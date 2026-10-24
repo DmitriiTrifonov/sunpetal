@@ -33,6 +33,8 @@ pub struct Shared {
     pub paused: AtomicBool,
     /// The emulation stopped (and why).
     pub stopped: Mutex<Option<String>>,
+    /// A line about how it runs (DS frame, speed), for the screen.
+    pub status: Mutex<String>,
 }
 
 impl Shared {
@@ -45,6 +47,7 @@ impl Shared {
             fast: AtomicBool::new(false),
             paused: AtomicBool::new(false),
             stopped: Mutex::new(None),
+            status: Mutex::new(String::from("starting")),
         })
     }
 }
@@ -58,6 +61,7 @@ pub fn spawn(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) -> std:
 }
 
 fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
+    *shared.status.lock().unwrap() = "booting".into();
     if let Err(e) = nds::boot(cfg) {
         *shared.stopped.lock().unwrap() = Some(e);
         return;
@@ -67,6 +71,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     let mut next = Instant::now();
     let stats = std::env::var_os("SUNPETAL_STATS").is_some();
     let (mut counted, mut since) = (0u32, Instant::now());
+    let (mut shown, mut shown_since) = (0u32, Instant::now());
     let mut last_flush = Instant::now();
     while !shared.quit.load(Ordering::Relaxed) {
         if shared.paused.load(Ordering::Relaxed) {
@@ -85,6 +90,13 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         }
         *shared.frame.lock().unwrap() = Some(nds::screens_rgba());
         counted += 1;
+        shown += 1;
+        if shown_since.elapsed() >= Duration::from_secs(1) {
+            let fps = shown as f64 / shown_since.elapsed().as_secs_f64();
+            *shared.status.lock().unwrap() = format!("DS frame {}, {:.0} fps", nds::vblanks(), fps);
+            shown = 0;
+            shown_since = Instant::now();
+        }
         if last_flush.elapsed() >= Duration::from_secs(5) {
             nds::flush_save();
             last_flush = Instant::now();

@@ -81,6 +81,8 @@ struct App {
     pad_touches: HashMap<u64, (f32, f32)>,
     /// The buttons those fingers hold.
     touch_held: Vec<&'static str>,
+    /// Why the machine stopped, kept on screen on a phone (where there is no terminal).
+    stopped_msg: Option<String>,
     /// Buttons held on the keyboard and on the pad (both go to the machine).
     kb: u32,
     pad: u32,
@@ -372,8 +374,12 @@ impl ApplicationHandler for App {
                 if let Some(why) = stopped {
                     eprintln!("stopped: {}", why);
                     self.save();
-                    el.exit();
-                    return;
+                    if !self.settings.touch_controls_on() {
+                        el.exit();
+                        return;
+                    }
+                    // on a phone the window stays, with the reason
+                    self.stopped_msg = Some(why);
                 }
                 let frame = self.shared.frame.lock().unwrap().take();
                 if let (Some((scale, rgba)), Some(g)) = (frame, &mut self.gfx) {
@@ -381,7 +387,7 @@ impl ApplicationHandler for App {
                 }
                 let mut action = None;
                 {
-                    let App { gfx, menu, settings, layouts, touch_held, .. } = self;
+                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, .. } = self;
                     if let Some(g) = gfx {
                         let layout = layouts.iter().find(|l| l.name == settings.video.layout).unwrap_or(&layouts[0]).clone();
                         let names: Vec<&str> = layouts.iter().map(|l| l.name).collect();
@@ -395,7 +401,11 @@ impl ApplicationHandler for App {
                             let held = touch_held.clone();
                             let mut f = |ctx: &egui::Context| {
                                 if pad_on {
-                                    touchpad::paint(ctx, band, &held);
+                                    let info = match stopped_msg {
+                                        Some(why) => format!("stopped: {}", why),
+                                        None => shared.status.lock().unwrap().clone(),
+                                    };
+                                    touchpad::paint(ctx, band, &held, &info);
                                 }
                                 if menu.open {
                                     action = menu.show(ctx, settings, &names, internal);
@@ -505,6 +515,7 @@ pub fn run(o: Options, el: EventLoop<()>) {
         touch: None,
         pad_touches: HashMap::new(),
         touch_held: Vec::new(),
+        stopped_msg: None,
         kb: 0,
         pad: 0,
         pads: gilrs::Gilrs::new().map_err(|e| eprintln!("no pads: {}", e)).ok(),

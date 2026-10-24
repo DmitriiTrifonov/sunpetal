@@ -103,13 +103,15 @@ pub fn on_menu(area: Rect, p: (f32, f32)) -> bool {
 }
 
 /// Draws the controls over the picture; `held` are the buttons now pressed. `ctx` works in points.
-pub fn paint(ctx: &egui::Context, area: Rect, held: &[&'static str]) {
+pub fn paint(ctx: &egui::Context, area: Rect, held: &[&'static str], info: &str) {
     use egui::{Align2, Color32, FontId, Pos2, Stroke};
     let k = ctx.pixels_per_point();
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("touchpad")));
     let pt = |x: f32, y: f32| Pos2::new(x / k, y / k);
     let fill = |on: bool| if on { Color32::from_white_alpha(110) } else { Color32::from_white_alpha(38) };
     let line = Stroke::new(1.5, Color32::from_white_alpha(120));
+    // a line for the screen's corner, under the status bar
+    painter.text(Pos2::new(8.0, 40.0), Align2::LEFT_TOP, info, FontId::proportional(14.0), Color32::from_rgb(255, 80, 80));
     for c in controls(area) {
         let on = match c.kind {
             Kind::Button(n) => held.contains(&n),
