@@ -388,6 +388,27 @@ pub fn set_draw(on: bool) {
     nds(|n| n.gpu.on = on);
 }
 
+pub use input::KEY_NAMES;
+
+/// Live input for the next frame: the buttons held (bit i of `KEY_NAMES`) and the stylus on the
+/// lower screen (x 0-255, y 0-191), if down. A script (`Config::input`) is replaced from here on.
+pub fn set_input(keys: u32, pen: Option<(i32, i32)>) {
+    nds(|n| {
+        n.script.clear();
+        n.set_input(keys, pen)
+    });
+}
+
+/// Both screens as RGBA, the upper first: 2 x 256 x 192 x 4 bytes.
+pub fn screens_rgba() -> Vec<u8> {
+    let rgb = nds(|n| n.screens_rgb());
+    let mut out = Vec::with_capacity(rgb.len() / 3 * 4);
+    for p in rgb.chunks_exact(3) {
+        out.extend_from_slice(&[p[0], p[1], p[2], 255]);
+    }
+    out
+}
+
 /// Keep the sound the unit mixes (someone listens): `take_samples` gives it.
 pub fn set_sound_keep(on: bool) {
     nds(|n| n.snd.keep = on);

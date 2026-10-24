@@ -1,0 +1,15 @@
+[package]
+name = "sunpetal-app"
+description = "The window, the GPU and the sound device for the Sunpetal runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+bytemuck = { version = "1.25.2", features = ["derive"] }
+cpal = "0.18.2"
+gilrs = "0.11.2"
+pollster = "1.0.1"
+sunpetal-runtime = { path = "../sunpetal-runtime" }
+wgpu = "30.0.1"
+winit = "0.30.13"

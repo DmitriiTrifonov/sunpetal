@@ -6,7 +6,7 @@
 //!                              [--shots V,V,...] [--shot-every N] [--input SCRIPT] [--wav FILE]
 //!
 //! Both screens are written as PNGs (DIR/v<N>.png) at the VBlanks asked for; --wav writes the sound
-//! (16-bit stereo, 32 728 Hz).
+//! (16-bit stereo, 32 728 Hz); --draw-all draws every frame (for timing).
 use std::process::ExitCode;
 
 use sunpetal_runtime::nds::{self, Config};
@@ -18,7 +18,7 @@ fn main() -> ExitCode {
     while let Some(a) = args.next() {
         match a.as_str() {
             "--vblanks" | "--out" | "--save" | "--shots" | "--shot-every" | "--input" | "--wav" => rest.push((a, args.next().unwrap_or_default())),
-            "--trace" => rest.push((a, String::new())),
+            "--trace" | "--draw-all" => rest.push((a, String::new())),
             _ if cfg.is_none() => cfg = Some(Config::new(a)),
             _ => {
                 eprintln!("unknown argument {}", a);
@@ -32,6 +32,7 @@ fn main() -> ExitCode {
     };
     let (mut shots, mut shot_every): (Vec<u64>, u64) = (Vec::new(), 0);
     let mut wav: Option<String> = None;
+    let mut draw_all = false;
     for (k, v) in rest {
         match k.as_str() {
             "--vblanks" => cfg.stop_vblanks = v.parse().unwrap_or(0),
@@ -41,6 +42,7 @@ fn main() -> ExitCode {
             "--shots" => shots.extend(v.split(',').filter_map(|x| x.parse::<u64>().ok())),
             "--shot-every" => shot_every = v.parse().unwrap_or(0),
             "--save" => cfg.save = Some(v.into()),
+            "--draw-all" => draw_all = true,
             _ => cfg.trace = true,
         }
     }
@@ -56,7 +58,7 @@ fn main() -> ExitCode {
     let any_shots = !shots.is_empty() || shot_every != 0;
     loop {
         // headless, the 2D engines draw only what a picture shows
-        nds::set_draw(any_shots && shot_at(nds::vblanks() + 1));
+        nds::set_draw(draw_all || (any_shots && shot_at(nds::vblanks() + 1)));
         if !nds::run_frame() {
             break;
         }

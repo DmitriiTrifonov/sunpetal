@@ -21,8 +21,7 @@ pub(super) struct Press {
 
 fn key_bit(k: &str) -> Result<u32, String> {
     // bits 10, 11: X and Y (EXTKEYIN 0, 1)
-    const NAMES: [&str; 12] = ["A", "B", "SELECT", "START", "RIGHT", "LEFT", "UP", "DOWN", "R", "L", "X", "Y"];
-    NAMES.iter().position(|n| *n == k).map(|i| 1 << i).ok_or_else(|| format!("input: no button {}", k))
+    KEY_NAMES.iter().position(|n| *n == k).map(|i| 1 << i).ok_or_else(|| format!("input: no button {}", k))
 }
 
 pub(super) fn parse(s: &str) -> Result<Vec<Press>, String> {
@@ -81,3 +80,18 @@ impl Nds {
         self.spi_set_pen(pen, x, y);
     }
 }
+
+impl Nds {
+    /// Live input (a window, a pad): the buttons held (bit i of `KEY_NAMES`: A B SELECT START RIGHT
+    /// LEFT UP DOWN R L X Y) and the stylus on the lower screen, if down. Replaces the script's.
+    pub(super) fn set_input(&mut self, keys: u32, pen: Option<(i32, i32)>) {
+        self.keys = !keys as u16 & 0x3FF;
+        let down = pen.is_some();
+        self.extkeys = 0x7F & !((keys >> 10) & 3) as u16 & !(if down { 0x40 } else { 0 });
+        let (x, y) = pen.unwrap_or((0, 0));
+        self.spi_set_pen(down, x, y);
+    }
+}
+
+/// The names of the buttons, by bit of the mask `set_input` takes.
+pub const KEY_NAMES: [&str; 12] = ["A", "B", "SELECT", "START", "RIGHT", "LEFT", "UP", "DOWN", "R", "L", "X", "Y"];
