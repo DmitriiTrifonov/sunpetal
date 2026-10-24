@@ -126,6 +126,11 @@ pub struct Nds {
     snd: sound::Sound,
     /// The 3D picture the rendering engine drew last, 256x192 (`render3d`).
     frame3d: Vec<u32>,
+    /// The scale it was drawn at.
+    frame3d_scale: usize,
+    /// The picture's scale: the 3D is drawn, and the screens put together, this many times as large
+    /// each way (1-8).
+    scale: usize,
     script: Vec<input::Press>,
     cart: cart::Cart,
     spi: spi::Spi,
@@ -198,6 +203,8 @@ impl Nds {
             gx: gx::Gx::new(),
             snd: sound::Sound::new(),
             frame3d: vec![0; 256 * 192],
+            frame3d_scale: 1,
+            scale: 1,
             script: Vec::new(),
             cart: cart::Cart::new(),
             spi: spi::Spi::new(),
@@ -399,14 +406,21 @@ pub fn set_input(keys: u32, pen: Option<(i32, i32)>) {
     });
 }
 
-/// Both screens as RGBA, the upper first: 2 x 256 x 192 x 4 bytes.
-pub fn screens_rgba() -> Vec<u8> {
-    let rgb = nds(|n| n.screens_rgb());
+/// The picture's scale: the 3D is drawn at 256 x `n` by 192 x `n`, and the screens come out that
+/// large (1-8). Takes effect with the next frame drawn.
+pub fn set_scale(n: usize) {
+    nds(|d| d.scale = n.clamp(1, 8));
+}
+
+/// Both screens as RGBA at the current scale, the upper first: 2 x (256 x n) x (192 x n) x 4 bytes.
+/// Returns the scale too.
+pub fn screens_rgba() -> (usize, Vec<u8>) {
+    let (scale, rgb) = nds(|n| (n.scale, n.screens_rgb(n.scale)));
     let mut out = Vec::with_capacity(rgb.len() / 3 * 4);
     for p in rgb.chunks_exact(3) {
         out.extend_from_slice(&[p[0], p[1], p[2], 255]);
     }
-    out
+    (scale, out)
 }
 
 /// Keep the sound the unit mixes (someone listens): `take_samples` gives it.
@@ -419,14 +433,14 @@ pub fn take_samples() -> Vec<i16> {
     nds(|n| std::mem::take(&mut n.snd.out))
 }
 
-/// Both screens as a PNG, 256x384, the upper first.
+/// Both screens as a PNG, 256x384 times the scale, the upper first.
 pub fn screenshot(path: &std::path::Path) -> Result<(), String> {
-    let rgb = nds(|n| n.screens_rgb());
+    let (scale, rgb) = nds(|n| (n.scale, n.screens_rgb(n.scale)));
     if let Some(d) = path.parent() {
         let _ = std::fs::create_dir_all(d);
     }
     let f = std::fs::File::create(path).map_err(|e| format!("{}: {}", path.display(), e))?;
-    let mut enc = png::Encoder::new(std::io::BufWriter::new(f), 256, 384);
+    let mut enc = png::Encoder::new(std::io::BufWriter::new(f), 256 * scale as u32, 384 * scale as u32);
     enc.set_color(png::ColorType::Rgb);
     enc.set_depth(png::BitDepth::Eight);
     let mut w = enc.write_header().map_err(|e| e.to_string())?;

@@ -6,8 +6,13 @@
 //! and "equal" depth tests, all seven texture formats (nearest filtering, repeat, flip, clamp),
 //! modulation, decal, toon and highlight shading, polygon alpha with blending over what is there,
 //! alpha test, wireframe polygons, the clear colour, depth and polygon ID.
-//! Not done (named in the log once each): fog, edge marking, anti-aliasing, shadow polygons, the
-//! rear plane's bitmap.
+//! Also: edge marking (a pixel next to a farther pixel of another polygon ID takes the edge
+//! colour of its ID) and shadow polygons (the mask polygon, ID 0, marks where it lies behind
+//! something; the others draw there).
+//! Not done (named in the log once each): fog, anti-aliasing, the rear plane's bitmap.
+//!
+//! At `scale` the picture is `scale` times as large each way: the polygons are rasterised at
+//! that resolution, the texels and the DS's depth rules unchanged.
 //!
 //! A pixel of the picture is RGB666 (r bits 0-5, g 6-11, b 12-17) and alpha in bits 18-22 (0: no
 //! pixel, the 2D layers under show), as the 2D compositor takes it.
@@ -73,12 +78,10 @@ pub(super) struct Job {
 }
 
 /// What `render` leaves out, by bit of the mask it returns.
-pub(super) const NOTE: [&str; 5] = [
+pub(super) const NOTE: [&str; 3] = [
     "3D: fog is not drawn",
-    "3D: edge marking and anti-aliasing are not drawn",
-    "3D: shadow polygons are drawn as modulated ones",
+    "3D: anti-aliasing is not drawn",
     "3D: the rear plane's bitmap is not drawn (the clear colour is)",
-    "3D: a polygon with a texture format 0 or no texture mapping is drawn untextured",
 ];
 
 fn c5to6(c: u32) -> u32 {
@@ -197,6 +200,8 @@ struct Target {
     alpha: Vec<u8>,
     depth: Vec<f32>,
     id: Vec<u8>,
+    /// Shadow polygons: where a mask polygon lay behind something.
+    stencil: Vec<u8>,
 }
 
 fn edge(a: (f32, f32), b: (f32, f32), p: (f32, f32)) -> f32 {
@@ -204,26 +209,31 @@ fn edge(a: (f32, f32), b: (f32, f32), p: (f32, f32)) -> f32 {
 }
 
 /// Draws a frame. Returns the picture and the mask of what it left out (`NOTE`).
-pub(super) fn render(job: &Job) -> (Vec<u32>, u32) {
+pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
     let mut notes = 0u32;
     let cc = job.clear_color;
     let (cr, cg, cb) = rgb555((cc & 0x7FFF) as u16);
     let calpha = ((cc >> 16) & 31) as u8;
     let cid = ((cc >> 24) & 63) as u8;
-    let n = 256 * 192;
+    let s = scale.max(1);
+    let (w, h) = (256 * s, 192 * s);
+    let n = w * h;
     let mut t = Target {
         color: vec![cr | cg << 6 | cb << 12; n],
         alpha: vec![calpha; n],
         depth: vec![clear_depth(job.clear_depth); n],
         id: vec![cid; n],
+        stencil: vec![0; n],
     };
+    let sc = s as f32;
+    let verts: Vec<GxVertex> = job.verts.iter().map(|v| GxVertex { sx: v.sx * sc, sy: v.sy * sc, ..*v }).collect();
     if job.disp3dcnt & 0x4000 != 0 {
-        notes |= 1 << 3;
+        notes |= 1 << 2;
     }
     if job.disp3dcnt & 0x80 != 0 {
         notes |= 1;
     }
-    if job.disp3dcnt & 0x30 != 0 {
+    if job.disp3dcnt & 0x10 != 0 {
         notes |= 1 << 1;
     }
     let probe: Option<(usize, usize)> = std::env::var("SUNPETAL_3D_PIXEL").ok().and_then(|v| { let mut it = v.split(','); Some((it.next()?.parse().ok()?, it.next()?.parse().ok()?)) });
@@ -232,28 +242,38 @@ pub(super) fn render(job: &Job) -> (Vec<u32>, u32) {
     let alpha_test = job.disp3dcnt & 4 != 0;
     let blend_on = job.disp3dcnt & 8 != 0;
     for p in &job.polys {
-        let vs = &job.verts[p.first as usize..(p.first + p.n) as usize];
+        let vs = &verts[p.first as usize..(p.first + p.n) as usize];
         let attr = p.attr;
         let polyalpha = ((attr >> 16) & 31) as u32;
         let pid = ((attr >> 24) & 63) as u8;
         let mode = (attr >> 4) & 3;
-        if mode == 3 {
-            notes |= 1 << 2;
-        }
         let fmt = (p.tex >> 26) & 7;
         let textured = texture_on && fmt != 0;
-        if texture_on && fmt == 0 {
-            notes |= 1 << 4;
-        }
         let eq_depth = attr & 0x4000 != 0;
         let write_trans_depth = attr & 0x800 != 0;
         let wire = polyalpha == 0;
         // fill one pixel
         let put = |t: &mut Target, x: usize, y: usize, depth: f32, vr: f32, vg: f32, vb: f32, s: f32, tt: f32| {
-            let i = y * 256 + x;
+            let i = y * w + x;
             let d = t.depth[i];
             let tol = 0x200 as f32 / 16_777_215.0;
-            if eq_depth { if (depth - d).abs() > tol { return; } } else if depth >= d { return; }
+            let behind = if eq_depth { (depth - d).abs() > tol } else { depth >= d };
+            if mode == 3 && pid == 0 {
+                // a shadow mask: no picture, a mark where it lies behind something
+                if behind {
+                    t.stencil[i] = 1;
+                }
+                return;
+            }
+            if behind {
+                return;
+            }
+            if mode == 3 {
+                // a shadow: only where a mask lay behind, and not on the polygon's own ID
+                if t.stencil[i] == 0 || t.id[i] == pid {
+                    return;
+                }
+            }
             let to6 = |c: f32| -> u32 { (c * 63.0 / 31.0).round().clamp(0.0, 63.0) as u32 };
             let (mut r, mut g, mut b) = (to6(vr), to6(vg), to6(vb));
             let mut va = if wire { 31 } else { polyalpha };
@@ -321,6 +341,7 @@ pub(super) fn render(job: &Job) -> (Vec<u32>, u32) {
                 t.alpha[i] = 31;
                 t.depth[i] = depth;
                 t.id[i] = pid;
+                t.stencil[i] = 0;
             } else {
                 if t.id[i] == pid && t.alpha[i] > 0 && t.alpha[i] < 31 {
                     return; // translucent polygons do not draw over their own ID
@@ -338,6 +359,7 @@ pub(super) fn render(job: &Job) -> (Vec<u32>, u32) {
                     t.depth[i] = depth;
                 }
                 t.id[i] = pid;
+                t.stencil[i] = 0;
             }
         };
         let depth_of = |v: &GxVertex| -> f32 {
@@ -355,7 +377,7 @@ pub(super) fn render(job: &Job) -> (Vec<u32>, u32) {
                 for s in 0..=steps {
                     let f = s as f32 / steps as f32;
                     let (x, y) = ((a.sx + dx * f).floor() as i32, (a.sy + dy * f).floor() as i32);
-                    if !(0..256).contains(&x) || !(0..192).contains(&y) {
+                    if !(0..w as i32).contains(&x) || !(0..h as i32).contains(&y) {
                         continue;
                     }
                     let d = depth_of(a) + (depth_of(b) - depth_of(a)) * f;
@@ -378,9 +400,9 @@ pub(super) fn render(job: &Job) -> (Vec<u32>, u32) {
             let area = area.abs();
             let (pa, pb, pc) = ((a.sx, a.sy), (b.sx, b.sy), (c.sx, c.sy));
             let x0 = pa.0.min(pb.0).min(pc.0).floor().max(0.0) as usize;
-            let x1 = (pa.0.max(pb.0).max(pc.0).ceil().min(255.0)) as usize;
+            let x1 = (pa.0.max(pb.0).max(pc.0).ceil().min(w as f32 - 1.0)) as usize;
             let y0 = pa.1.min(pb.1).min(pc.1).floor().max(0.0) as usize;
-            let y1 = (pa.1.max(pb.1).max(pc.1).ceil().min(191.0)) as usize;
+            let y1 = (pa.1.max(pb.1).max(pc.1).ceil().min(h as f32 - 1.0)) as usize;
             let iw = |v: &GxVertex| 1.0 / (v.w.max(1) as f32);
             let (ia, ib, ic) = (iw(a), iw(b), iw(c));
             let (da, db, dc) = (depth_of(a), depth_of(b), depth_of(c));
@@ -407,6 +429,29 @@ pub(super) fn render(job: &Job) -> (Vec<u32>, u32) {
                     let (q0, q1, q2) = (p0 / den, p1 / den, p2 / den);
                     let at = |fa: f32, fb: f32, fc: f32| q0 * fa + q1 * fb + q2 * fc;
                     put(&mut t, x, y, depth, at(a.r, b.r, c.r), at(a.g, b.g, c.g), at(a.b, b.b, c.b), at(a.s, b.s, c.s), at(a.t, b.t, c.t));
+                }
+            }
+        }
+    }
+    if job.disp3dcnt & 0x20 != 0 {
+        // edge marking: a pixel with a nearer-or-equal... no: a pixel beside a farther pixel of another
+        // polygon ID (the clear plane's included) takes its ID's edge colour
+        let (id, depth, alpha) = (t.id.clone(), t.depth.clone(), t.alpha.clone());
+        for y in 0..h {
+            for x in 0..w {
+                let i = y * w + x;
+                if alpha[i] < 31 {
+                    continue;
+                }
+                let nb = [
+                    (x >= s).then(|| i - s),
+                    (x + s < w).then(|| i + s),
+                    (y >= s).then(|| i - s * w),
+                    (y + s < h).then(|| i + s * w),
+                ];
+                if nb.iter().flatten().any(|&j| id[j] != id[i] && depth[j] >= depth[i]) {
+                    let (r, g, b) = rgb555(job.edge[(id[i] >> 3) as usize & 7]);
+                    t.color[i] = r | g << 6 | b << 12;
                 }
             }
         }

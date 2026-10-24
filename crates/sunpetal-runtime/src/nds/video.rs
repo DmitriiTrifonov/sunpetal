@@ -257,6 +257,7 @@ impl Nds {
         self.gpu = super::gpu2d::Gpu2d::new();
         self.gx = super::gx::Gx::new();
         self.frame3d = vec![0; 256 * 192];
+        self.frame3d_scale = 1;
         self.gpu2d_line(0);
     }
 

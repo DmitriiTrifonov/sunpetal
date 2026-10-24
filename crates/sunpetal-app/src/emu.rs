@@ -1,7 +1,7 @@
 //! The machine on its own thread: the runtime keeps its state per thread, and the window's thread
 //! belongs to the window. Frames and sound go out, input comes in, through `Shared`.
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -22,8 +22,10 @@ pub struct Input {
 
 pub struct Shared {
     pub input: Mutex<Input>,
-    /// The latest picture: both screens, RGBA, the upper first.
-    pub frame: Mutex<Option<Vec<u8>>>,
+    /// The latest picture: its scale, then both screens, RGBA, the upper first.
+    pub frame: Mutex<Option<(usize, Vec<u8>)>>,
+    /// The internal resolution, times 256x192 (1-8): the 3D is drawn that large.
+    pub scale: AtomicUsize,
     pub quit: AtomicBool,
     /// Run without waiting for the clock.
     pub fast: AtomicBool,
@@ -36,6 +38,7 @@ impl Shared {
         Arc::new(Shared {
             input: Mutex::new(Input::default()),
             frame: Mutex::new(None),
+            scale: AtomicUsize::new(2),
             quit: AtomicBool::new(false),
             fast: AtomicBool::new(false),
             stopped: Mutex::new(None),
@@ -66,6 +69,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             let i = shared.input.lock().unwrap();
             nds::set_input(i.keys, i.pen);
         }
+        nds::set_scale(shared.scale.load(Ordering::Relaxed));
         nds::set_draw(true);
         if !nds::run_frame() {
             break;

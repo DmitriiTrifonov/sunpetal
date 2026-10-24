@@ -1,12 +1,13 @@
 //! Sunpetal: the window. A recompiled DS game's two screens on the GPU, its sound on the host's
 //! device, played with the keyboard, a pad and the mouse.
 //!
-//!     sunpetal-app ROM.nds [--out DIR] [--save FILE] [--mute] [--scale N]
+//!     sunpetal-app ROM.nds [--out DIR] [--save FILE] [--mute] [--scale N] [--res N]
 //!
 //! Keys: arrows = the D-pad, Z = A, X = B, S = X, A = Y, Q = L, W = R, Enter = START,
 //! Backspace = SELECT; the mouse on the lower screen = the stylus. A pad: the D-pad or left stick,
 //! the face buttons as the DS's (east A, south B, north X, west Y), shoulders L and R, Start, Select. F2 changes the layout, F3 the
-//! filter, Tab (held) runs without waiting for the clock, Esc quits.
+//! filter, F4 and F5 the internal resolution of the 3D (1-8 times the DS's; --res sets the first),
+//! Tab (held) runs without waiting for the clock, Esc quits.
 mod audio;
 mod emu;
 mod gfx;
@@ -184,6 +185,14 @@ impl ApplicationHandler for App {
                             w.set_title(&format!("Sunpetal: {}", self.layouts[self.current].name));
                         }
                     }
+                    KeyCode::F4 | KeyCode::F5 if down && !event.repeat => {
+                        let cur = self.shared.scale.load(Ordering::Relaxed);
+                        let n = if code == KeyCode::F5 { (cur + 1).min(8) } else { cur.saturating_sub(1).max(1) };
+                        self.shared.scale.store(n, Ordering::Relaxed);
+                        if let Some(w) = &self.window {
+                            w.set_title(&format!("Sunpetal: {}x", n));
+                        }
+                    }
                     KeyCode::F3 if down && !event.repeat => {
                         if let Some(g) = &mut self.gfx {
                             g.linear = !g.linear;
@@ -216,10 +225,9 @@ impl ApplicationHandler for App {
                     el.exit();
                     return;
                 }
-                if let Some(rgba) = self.shared.frame.lock().unwrap().take() {
-                    if let Some(g) = &self.gfx {
-                        g.upload(&rgba);
-                    }
+                let frame = self.shared.frame.lock().unwrap().take();
+                if let (Some((scale, rgba)), Some(g)) = (frame, &mut self.gfx) {
+                    g.upload(scale, &rgba);
                 }
                 if let Some(g) = &mut self.gfx {
                     g.draw(&self.layouts[self.current]);
@@ -236,12 +244,13 @@ impl ApplicationHandler for App {
 fn main() {
     let mut args = std::env::args().skip(1);
     let mut rom: Option<PathBuf> = None;
-    let (mut out, mut save, mut mute, mut scale) = (None, None, false, 2.0f32);
+    let (mut out, mut save, mut mute, mut scale, mut res) = (None, None, false, 2.0f32, 2usize);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--out" => out = args.next().map(PathBuf::from),
             "--save" => save = args.next().map(PathBuf::from),
             "--scale" => scale = args.next().and_then(|v| v.parse().ok()).unwrap_or(2.0),
+            "--res" => res = args.next().and_then(|v| v.parse().ok()).unwrap_or(2),
             "--mute" => mute = true,
             _ if rom.is_none() => rom = Some(PathBuf::from(a)),
             _ => {
@@ -251,7 +260,7 @@ fn main() {
         }
     }
     let Some(rom) = rom else {
-        eprintln!("usage: sunpetal-app ROM.nds [--out DIR] [--save FILE] [--mute] [--scale N]");
+        eprintln!("usage: sunpetal-app ROM.nds [--out DIR] [--save FILE] [--mute] [--scale N] [--res N]");
         std::process::exit(2);
     };
     if !rom.is_file() {
@@ -266,6 +275,7 @@ fn main() {
     }
     cfg.save = save;
     let shared = Shared::new();
+    shared.scale.store(res.clamp(1, 8), Ordering::Relaxed);
     // the stream must outlive the machine's use of the ring
     let (ring, _stream) = if mute {
         (None, None)

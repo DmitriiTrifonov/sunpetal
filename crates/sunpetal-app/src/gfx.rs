@@ -45,6 +45,11 @@ struct Screen {
 }
 
 pub struct Gfx {
+    bgl: wgpu::BindGroupLayout,
+    nearest: wgpu::Sampler,
+    linear_sampler: wgpu::Sampler,
+    /// The screens' textures are this many times 256x192.
+    scale: usize,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -52,6 +57,45 @@ pub struct Gfx {
     pipeline: wgpu::RenderPipeline,
     screens: [Screen; 2],
     pub linear: bool,
+}
+
+fn make_screen(
+    device: &wgpu::Device,
+    bgl: &wgpu::BindGroupLayout,
+    nearest: &wgpu::Sampler,
+    linear: &wgpu::Sampler,
+    scale: usize,
+    label: &str,
+) -> Screen {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d { width: 256 * scale as u32, height: 192 * scale as u32, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&Default::default());
+    let uniform = device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: 16,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let bind = |s: &wgpu::Sampler| {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(s) },
+            ],
+        })
+    };
+    Screen { bind_nearest: bind(nearest), bind_linear: bind(linear), texture, uniform }
 }
 
 impl Gfx {
@@ -150,39 +194,8 @@ impl Gfx {
             device.create_sampler(&wgpu::SamplerDescriptor { mag_filter: f, min_filter: f, ..Default::default() })
         };
         let (nearest, linear) = (sampler(wgpu::FilterMode::Nearest), sampler(wgpu::FilterMode::Linear));
-        let make = |label: &str| -> Screen {
-            let texture = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some(label),
-                size: wgpu::Extent3d { width: 256, height: 192, depth_or_array_layers: 1 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8Unorm,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
-            let view = texture.create_view(&Default::default());
-            let uniform = device.create_buffer(&wgpu::BufferDescriptor {
-                label: None,
-                size: 16,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            let bind = |s: &wgpu::Sampler| {
-                device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: None,
-                    layout: &bgl,
-                    entries: &[
-                        wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view) },
-                        wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(s) },
-                    ],
-                })
-            };
-            Screen { bind_nearest: bind(&nearest), bind_linear: bind(&linear), texture, uniform }
-        };
-        let screens = [make("upper"), make("lower")];
-        Ok(Gfx { surface, device, queue, config, pipeline, screens, linear: true })
+        let screens = [make_screen(&device, &bgl, &nearest, &linear, 1, "upper"), make_screen(&device, &bgl, &nearest, &linear, 1, "lower")];
+        Ok(Gfx { bgl, nearest, linear_sampler: linear, scale: 1, surface, device, queue, config, pipeline, screens, linear: true })
     }
 
     pub fn resize(&mut self, w: u32, h: u32) {
@@ -198,15 +211,24 @@ impl Gfx {
         (self.config.width as f32, self.config.height as f32)
     }
 
-    /// Uploads a picture (both screens, RGBA, the upper first).
-    pub fn upload(&self, rgba: &[u8]) {
-        let n = 256 * 192 * 4;
+    /// Uploads a picture at `scale` (both screens, RGBA, the upper first); the textures are made
+    /// again when the scale changes.
+    pub fn upload(&mut self, scale: usize, rgba: &[u8]) {
+        if scale != self.scale {
+            self.scale = scale;
+            self.screens = [
+                make_screen(&self.device, &self.bgl, &self.nearest, &self.linear_sampler, scale, "upper"),
+                make_screen(&self.device, &self.bgl, &self.nearest, &self.linear_sampler, scale, "lower"),
+            ];
+        }
+        let (w, h) = (256 * scale as u32, 192 * scale as u32);
+        let n = (w * h * 4) as usize;
         for (s, data) in self.screens.iter().zip(rgba.chunks_exact(n)) {
             self.queue.write_texture(
                 s.texture.as_image_copy(),
                 data,
-                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(256 * 4), rows_per_image: Some(192) },
-                wgpu::Extent3d { width: 256, height: 192, depth_or_array_layers: 1 },
+                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(w * 4), rows_per_image: Some(h) },
+                wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
             );
         }
     }

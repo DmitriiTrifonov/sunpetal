@@ -11,8 +11,9 @@
 //! double-size, bitmaps, semi-transparent and window sprites; windows 0, 1 and the OBJ window;
 //! blending (alpha, brighter, darker); the master brightness; the display modes "off" (white),
 //! graphics and VRAM display. On engine A, BG0 can be the 3D layer: its pixels are left to the
-//! compositor, which has the 3D picture the rendering engine drew (`render3d`). Mosaic, display
-//! capture and the main memory display are not drawn.
+//! compositor, which has the 3D picture the rendering engine drew (`render3d`). Mosaic is drawn for
+//! backgrounds (the first line of each block repeated, the first column of each block repeated)
+//! and sprites; display capture and the main memory display are not.
 //!
 //! Colours are kept as the DS keeps them inside, 6 bits a component: a palette's 5-bit component
 //! c is 2c. A drawn pixel is two words (`Gpu2d::px`):
@@ -32,11 +33,13 @@ pub(super) struct Gpu2d {
     refs: [[[i32; 2]; 2]; 2],
     /// The engines draw (a headless run draws only for a picture's frame).
     pub(super) on: bool,
+    /// [engine][BG]: the line a mosaic block repeats.
+    mosaic: Vec<[u32; 256]>,
 }
 
 impl Gpu2d {
     pub(super) fn new() -> Gpu2d {
-        Gpu2d { px: vec![0; 2 * 192 * 256 * 2], refs: [[[0; 2]; 2]; 2], on: true }
+        Gpu2d { px: vec![0; 2 * 192 * 256 * 2], refs: [[[0; 2]; 2]; 2], on: true, mosaic: vec![[0; 256]; 8] }
     }
 
     fn at(e: usize, y: usize) -> usize {
@@ -356,9 +359,10 @@ impl Nds {
                 x0 -= 512;
             }
             let mode = (a0 >> 10) & 3;
-            if a0 & 0x1000 != 0 {
-                self.once("2d", 1, || "2D: a mosaic sprite (mosaic is not drawn)".to_string());
-            }
+            let mosaic = a0 & 0x1000 != 0;
+            let mreg = self.g16(l.io + 0x4C) as i32;
+            let (moh, mov) = ((mreg >> 8 & 15) + 1, (mreg >> 12 & 15) + 1);
+            let dy = if mosaic { (dy - y % mov).max(0) } else { dy };
             let prio = ((a2 >> 10) & 3) as u8;
             let c256 = a0 & 0x2000 != 0;
             let tile = a2 & 0x3FF;
@@ -379,6 +383,8 @@ impl Nds {
                 if !(0..=255).contains(&xs) {
                     continue;
                 }
+                // a mosaic sprite takes each block's first column
+                let sx = if mosaic { (xs - xs % moh - x0).clamp(0, bw - 1) } else { sx };
                 let (tx, ty);
                 if affine {
                     let (cx, cy) = (sx - bw / 2, dy - bh / 2);
@@ -566,9 +572,9 @@ impl Nds {
                 if kind < 0 {
                     continue;
                 }
-                if cnt & 0x40 != 0 {
-                    self.once("2d", 2, || "2D: a mosaic background (mosaic is not drawn)".to_string());
-                }
+                let mosaic = cnt & 0x40 != 0;
+                let mreg = self.g16(l.io + 0x4C) as i32;
+                let (mbh, mbv) = ((mreg & 15) as usize + 1, (mreg >> 4 & 15) as usize + 1);
                 if bg == 0 && is3d {
                     for x in 0..256 {
                         if l.win[x] & 1 != 0 {
@@ -577,13 +583,24 @@ impl Nds {
                     }
                     continue;
                 }
-                match kind {
-                    0 => self.bg_text(l, bg, y, &mut buf),
-                    1 => self.bg_affine(l, bg, 0, &mut buf),
-                    3 => self.bg_affine(l, bg, 4, &mut buf),
-                    _ => {
-                        let k = if cnt & 0x80 == 0 { 1 } else if cnt & 4 != 0 { 3 } else { 2 };
-                        self.bg_affine(l, bg, k, &mut buf)
+                let cached = mosaic && y as usize % mbv != 0;
+                if cached {
+                    buf = self.gpu.mosaic[e * 4 + bg];
+                } else {
+                    match kind {
+                        0 => self.bg_text(l, bg, y, &mut buf),
+                        1 => self.bg_affine(l, bg, 0, &mut buf),
+                        3 => self.bg_affine(l, bg, 4, &mut buf),
+                        _ => {
+                            let k = if cnt & 0x80 == 0 { 1 } else if cnt & 4 != 0 { 3 } else { 2 };
+                            self.bg_affine(l, bg, k, &mut buf)
+                        }
+                    }
+                    if mosaic {
+                        for x in 0..256 {
+                            buf[x] = buf[x - x % mbh];
+                        }
+                        self.gpu.mosaic[e * 4 + bg] = buf;
                     }
                 }
                 for x in 0..256 {
@@ -662,23 +679,38 @@ impl Nds {
         }
     }
 
-    /// Both screens as 256x384 RGB, the upper first.
-    pub(crate) fn screens_rgb(&self) -> Vec<u8> {
-        let mut rgb = vec![0u8; 256 * 384 * 3];
+    /// Both screens as RGB at `scale` (256 x scale by 384 x scale), the upper first: the 2D
+    /// layers repeated per pixel, the 3D picture at its own scale (the nearest pixel).
+    pub(crate) fn screens_rgb(&self, scale: usize) -> Vec<u8> {
+        let s = scale.max(1);
+        let (w, h3) = (256 * s, 192 * s);
+        let mut rgb = vec![0u8; w * 2 * h3 * 3];
         let a_top = self.gpu2d_top_is_a();
-        for s in 0..2 {
-            let e = if (s == 0) == a_top { 0 } else { 1 };
-            for y in 0..192 {
-                for x in 0..256 {
-                    let i = Gpu2d::at(e, y) + 2 * x;
-                    let c = compose(&self.gpu.px[i..i + 2], if e == 0 { self.frame3d[y * 256 + x] } else { 0 });
-                    let o = ((s * 192 + y) * 256 + x) * 3;
-                    rgb[o] = (c >> 16) as u8;
-                    rgb[o + 1] = (c >> 8) as u8;
-                    rgb[o + 2] = c as u8;
-                }
+        let f3 = self.frame3d_scale.max(1);
+        let w3 = 256 * f3;
+        let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(8);
+        // rows of the picture, split across threads
+        let rows_per = (2 * h3).div_ceil(threads);
+        std::thread::scope(|sc| {
+            for (k, chunk) in rgb.chunks_mut(rows_per * w * 3).enumerate() {
+                sc.spawn(move || {
+                    for (r, row) in chunk.chunks_mut(w * 3).enumerate() {
+                        let ry = k * rows_per + r;
+                        let (screen, y) = (ry / h3, ry % h3);
+                        let e = if (screen == 0) == a_top { 0 } else { 1 };
+                        let (y2, y3) = (y / s, y * f3 / s);
+                        for x in 0..w {
+                            let i = Gpu2d::at(e, y2) + 2 * (x / s);
+                            let p3 = if e == 0 { self.frame3d[y3 * w3 + x * f3 / s] } else { 0 };
+                            let c = compose(&self.gpu.px[i..i + 2], p3);
+                            row[3 * x] = (c >> 16) as u8;
+                            row[3 * x + 1] = (c >> 8) as u8;
+                            row[3 * x + 2] = c as u8;
+                        }
+                    }
+                });
             }
-        }
+        });
         rgb
     }
 }

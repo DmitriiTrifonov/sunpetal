@@ -1156,7 +1156,8 @@ impl Nds {
                 }
             }
         }
-        let (px, notes) = super::render3d::render(&job);
+        let (px, notes) = super::render3d::render(&job, self.scale);
+        self.frame3d_scale = self.scale;
         self.frame3d = px;
         for (s, text) in super::render3d::NOTE.iter().enumerate() {
             if notes >> s & 1 != 0 {

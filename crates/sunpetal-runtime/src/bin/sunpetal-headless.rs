@@ -3,7 +3,7 @@
 //! the same ROM must be linked in (docs/ABI.md).
 //!
 //!     sunpetal-headless ROM.nds [--vblanks N] [--trace] [--out DIR] [--save FILE]
-//!                              [--shots V,V,...] [--shot-every N] [--input SCRIPT] [--wav FILE]
+//!                              [--shots V,V,...] [--shot-every N] [--input SCRIPT] [--wav FILE] [--scale N]
 //!
 //! Both screens are written as PNGs (DIR/v<N>.png) at the VBlanks asked for; --wav writes the sound
 //! (16-bit stereo, 32 728 Hz); --draw-all draws every frame (for timing).
@@ -17,7 +17,7 @@ fn main() -> ExitCode {
     let mut rest = Vec::new();
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--vblanks" | "--out" | "--save" | "--shots" | "--shot-every" | "--input" | "--wav" => rest.push((a, args.next().unwrap_or_default())),
+            "--vblanks" | "--out" | "--save" | "--shots" | "--shot-every" | "--input" | "--wav" | "--scale" => rest.push((a, args.next().unwrap_or_default())),
             "--trace" | "--draw-all" => rest.push((a, String::new())),
             _ if cfg.is_none() => cfg = Some(Config::new(a)),
             _ => {
@@ -33,11 +33,13 @@ fn main() -> ExitCode {
     let (mut shots, mut shot_every): (Vec<u64>, u64) = (Vec::new(), 0);
     let mut wav: Option<String> = None;
     let mut draw_all = false;
+    let mut scale = 1usize;
     for (k, v) in rest {
         match k.as_str() {
             "--vblanks" => cfg.stop_vblanks = v.parse().unwrap_or(0),
             "--out" => cfg.out = v.into(),
             "--input" => cfg.input = v,
+            "--scale" => scale = v.parse().unwrap_or(1),
             "--wav" => wav = Some(v),
             "--shots" => shots.extend(v.split(',').filter_map(|x| x.parse::<u64>().ok())),
             "--shot-every" => shot_every = v.parse().unwrap_or(0),
@@ -52,6 +54,7 @@ fn main() -> ExitCode {
         return ExitCode::from(1);
     }
     let out = cfg_out;
+    nds::set_scale(scale);
     nds::set_sound_keep(wav.is_some());
     let mut samples: Vec<i16> = Vec::new();
     let shot_at = |v: u64| (shot_every != 0 && v % shot_every == 0) || shots.contains(&v);
