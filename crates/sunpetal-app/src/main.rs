@@ -405,7 +405,17 @@ fn main() {
     cfg.out = out.unwrap_or_else(|| rom.parent().map(|p| p.to_path_buf()).unwrap_or_default());
     cfg.save = save;
     cfg.dump_textures = dump;
-    cfg.texture_pack = pack;
+    cfg.texture_pack = pack.or_else(|| {
+        let p = PathBuf::from(&settings.video.texture_pack);
+        if settings.video.texture_pack.is_empty() {
+            None
+        } else if p.is_dir() {
+            Some(p)
+        } else {
+            eprintln!("texture pack {}: not a folder, ignored", p.display());
+            None
+        }
+    });
     let shared = Shared::new();
     shared.scale.store(settings.video.res, Ordering::Relaxed);
     // the stream must outlive the machine's use of the ring

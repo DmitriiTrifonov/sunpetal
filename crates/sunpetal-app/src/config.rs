@@ -18,13 +18,15 @@ pub struct Video {
     /// The layout's name (`layout::all`).
     pub layout: String,
     pub fullscreen: bool,
+    /// A folder of replacement textures (empty: none); read when the game starts.
+    pub texture_pack: String,
     /// The window's size in logical points when it was closed.
     pub window: [u32; 2],
 }
 
 impl Default for Video {
     fn default() -> Video {
-        Video { res: 2, linear: true, layout: "stacked".into(), fullscreen: false, window: [512, 768] }
+        Video { res: 2, linear: true, layout: "stacked".into(), fullscreen: false, texture_pack: String::new(), window: [512, 768] }
     }
 }
 

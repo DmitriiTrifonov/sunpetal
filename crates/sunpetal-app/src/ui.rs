@@ -65,6 +65,14 @@ impl Menu {
                     }
                 });
                 ui.checkbox(&mut s.video.fullscreen, tx("Full screen (F11)", "Полный экран (F11)"));
+                ui.horizontal(|ui| {
+                    ui.label(tx("Texture pack folder:", "Папка пакета текстур:"));
+                    ui.text_edit_singleline(&mut s.video.texture_pack);
+                });
+                if !s.video.texture_pack.is_empty() && !std::path::Path::new(&s.video.texture_pack).is_dir() {
+                    ui.colored_label(egui::Color32::LIGHT_RED, tx("no such folder", "такой папки нет"));
+                }
+                ui.label(tx("Takes effect the next time the game starts.", "Применится при следующем запуске игры."));
             });
             egui::CollapsingHeader::new(tx("Sound", "Звук")).default_open(true).show(ui, |ui| {
                 ui.add(egui::Slider::new(&mut s.audio.volume, 0.0..=1.0).text(tx("Volume", "Громкость")));
