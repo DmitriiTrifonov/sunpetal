@@ -1142,6 +1142,7 @@ impl Nds {
             disp3dcnt: self.io_reg16(9, 0x0400_0060),
             clear_color: reg32(0x350 - 0x320),
             clear_depth: self.gx_r16(0x0400_0354) & 0x7FFF,
+            clrimage_offset: self.gx_r16(0x0400_0356),
             alpha_ref: g.regs[0x340 - 0x320] & 31,
             edge,
             fog_color: reg32(0x358 - 0x320),

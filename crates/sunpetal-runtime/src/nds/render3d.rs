@@ -68,6 +68,8 @@ pub(super) struct Job {
     /// CLEAR_COLOR: colour, fog bit, alpha, polygon ID.
     pub clear_color: u32,
     pub clear_depth: u16,
+    /// CLRIMAGE_OFFSET: where the rear-plane bitmap starts (x, then y << 8).
+    pub clrimage_offset: u16,
     pub alpha_ref: u8,
     pub edge: [u16; 8],
     pub fog_color: u32,
@@ -122,10 +124,9 @@ fn sample_image(img: &Image, tex: u32, s: f32, t: f32) -> (u32, u32, u32, u32) {
 }
 
 /// What `render` leaves out, by bit of the mask it returns.
-pub(super) const NOTE: [&str; 3] = [
-    "3D: fog is not drawn",
-    "3D: anti-aliasing is not drawn",
-    "3D: the rear plane's bitmap is not drawn (the clear colour is)",
+pub(super) const NOTE: [&str; 2] = [
+    "",
+    "3D: anti-aliasing is not drawn (at 2x and more the picture is smoother anyway)",
 ];
 
 fn c5to6(c: u32) -> u32 {
@@ -253,13 +254,80 @@ struct Target {
     id: Vec<u8>,
     /// Shadow polygons: where a mask polygon lay behind something.
     stencil: Vec<u8>,
+    /// The pixel takes the fog (its polygon's attribute, or the clear plane's).
+    fog: Vec<bool>,
 }
 
 fn edge(a: (f32, f32), b: (f32, f32), p: (f32, f32)) -> f32 {
     (b.0 - a.0) * (p.1 - a.1) - (b.1 - a.1) * (p.0 - a.0)
 }
 
-/// Draws a frame. Returns the picture and the mask of what it left out (`NOTE`).
+/// The rear plane's bitmap (DISP3DCNT bit 14): colours from texture slot 2, depths and fog flags
+/// from slot 3, 256 x 256 starting at CLRIMAGE_OFFSET and wrapping; it replaces the clear colour
+/// and depth where the picture has nothing nearer.
+fn rear_plane(job: &Job, t: &mut Target, s: usize, ya: usize, yb: usize) {
+    let (w, ox, oy) = (256 * s, (job.clrimage_offset & 0xFF) as usize, (job.clrimage_offset >> 8) as usize);
+    let cid = ((job.clear_color >> 24) & 63) as u8;
+    let rd = |base: usize, x: usize, y: usize| -> u16 {
+        let o = base + (y * 256 + x) * 2;
+        u16::from_le_bytes([job.tex.get(o).copied().unwrap_or(0), job.tex.get(o + 1).copied().unwrap_or(0)])
+    };
+    for y in ya..yb {
+        for x in 0..w {
+            let (sx, sy) = ((x / s + ox) & 255, (y / s + oy) & 255);
+            let (c, d) = (rd(0x40000, sx, sy), rd(0x60000, sx, sy));
+            let (r, g, b) = rgb555(c & 0x7FFF);
+            let i = (y - ya) * w + x;
+            t.color[i] = r | g << 6 | b << 12;
+            t.alpha[i] = if c & 0x8000 != 0 { 31 } else { 0 };
+            t.depth[i] = clear_depth(d & 0x7FFF);
+            t.id[i] = cid;
+            t.fog[i] = d & 0x8000 != 0;
+        }
+    }
+}
+
+/// The fog density (0-128) at a depth: FOG_TABLE's 32 entries sit at FOG_OFFSET + (0x400 >> shift)
+/// times 1 to 32, linear between; before the first and past the last, those entries.
+fn fog_density(job: &Job, depth24: u32) -> u32 {
+    let z = (depth24 >> 9) as i32;
+    let step = (0x400i32 >> ((job.disp3dcnt >> 8) & 15)).max(1);
+    let pos = z - job.fog_offset as i32 - step;
+    let d = if pos <= 0 {
+        job.fog_table[0] as i32 * 256
+    } else {
+        let (i, f) = ((pos / step) as usize, pos % step);
+        if i >= 31 {
+            job.fog_table[31] as i32 * 256
+        } else {
+            let (a, b) = (job.fog_table[i] as i32, job.fog_table[i + 1] as i32);
+            a * 256 + (b - a) * 256 * f / step
+        }
+    };
+    let d = (d / 256) as u32 & 127;
+    if d >= 127 { 128 } else { d }
+}
+
+/// Fog over the finished picture: pixels that take it move towards the fog colour (unless the mode
+/// says alpha only) and the fog alpha by the density at their depth.
+fn apply_fog(job: &Job, t: &mut Target) {
+    let (fr, fg, fb) = rgb555((job.fog_color & 0x7FFF) as u16);
+    let fa = (job.fog_color >> 16) & 31;
+    let alpha_only = job.disp3dcnt & 0x40 != 0;
+    for i in 0..t.color.len() {
+        if !t.fog[i] {
+            continue;
+        }
+        let d = fog_density(job, (t.depth[i].clamp(0.0, 1.0) * 16_777_215.0) as u32);
+        let mix = |a: u32, b: u32| (a * (128 - d) + b * d) >> 7;
+        if !alpha_only {
+            let c = t.color[i];
+            t.color[i] = mix(c & 63, fr) | mix(c >> 6 & 63, fg) << 6 | mix(c >> 12 & 63, fb) << 12;
+        }
+        t.alpha[i] = mix(t.alpha[i] as u32, fa) as u8;
+    }
+}
+
 /// How many threads draw the picture: the cores (at most 8); `SUNPETAL_3D_THREADS` sets it (1 draws
 /// in one pass, to compare).
 fn threads() -> usize {
@@ -284,7 +352,11 @@ fn raster(job: &Job, verts: &[GxVertex], s: usize, ya: usize, yb: usize) -> Targ
         depth: vec![clear_depth(job.clear_depth); n],
         id: vec![cid; n],
         stencil: vec![0; n],
+        fog: vec![cc & 0x8000 != 0; n],
     };
+    if job.disp3dcnt & 0x4000 != 0 {
+        rear_plane(job, &mut t, s, ya, yb);
+    }
     let mem = Mem { tex: &job.tex, pal: &job.texpal };
     let texture_on = job.disp3dcnt & 1 != 0;
     let highlight = job.disp3dcnt & 2 != 0;
@@ -302,6 +374,7 @@ fn raster(job: &Job, verts: &[GxVertex], s: usize, ya: usize, yb: usize) -> Targ
         let replacement: Option<&Image> =
             job.keys.get(&(p.tex, p.pal)).and_then(|k| job.pack.get(k)).map(|i| &**i);
         let eq_depth = attr & 0x4000 != 0;
+        let fog_attr = attr & 0x8000 != 0;
         let write_trans_depth = attr & 0x800 != 0;
         let wire = polyalpha == 0;
         // fill one pixel
@@ -390,6 +463,7 @@ fn raster(job: &Job, verts: &[GxVertex], s: usize, ya: usize, yb: usize) -> Targ
                 t.depth[i] = depth;
                 t.id[i] = pid;
                 t.stencil[i] = 0;
+                t.fog[i] = fog_attr;
             } else {
                 if t.id[i] == pid && t.alpha[i] > 0 && t.alpha[i] < 31 {
                     return; // translucent polygons do not draw over their own ID
@@ -408,6 +482,7 @@ fn raster(job: &Job, verts: &[GxVertex], s: usize, ya: usize, yb: usize) -> Targ
                 }
                 t.id[i] = pid;
                 t.stencil[i] = 0;
+                t.fog[i] = fog_attr;
             }
         };
         let depth_of = |v: &GxVertex| -> f32 {
@@ -488,6 +563,7 @@ fn raster(job: &Job, verts: &[GxVertex], s: usize, ya: usize, yb: usize) -> Targ
     t
 }
 
+/// Draws a frame. Returns the picture and the mask of what it left out (`NOTE`).
 pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
     let mut notes = 0u32;
     let s = scale.max(1);
@@ -495,12 +571,6 @@ pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
     let n = w * h;
     let sc = s as f32;
     let verts: Vec<GxVertex> = job.verts.iter().map(|v| GxVertex { sx: v.sx * sc, sy: v.sy * sc, ..*v }).collect();
-    if job.disp3dcnt & 0x4000 != 0 {
-        notes |= 1 << 2;
-    }
-    if job.disp3dcnt & 0x80 != 0 {
-        notes |= 1;
-    }
     if job.disp3dcnt & 0x10 != 0 {
         notes |= 1 << 1;
     }
@@ -517,12 +587,13 @@ pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
             hs.into_iter().map(|h| h.join().expect("a band of the 3D picture")).collect()
         })
     };
-    let mut t = Target { color: Vec::with_capacity(n), alpha: Vec::with_capacity(n), depth: Vec::with_capacity(n), id: Vec::with_capacity(n), stencil: Vec::new() };
+    let mut t = Target { color: Vec::with_capacity(n), alpha: Vec::with_capacity(n), depth: Vec::with_capacity(n), id: Vec::with_capacity(n), stencil: Vec::new(), fog: Vec::with_capacity(n) };
     for p in parts {
         t.color.extend(p.color);
         t.alpha.extend(p.alpha);
         t.depth.extend(p.depth);
         t.id.extend(p.id);
+        t.fog.extend(p.fog);
     }
     if job.disp3dcnt & 0x20 != 0 {
         // edge marking: a pixel with a nearer-or-equal... no: a pixel beside a farther pixel of another
@@ -547,6 +618,129 @@ pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
             }
         }
     }
+    if job.disp3dcnt & 0x80 != 0 {
+        apply_fog(job, &mut t);
+    }
     let out = (0..n).map(|i| if t.alpha[i] == 0 { 0 } else { t.color[i] | (t.alpha[i] as u32) << 18 }).collect();
     (out, notes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_job() -> Job {
+        Job {
+            verts: vec![],
+            polys: vec![],
+            wbuffer: false,
+            disp3dcnt: 0,
+            clear_color: 31 << 16,
+            clear_depth: 0x7FFF,
+            clrimage_offset: 0,
+            alpha_ref: 0,
+            edge: [0; 8],
+            fog_color: 31 << 16,
+            fog_offset: 0,
+            fog_table: [0; 32],
+            toon: [0; 32],
+            tex: vec![0; 0x80000],
+            texpal: vec![0; 0x18000],
+            keys: HashMap::new(),
+            pack: Arc::new(HashMap::new()),
+        }
+    }
+
+    /// A job like `j` (the fields the fog reads).
+    fn empty_job_with(j: &Job) -> Job {
+        Job { fog_table: j.fog_table, disp3dcnt: j.disp3dcnt, ..empty_job() }
+    }
+
+    fn pixel(c555: u16, alpha: u32) -> u32 {
+        let (r, g, b) = rgb555(c555);
+        r | g << 6 | b << 12 | alpha << 18
+    }
+
+    const BLUE: u16 = 0x7C00;
+    const RED: u16 = 0x001F;
+
+    #[test]
+    fn fog_takes_the_clear_plane_to_the_fog_colour_when_the_plane_asks_for_it() {
+        let mut j = empty_job();
+        j.disp3dcnt = 0x80;
+        j.clear_color = BLUE as u32 | 0x8000 | 31 << 16; // the clear plane's fog bit
+        j.fog_color = RED as u32 | 31 << 16;
+        j.fog_table = [127; 32];
+        let (out, _) = render(&j, 1);
+        assert_eq!(out[0], pixel(RED, 31), "full density: the fog colour");
+        // without the plane's fog bit nothing changes
+        j.clear_color = BLUE as u32 | 31 << 16;
+        assert_eq!(render(&j, 1).0[0], pixel(BLUE, 31));
+        // and fog switched off in DISP3DCNT does nothing either
+        j.clear_color |= 0x8000;
+        j.disp3dcnt = 0;
+        assert_eq!(render(&j, 1).0[0], pixel(BLUE, 31));
+    }
+
+    #[test]
+    fn half_density_is_half_way_and_alpha_only_leaves_the_colour() {
+        let mut j = empty_job();
+        j.disp3dcnt = 0x80;
+        j.clear_color = BLUE as u32 | 0x8000 | 31 << 16;
+        j.fog_color = RED as u32 | 31 << 16;
+        j.fog_table = [64; 32];
+        let (out, _) = render(&j, 1);
+        let (br, _, bb) = (rgb555(BLUE).0, 0, rgb555(BLUE).2);
+        let rr = rgb555(RED).0;
+        assert_eq!(out[0] & 63, (br * 64 + rr * 64) >> 7);
+        assert_eq!(out[0] >> 12 & 63, (bb * 64) >> 7);
+        // alpha only, to a fog alpha of 0: the colour stays, the pixel goes transparent
+        j.disp3dcnt = 0xC0;
+        j.fog_color = RED as u32;
+        j.fog_table = [127; 32];
+        assert_eq!(render(&j, 1).0[0], 0);
+        j.fog_table = [0; 32];
+        assert_eq!(render(&j, 1).0[0], pixel(BLUE, 31));
+    }
+
+    #[test]
+    fn the_density_follows_the_table_between_its_steps() {
+        let mut j = empty_job();
+        for i in 0..32 {
+            j.fog_table[i] = (i * 4) as u8;
+        }
+        // shift 0: a step is 0x400; entry i sits at offset + 0x400 * (i + 1)
+        let d = |z15: u32, j: &Job| fog_density(j, z15 << 9);
+        assert_eq!(d(0, &j), 0, "before the first entry: the first");
+        assert_eq!(d(0x800, &j), 4, "on entry 1");
+        assert_eq!(d(0x800 + 0x200, &j), 6, "half way to entry 2");
+        assert_eq!(d(0x7FFF, &j), 123, "the last entry sits at 0x8000, just past the deepest pixel");
+        assert_eq!(d(0x7FFF, &Job { disp3dcnt: 1 << 8, ..empty_job_with(&j) }), 124, "with shift 1 the steps are half as long: past the last entry");
+        // the offset moves the steps, the shift narrows them
+        j.fog_offset = 0x100;
+        assert_eq!(d(0x900, &j), 4);
+        j.disp3dcnt = 1 << 8; // shift 1: a step is 0x200
+        assert_eq!(d(0x100 + 0x400, &j), 4);
+    }
+
+    #[test]
+    fn the_rear_plane_bitmap_replaces_the_clear_colour_and_scrolls() {
+        let mut j = empty_job();
+        j.disp3dcnt = 0x4000;
+        j.clear_color = 31 << 16;
+        // slot 2: pixel (1, 0) opaque red; slot 3: its depth 0 (nearest)
+        let put = |tex: &mut Vec<u8>, base: usize, x: usize, v: u16| tex[base + 2 * x..base + 2 * x + 2].copy_from_slice(&v.to_le_bytes());
+        put(&mut j.tex, 0x40000, 1, RED | 0x8000);
+        put(&mut j.tex, 0x60000, 1, 0);
+        let (out, _) = render(&j, 1);
+        assert_eq!(out[0], 0, "the bitmap's first pixel has no alpha: nothing there");
+        assert_eq!(out[1], pixel(RED, 31));
+        // scrolled by one, the red pixel is at x = 0
+        j.clrimage_offset = 1;
+        assert_eq!(render(&j, 1).0[0], pixel(RED, 31));
+        // drawn at scale 2 the pixel is two wide
+        j.clrimage_offset = 0;
+        let (big, _) = render(&j, 2);
+        assert_eq!((big[2], big[3], big[1], big[4]), (pixel(RED, 31), pixel(RED, 31), 0, 0));
+    }
 }
