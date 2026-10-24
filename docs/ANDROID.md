@@ -4,12 +4,13 @@
 
 ## Сборка
 
-Нужны: Android SDK (платформа 26+, build-tools), NDK r27, `cargo install cargo-ndk`, `rustup target add aarch64-linux-android`.
+Нужны: JDK (`javac`), Android SDK (платформа 26+, build-tools), NDK r27, `cargo install cargo-ndk`, `rustup target add aarch64-linux-android`.
 
 ```sh
 tools/android/build-apk.sh        # build/android/sunpetal.apk, подпись отладочным ключом
 adb install -r build/android/sunpetal.apk
-adb push rom.nds /sdcard/Android/data/org.sunpetal.app/files/rom.nds   # ром (папка появляется после первого запуска)
+# ром выбирается на телефоне при первом запуске; можно и положить вручную:
+adb push rom.nds /sdcard/Android/data/org.sunpetal.app/files/rom.nds
 ```
 
 Скрипт: `cargo ndk` собирает `libsunpetal_app.so` (приложение как `cdylib`, точка входа `android_main`, `NativeActivity` из `winit`), `aapt2` пакует манифест (`tools/android/AndroidManifest.xml`), `zipalign`, `apksigner`. Сгенерированный C собирается clang из NDK через `cc` в `build.rs`.
@@ -18,7 +19,7 @@ adb push rom.nds /sdcard/Android/data/org.sunpetal.app/files/rom.nds   # ром 
 
 ## Как устроено
 
-- ROM: `rom.nds` в `Android/data/org.sunpetal.app/files/` (общий накопитель, достаётся через `adb push` и файловый менеджер на Android до 11). Сохранения кладутся рядом; настройки в приватной папке приложения.
+- ROM: при первом запуске `PickerActivity` (Java, `tools/android/java`) открывает системный выбор файла (`ACTION_OPEN_DOCUMENT`, разрешения не нужны), копирует выбранный файл в `rom.nds` и запускает игру (`NativeActivity`). Файл лежит в `Android/data/org.sunpetal.app/files/` (общий накопитель, достаётся через `adb push` и файловый менеджер на Android до 11). Сохранения кладутся рядом; настройки в приватной папке приложения.
 - Картинка: те же `wgpu` и `egui`, что на десктопе. Звук: `cpal` (AAudio). Касание нижнего экрана = стилус.
 - Экранные кнопки (`touchpad.rs`): полоса под экранами (не меньше 28% и не больше 50% высоты окна), в ней крестовина, A/B/X/Y, L и R, Select и Start, кнопка MENU. Мультитач; палец, скользящий с кнопки на кнопку, нажимает вторую. Рисуются через `egui` поверх картинки. Настройка «Кнопки на экране»: на телефоне (по умолчанию) / всегда / никогда (`input.touch_controls` в `config.toml`); на десктопе включается для проверки через `[input] touch_controls = "on"`.
 - Внутреннее разрешение 3D по умолчанию 1× (рендер программный и однопоточный).
@@ -26,6 +27,6 @@ adb push rom.nds /sdcard/Android/data/org.sunpetal.app/files/rom.nds   # ром 
 ## Не сделано
 
 - Положение и размеры кнопок подобраны по расчёту (тест на непересечение для нескольких размеров окна), не по ощущению в руке; нужны правки после проверки на телефоне. Нет вибрации, нет настройки прозрачности и размера. Геймпад по Bluetooth: `gilrs` на Android не работает.
-- Выбор ROM через системный диалог (SAF): нужен Java-класс-наследник `NativeActivity` и компиляция в dex.
+- Сменить ROM из приложения (сейчас: очистить данные приложения или удалить `rom.nds`). Проверка, что выбран именно DS-ROM, только по размеру.
 - Сообщение на экране, если ROM не найден (сейчас приложение просто закрывается, причина в logcat).
 - Меню настроек под палец, ориентация, фоновые режимы, иконка, подпись для релиза, armeabi-v7a и x86_64.
