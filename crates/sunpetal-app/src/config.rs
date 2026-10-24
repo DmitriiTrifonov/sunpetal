@@ -55,6 +55,10 @@ pub struct Input {
     pub stick_threshold: f32,
     /// On-screen buttons: "auto" (on a phone), "on" or "off".
     pub touch_controls: String,
+    /// A swipe turns the dial puzzle's dial (see `dial.rs`).
+    pub dial_swipe: bool,
+    /// Turn of the dial, in radians, for a swipe of one dial radius; negative turns the other way.
+    pub dial_gain: f32,
 }
 
 impl Default for Input {
@@ -77,6 +81,8 @@ impl Default for Input {
             ]),
             stick_threshold: 0.5,
             touch_controls: "auto".into(),
+            dial_swipe: true,
+            dial_gain: 1.5,
         }
     }
 }
@@ -188,6 +194,7 @@ impl Settings {
         if !matches!(self.input.touch_controls.as_str(), "auto" | "on" | "off") {
             self.input.touch_controls = "auto".into();
         }
+        self.input.dial_gain = if self.input.dial_gain.is_finite() { self.input.dial_gain.clamp(-4.0, 4.0) } else { 1.5 };
         self.effects.sanitize();
         self.audio.volume = self.audio.volume.clamp(0.0, 1.0);
         self.input.stick_threshold = self.input.stick_threshold.clamp(0.1, 0.9);

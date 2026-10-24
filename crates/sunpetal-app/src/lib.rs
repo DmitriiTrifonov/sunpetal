@@ -14,6 +14,7 @@
 //! and at exit.
 mod audio;
 mod config;
+mod dial;
 mod effects;
 mod emu;
 mod gfx;
@@ -77,6 +78,10 @@ struct App {
     pen_down: bool,
     /// The finger that is the stylus.
     touch: Option<u64>,
+    /// The lower screen shows the dial puzzle (from the last frame).
+    dial_scene: bool,
+    /// A finger turning the dial.
+    dial: Option<dial::Dial>,
     /// Fingers on the on-screen controls, by id.
     pad_touches: HashMap<u64, (f32, f32)>,
     /// The buttons those fingers hold.
@@ -191,7 +196,11 @@ impl App {
 
     fn update_pen(&mut self) {
         let Some(g) = &self.gfx else { return };
-        let pen = if self.pen_down && !self.menu.open { self.layout().touch(g.size(), self.mouse, true) } else { None };
+        let pen = match self.dial {
+            Some(d) if self.pen_down && !self.menu.open => Some(d.pen()),
+            _ if self.pen_down && !self.menu.open => self.layout().touch(g.size(), self.mouse, true),
+            _ => None,
+        };
         self.shared.input.lock().unwrap().pen = pen;
     }
 
@@ -210,6 +219,7 @@ impl ApplicationHandler for App {
         self.window = None;
         self.touch = None;
         self.pen_down = false;
+        self.dial = None;
         self.pad_touches.clear();
         self.touch_held.clear();
         self.send_keys();
@@ -359,6 +369,11 @@ impl ApplicationHandler for App {
                             self.touch = Some(t.id);
                             self.pen_down = true;
                             self.mouse = p;
+                            self.dial = None;
+                            if self.settings.input.dial_swipe && self.dial_scene {
+                                let at = self.gfx.as_ref().and_then(|g| self.layout().touch(g.size(), p, false));
+                                self.dial = at.and_then(|(x, y)| dial::Dial::grab((x as f32, y as f32)));
+                            }
                         } else if let Some(b) = band {
                             if touchpad::on_menu(b, p) {
                                 self.toggle_menu();
@@ -370,6 +385,13 @@ impl ApplicationHandler for App {
                     Moved => {
                         if self.touch == Some(t.id) {
                             self.mouse = p;
+                            if self.dial.is_some() {
+                                let at = self.gfx.as_ref().and_then(|g| self.layout().touch(g.size(), p, true));
+                                let gain = self.settings.input.dial_gain;
+                                if let (Some((x, _)), Some(d)) = (at, self.dial.as_mut()) {
+                                    d.moved(x as f32, gain);
+                                }
+                            }
                         } else if let Some(q) = self.pad_touches.get_mut(&t.id) {
                             *q = p;
                         }
@@ -378,6 +400,7 @@ impl ApplicationHandler for App {
                         if self.touch == Some(t.id) {
                             self.touch = None;
                             self.pen_down = false;
+                            self.dial = None;
                         }
                         self.pad_touches.remove(&t.id);
                     }
@@ -405,6 +428,9 @@ impl ApplicationHandler for App {
                     self.stopped_msg = Some(why);
                 }
                 let frame = self.shared.frame.lock().unwrap().take();
+                if let Some((scale, rgba)) = &frame {
+                    self.dial_scene = dial::recognise(*scale, rgba);
+                }
                 if let (Some((scale, rgba)), Some(g)) = (frame, &mut self.gfx) {
                     g.upload(scale, &rgba);
                 }
@@ -547,6 +573,8 @@ pub fn run(o: Options, el: EventLoop<()>) {
         mouse: (0.0, 0.0),
         pen_down: false,
         touch: None,
+        dial_scene: false,
+        dial: None,
         pad_touches: HashMap::new(),
         touch_held: Vec::new(),
         stopped_msg: None,

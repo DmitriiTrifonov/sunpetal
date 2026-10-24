@@ -143,6 +143,10 @@ impl Menu {
                         ui.selectable_value(&mut s.input.touch_controls, "on".to_string(), tx("always", "всегда"));
                         ui.selectable_value(&mut s.input.touch_controls, "off".to_string(), tx("never", "никогда"));
                     });
+                ui.checkbox(&mut s.input.dial_swipe, tx("A swipe turns the dial puzzle's dial", "Свайп вращает диск в головоломке с диском"));
+                if s.input.dial_swipe {
+                    ui.add(egui::Slider::new(&mut s.input.dial_gain, -4.0..=4.0).text(tx("Dial turn per swipe (negative: the other way)", "Поворот диска за свайп (минус: в другую сторону)")));
+                }
                 ui.add(egui::Slider::new(&mut s.input.stick_threshold, 0.1..=0.9).text(tx("Stick threshold", "Порог стика")));
                 ui.label(tx("Pad: the D-pad and the left stick, the face buttons as the DS's (east A, south B, north X, west Y), shoulders L and R, Start, Select. The mouse on the lower screen is the stylus.", "Геймпад: крестовина и левый стик, кнопки как на DS (восток A, юг B, север X, запад Y), плечевые L и R, Start, Select. Мышь на нижнем экране: стилус."));
             });
