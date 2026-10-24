@@ -156,13 +156,23 @@ pub fn on_fast_button(w: f32, h: f32, p: (f32, f32)) -> bool {
     fast_button(w, h).contains(p)
 }
 
+/// The skip button (the DS's Start), left of the fast-forward button.
+pub fn skip_button(w: f32, h: f32) -> Shape {
+    let Shape::Circle { x, y, r } = fast_button(w, h) else { unreachable!() };
+    Shape::Circle { x: x - 2.4 * r, y, r }
+}
+
+pub fn on_skip_button(w: f32, h: f32, p: (f32, f32)) -> bool {
+    skip_button(w, h).contains(p)
+}
+
 /// Whether a finger landing at `p` is on that button.
 pub fn on_menu_button(w: f32, h: f32, p: (f32, f32)) -> bool {
     menu_button(w, h).contains(p)
 }
 
 /// Draws that button; it stays faint so as not to be in the way.
-pub fn paint_menu_button(ctx: &egui::Context, w: f32, h: f32, info: &str, fast: Option<bool>) {
+pub fn paint_menu_button(ctx: &egui::Context, w: f32, h: f32, info: &str, fast: Option<bool>, skip: Option<bool>) {
     use egui::{Align2, Color32, FontId, Pos2, Stroke};
     let k = ctx.pixels_per_point();
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("menubutton")));
@@ -175,6 +185,19 @@ pub fn paint_menu_button(ctx: &egui::Context, w: f32, h: f32, info: &str, fast: 
         for dy in [-gap, 0.0, gap] {
             painter.line_segment([Pos2::new(c.x - hw, c.y + dy), Pos2::new(c.x + hw, c.y + dy)], Stroke::new(r / k * 0.14, Color32::from_white_alpha(190)));
         }
+    }
+    // skip (Start): a triangle and a bar, lit while held
+    if let (Some(on), Shape::Circle { x, y, r }) = (skip, skip_button(w, h)) {
+        let c = Pos2::new(x / k, y / k);
+        let fill = if on { Color32::from_rgba_unmultiplied(255, 255, 255, 120) } else { Color32::from_black_alpha(90) };
+        painter.circle(c, r / k, fill, Stroke::new(1.5, Color32::from_white_alpha(110)));
+        let u = r / k * 0.34;
+        let ink = Stroke::new(r / k * 0.14, Color32::from_white_alpha(if on { 255 } else { 190 }));
+        let (a, b, d) = (Pos2::new(c.x - u * 1.2, c.y - u), Pos2::new(c.x - u * 1.2, c.y + u), Pos2::new(c.x + u * 0.6, c.y));
+        painter.line_segment([a, b], ink);
+        painter.line_segment([b, d], ink);
+        painter.line_segment([d, a], ink);
+        painter.line_segment([Pos2::new(c.x + u * 1.3, c.y - u), Pos2::new(c.x + u * 1.3, c.y + u)], ink);
     }
     // fast-forward: lit while it is on
     if let (Some(on), Shape::Circle { x, y, r }) = (fast, fast_button(w, h)) {
@@ -268,6 +291,17 @@ mod tests {
         assert!(on_fast_button(1080.0, 2400.0, (x, y)));
         assert!(!on_fast_button(1080.0, 2400.0, (mx, my)));
         assert!(!on_menu_button(1080.0, 2400.0, (x, y)));
+    }
+
+    #[test]
+    fn the_three_corner_buttons_are_apart_and_the_skip_one_is_found() {
+        let (w, h) = (1080.0, 2400.0);
+        let c = |s: Shape| match s { Shape::Circle { x, y, r } => (x, y, r), _ => unreachable!() };
+        let (m, f, s) = (c(menu_button(w, h)), c(fast_button(w, h)), c(skip_button(w, h)));
+        assert!(m.0 - f.0 > 2.0 * m.2 && f.0 - s.0 > 2.0 * f.2, "the buttons must not touch");
+        assert!(s.0 - s.2 > 0.0, "all on the screen");
+        assert!(on_skip_button(w, h, (s.0, s.1)));
+        assert!(!on_skip_button(w, h, (f.0, f.1)) && !on_fast_button(w, h, (s.0, s.1)) && !on_menu_button(w, h, (s.0, s.1)));
     }
 
     #[test]

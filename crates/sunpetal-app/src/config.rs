@@ -96,11 +96,13 @@ pub struct Emulation {
     pub pause_in_menu: bool,
     /// A fast-forward button beside the menu button (a phone with the controls off).
     pub fast_button: bool,
+    /// A skip button (the DS's Start) beside them.
+    pub skip_button: bool,
 }
 
 impl Default for Emulation {
     fn default() -> Emulation {
-        Emulation { pause_in_menu: true, fast_button: true }
+        Emulation { pause_in_menu: true, fast_button: true, skip_button: true }
     }
 }
 

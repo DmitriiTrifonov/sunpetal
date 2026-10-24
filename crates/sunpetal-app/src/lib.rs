@@ -82,6 +82,8 @@ struct App {
     dial_scene: bool,
     /// A finger turning the dial.
     dial: Option<dial::Dial>,
+    /// The finger on the skip button (it holds Start while it is down).
+    skip_touch: Option<u64>,
     /// Fingers on the on-screen controls, by id.
     pad_touches: HashMap<u64, (f32, f32)>,
     /// The buttons those fingers hold.
@@ -101,7 +103,7 @@ impl App {
     }
 
     fn send_keys(&self) {
-        let touch = self.touch_held.iter().fold(0, |a, n| a | bit(n));
+        let touch = self.touch_held.iter().fold(0, |a, n| a | bit(n)) | if self.skip_touch.is_some() { bit("START") } else { 0 };
         self.shared.input.lock().unwrap().keys = self.kb | self.pad | touch;
     }
 
@@ -221,6 +223,7 @@ impl ApplicationHandler for App {
         self.touch = None;
         self.pen_down = false;
         self.dial = None;
+        self.skip_touch = None;
         self.pad_touches.clear();
         self.touch_held.clear();
         self.send_keys();
@@ -360,6 +363,9 @@ impl ApplicationHandler for App {
                     Started if !self.menu.open && !consumed && corner.map_or(false, |(w, h)| touchpad::on_menu_button(w, h, p)) => {
                         self.toggle_menu();
                     }
+                    Started if !self.menu.open && !consumed && self.settings.emulation.skip_button && corner.map_or(false, |(w, h)| touchpad::on_skip_button(w, h, p)) => {
+                        self.skip_touch = Some(t.id);
+                    }
                     Started if !self.menu.open && !consumed && self.settings.emulation.fast_button && corner.map_or(false, |(w, h)| touchpad::on_fast_button(w, h, p)) => {
                         let on = !self.shared.fast.load(Ordering::Relaxed);
                         self.shared.fast.store(on, Ordering::Relaxed);
@@ -404,6 +410,9 @@ impl ApplicationHandler for App {
                             self.dial = None;
                         }
                         self.pad_touches.remove(&t.id);
+                        if self.skip_touch == Some(t.id) {
+                            self.skip_touch = None;
+                        }
                     }
                     _ => {}
                 }
@@ -437,7 +446,8 @@ impl ApplicationHandler for App {
                 }
                 let mut action = None;
                 {
-                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, .. } = self;
+                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, skip_touch, .. } = self;
+                    let skip_held = skip_touch.is_some();
                     if let Some(g) = gfx {
                         let layout = layouts.iter().find(|l| l.name == settings.video.layout).unwrap_or(&layouts[0]).clone();
                         let names: Vec<&str> = layouts.iter().map(|l| l.name).collect();
@@ -458,7 +468,8 @@ impl ApplicationHandler for App {
                                         None => String::new(),
                                     };
                                     let fast = settings.emulation.fast_button.then(|| shared.fast.load(Ordering::Relaxed));
-                                    touchpad::paint_menu_button(ctx, ww, wh, &info, fast);
+                                    let skip = settings.emulation.skip_button.then(|| skip_held);
+                                    touchpad::paint_menu_button(ctx, ww, wh, &info, fast, skip);
                                 }
                                 if pad_on {
                                     let info = match stopped_msg {
@@ -576,6 +587,7 @@ pub fn run(o: Options, el: EventLoop<()>) {
         touch: None,
         dial_scene: false,
         dial: None,
+        skip_touch: None,
         pad_touches: HashMap::new(),
         touch_held: Vec::new(),
         stopped_msg: None,
