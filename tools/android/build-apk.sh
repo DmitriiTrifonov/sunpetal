@@ -17,9 +17,11 @@ cp target/aarch64-linux-android/release/libsunpetal_app.so "$OUT/apk/lib/arm64-v
 rm -rf "$OUT/classes" && mkdir -p "$OUT/classes"
 javac -source 8 -target 8 -Xlint:-options -cp "$JAR" -d "$OUT/classes" tools/android/java/org/sunpetal/app/*.java
 "$BT/d8" --min-api 26 --lib "$JAR" --output "$OUT/apk" $(find "$OUT/classes" -name '*.class')
-"$BT/aapt2" link -o "$OUT/base.apk" -I "$JAR" --manifest tools/android/AndroidManifest.xml \
+rm -rf "$OUT/res" && python3 tools/android/make-icon.py "$OUT/res"
+"$BT/aapt2" compile --dir "$OUT/res" -o "$OUT/res.zip"
+"$BT/aapt2" link -o "$OUT/base.apk" -I "$JAR" --manifest tools/android/AndroidManifest.xml -R "$OUT/res.zip" \
     --min-sdk-version 26 --target-sdk-version 34 --version-code 1 --version-name 0.0.1
-(cd "$OUT/apk" && zip -q -r -0 ../base.apk lib && zip -q ../base.apk classes.dex)
+(cd "$OUT/apk" && zip -q -r -9 ../base.apk lib && zip -q ../base.apk classes.dex)
 "$BT/zipalign" -f -p 4 "$OUT/base.apk" "$OUT/aligned.apk"
 [ -f "$OUT/debug.keystore" ] || keytool -genkeypair -keystore "$OUT/debug.keystore" -storepass android -keypass android \
     -alias debug -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Sunpetal debug" >/dev/null 2>&1

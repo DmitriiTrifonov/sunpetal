@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.sunpetal.app">
     <uses-feature android:glEsVersion="0x00030000" android:required="true" />
-    <application android:label="Sunpetal" android:hasCode="true" android:allowBackup="false">
+    <application android:label="Sunpetal" android:icon="@mipmap/ic_launcher" android:hasCode="true" android:extractNativeLibs="true" android:allowBackup="false">
         <activity android:name="org.sunpetal.app.PickerActivity" android:exported="true"
             android:screenOrientation="portrait">
             <intent-filter>

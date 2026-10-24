@@ -1,0 +1,15 @@
+Sunpetal
+Copyright 2026 the Sunpetal contributors
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This project bundles or builds on:
+
+- tools/ndskit: a fork of the Python part of ndskit, MIT licence,
+  Copyright (c) 2026 Samuele Voltan (tools/ndskit/LICENSE, tools/ndskit/UPSTREAM.md).
+- The Rust crates listed in docs/THIRD-PARTY.md, each under its own licence
+  (mostly MIT and Apache-2.0).
+- The menu font bundled with egui (Ubuntu Font Licence 1.0, and others as listed by egui).
+
+No game data is included. The game's code and data are never part of this repository;
+a build contains game code only when the user makes it from their own copy of the game.
