@@ -146,13 +146,23 @@ pub fn menu_button(w: f32, h: f32) -> Shape {
     Shape::Circle { x: w - 1.8 * r, y: 3.0 * r, r }
 }
 
+/// The fast-forward button, left of the menu button.
+pub fn fast_button(w: f32, h: f32) -> Shape {
+    let Shape::Circle { x, y, r } = menu_button(w, h) else { unreachable!() };
+    Shape::Circle { x: x - 2.4 * r, y, r }
+}
+
+pub fn on_fast_button(w: f32, h: f32, p: (f32, f32)) -> bool {
+    fast_button(w, h).contains(p)
+}
+
 /// Whether a finger landing at `p` is on that button.
 pub fn on_menu_button(w: f32, h: f32, p: (f32, f32)) -> bool {
     menu_button(w, h).contains(p)
 }
 
 /// Draws that button; it stays faint so as not to be in the way.
-pub fn paint_menu_button(ctx: &egui::Context, w: f32, h: f32, info: &str) {
+pub fn paint_menu_button(ctx: &egui::Context, w: f32, h: f32, info: &str, fast: Option<bool>) {
     use egui::{Align2, Color32, FontId, Pos2, Stroke};
     let k = ctx.pixels_per_point();
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("menubutton")));
@@ -161,6 +171,13 @@ pub fn paint_menu_button(ctx: &egui::Context, w: f32, h: f32, info: &str) {
         let c = Pos2::new(x / k, y / k);
         painter.circle(c, r / k, Color32::from_black_alpha(90), Stroke::new(1.5, Color32::from_white_alpha(110)));
         painter.text(c, Align2::CENTER_CENTER, "≡", FontId::proportional(r / k * 1.3), Color32::from_white_alpha(170));
+    }
+    // fast-forward: lit while it is on
+    if let (Some(on), Shape::Circle { x, y, r }) = (fast, fast_button(w, h)) {
+        let c = Pos2::new(x / k, y / k);
+        let fill = if on { Color32::from_rgba_unmultiplied(255, 255, 255, 120) } else { Color32::from_black_alpha(90) };
+        painter.circle(c, r / k, fill, Stroke::new(1.5, Color32::from_white_alpha(110)));
+        painter.text(c, Align2::CENTER_CENTER, "»", FontId::proportional(r / k * 1.3), Color32::from_white_alpha(if on { 255 } else { 170 }));
     }
 }
 
@@ -231,6 +248,16 @@ mod tests {
         assert!(x + r <= 1080.0 && y - r > 0.0);
         assert!(on_menu_button(1080.0, 2400.0, (x, y)));
         assert!(!on_menu_button(1080.0, 2400.0, (x - 3.0 * r, y)));
+    }
+
+    #[test]
+    fn the_fast_button_sits_beside_the_menu_button_and_apart() {
+        let (Shape::Circle { x: mx, y: my, r: mr }, Shape::Circle { x, y, r }) = (menu_button(1080.0, 2400.0), fast_button(1080.0, 2400.0)) else { unreachable!() };
+        assert_eq!((y, r), (my, mr));
+        assert!(mx - x > 2.0 * r, "the buttons must not touch");
+        assert!(on_fast_button(1080.0, 2400.0, (x, y)));
+        assert!(!on_fast_button(1080.0, 2400.0, (mx, my)));
+        assert!(!on_menu_button(1080.0, 2400.0, (x, y)));
     }
 
     #[test]

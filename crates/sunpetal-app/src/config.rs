@@ -86,11 +86,13 @@ impl Default for Input {
 pub struct Emulation {
     /// The machine waits while the menu is open.
     pub pause_in_menu: bool,
+    /// A fast-forward button beside the menu button (a phone with the controls off).
+    pub fast_button: bool,
 }
 
 impl Default for Emulation {
     fn default() -> Emulation {
-        Emulation { pause_in_menu: true }
+        Emulation { pause_in_menu: true, fast_button: true }
     }
 }
 

@@ -349,6 +349,10 @@ impl ApplicationHandler for App {
                     Started if !self.menu.open && !consumed && corner.map_or(false, |(w, h)| touchpad::on_menu_button(w, h, p)) => {
                         self.toggle_menu();
                     }
+                    Started if !self.menu.open && !consumed && self.settings.emulation.fast_button && corner.map_or(false, |(w, h)| touchpad::on_fast_button(w, h, p)) => {
+                        let on = !self.shared.fast.load(Ordering::Relaxed);
+                        self.shared.fast.store(on, Ordering::Relaxed);
+                    }
                     Started if !self.menu.open && !consumed => {
                         let on_screen = self.gfx.as_ref().map_or(false, |g| self.layout().touch(g.size(), p, false).is_some());
                         if on_screen && self.touch.is_none() {
@@ -426,7 +430,8 @@ impl ApplicationHandler for App {
                                         None if settings.video.show_stats => shared.status.lock().unwrap().clone(),
                                         None => String::new(),
                                     };
-                                    touchpad::paint_menu_button(ctx, ww, wh, &info);
+                                    let fast = settings.emulation.fast_button.then(|| shared.fast.load(Ordering::Relaxed));
+                                    touchpad::paint_menu_button(ctx, ww, wh, &info, fast);
                                 }
                                 if pad_on {
                                     let info = match stopped_msg {
