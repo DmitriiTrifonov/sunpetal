@@ -81,7 +81,7 @@ impl Default for Input {
             ]),
             stick_threshold: 0.5,
             touch_controls: "auto".into(),
-            dial_swipe: true,
+            dial_swipe: false,
             dial_gain: 1.5,
         }
     }
