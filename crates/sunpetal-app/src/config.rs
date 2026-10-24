@@ -18,6 +18,8 @@ pub struct Video {
     /// The layout's name (`layout::all`).
     pub layout: String,
     pub fullscreen: bool,
+    /// Behind the screens: "glow" (their colours, blurred) or "black".
+    pub background: String,
     /// Speed figures over the picture (frame, fps, time per frame).
     pub show_stats: bool,
     /// A folder of replacement textures (empty: none); read when the game starts.
@@ -28,7 +30,7 @@ pub struct Video {
 
 impl Default for Video {
     fn default() -> Video {
-        Video { res: 2, linear: true, layout: "stacked".into(), fullscreen: false, show_stats: false, texture_pack: String::new(), window: [512, 768] }
+        Video { res: 2, linear: true, layout: "stacked".into(), fullscreen: false, background: "glow".into(), show_stats: false, texture_pack: String::new(), window: [512, 768] }
     }
 }
 
@@ -190,6 +192,9 @@ impl Settings {
             self.interface.language = "auto".into();
         }
         self.video.res = self.video.res.clamp(1, 8);
+        if !matches!(self.video.background.as_str(), "glow" | "black") {
+            self.video.background = "glow".into();
+        }
         self.video.window = [self.video.window[0].clamp(128, 16384), self.video.window[1].clamp(128, 16384)];
         if !matches!(self.input.touch_controls.as_str(), "auto" | "on" | "off") {
             self.input.touch_controls = "auto".into();

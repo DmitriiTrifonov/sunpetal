@@ -64,6 +64,13 @@ impl Menu {
                         ui.selectable_value(&mut s.video.layout, l.to_string(), layout_label(l, lang));
                     }
                 });
+                egui::ComboBox::from_label(tx("Background", "Подложка")).selected_text(match s.video.background.as_str() {
+                    "black" => tx("black", "чёрная"),
+                    _ => tx("glow of the picture", "свечение картинки"),
+                }).show_ui(ui, |ui| {
+                    ui.selectable_value(&mut s.video.background, "glow".to_string(), tx("glow of the picture", "свечение картинки"));
+                    ui.selectable_value(&mut s.video.background, "black".to_string(), tx("black", "чёрная"));
+                });
                 ui.checkbox(&mut s.video.fullscreen, tx("Full screen (F11)", "Полный экран (F11)"));
                 ui.horizontal(|ui| {
                     ui.label(tx("Texture pack folder:", "Папка пакета текстур:"));

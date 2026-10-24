@@ -120,6 +120,7 @@ impl App {
         }
         if let Some(g) = &mut self.gfx {
             g.linear = s.video.linear;
+            g.background = s.video.background == "glow";
         }
         if s.video.fullscreen != a.video.fullscreen {
             if let Some(w) = &self.window {

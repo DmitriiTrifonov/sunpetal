@@ -8,6 +8,10 @@ use winit::window::Window;
 use crate::effects::Effects;
 use crate::layout::Layout;
 
+/// The glow's size: 16 across, 12 rows for each screen.
+const GLOW_W: usize = 16;
+const GLOW_H: usize = 24;
+
 const SHADER: &str = r#"
 struct Quad {
     rect: vec4<f32>,   // x0, y0, x1, y1 in clip space
@@ -92,6 +96,11 @@ pub struct Gfx {
     config: wgpu::SurfaceConfiguration,
     pipeline: wgpu::RenderPipeline,
     screens: [Screen; 2],
+    /// A small picture of the screens' colours, stretched over the window behind them.
+    glow: Screen,
+    glow_grid: Vec<f32>,
+    /// Draw the glow behind the screens (else black).
+    pub background: bool,
     pub linear: bool,
     /// Pixels kept free at the bottom of the window (the touch controls' band).
     pub reserve: f32,
@@ -105,9 +114,21 @@ fn make_screen(
     scale: usize,
     label: &str,
 ) -> Screen {
+    make_texture(device, bgl, nearest, linear, 256 * scale as u32, 192 * scale as u32, label)
+}
+
+fn make_texture(
+    device: &wgpu::Device,
+    bgl: &wgpu::BindGroupLayout,
+    nearest: &wgpu::Sampler,
+    linear: &wgpu::Sampler,
+    width: u32,
+    height: u32,
+    label: &str,
+) -> Screen {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some(label),
-        size: wgpu::Extent3d { width: 256 * scale as u32, height: 192 * scale as u32, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -234,6 +255,7 @@ impl Gfx {
         };
         let (nearest, linear) = (sampler(wgpu::FilterMode::Nearest), sampler(wgpu::FilterMode::Linear));
         let screens = [make_screen(&device, &bgl, &nearest, &linear, 1, "upper"), make_screen(&device, &bgl, &nearest, &linear, 1, "lower")];
+        let glow = make_texture(&device, &bgl, &nearest, &linear, GLOW_W as u32, GLOW_H as u32, "glow");
         let egui_ctx = egui::Context::default();
         let egui_state = egui_winit::State::new(
             egui_ctx.clone(),
@@ -244,7 +266,7 @@ impl Gfx {
             Some(device.limits().max_texture_dimension_2d as usize),
         );
         let egui_renderer = egui_wgpu::Renderer::new(&device, format, egui_wgpu::RendererOptions::default());
-        Ok(Gfx { window: w, egui_ctx, egui_state, egui_renderer, bgl, nearest, linear_sampler: linear, scale: 1, surface, device, queue, config, pipeline, screens, linear: true, reserve: 0.0 })
+        Ok(Gfx { window: w, egui_ctx, egui_state, egui_renderer, bgl, nearest, linear_sampler: linear, scale: 1, surface, device, queue, config, pipeline, screens, glow, glow_grid: vec![0.0; GLOW_W * GLOW_H * 3], background: true, linear: true, reserve: 0.0 })
     }
 
     pub fn resize(&mut self, w: u32, h: u32) {
@@ -278,6 +300,7 @@ impl Gfx {
         }
         let (w, h) = (256 * scale as u32, 192 * scale as u32);
         let n = (w * h * 4) as usize;
+        self.update_glow(scale, rgba);
         for (s, data) in self.screens.iter().zip(rgba.chunks_exact(n)) {
             self.queue.write_texture(
                 s.texture.as_image_copy(),
@@ -286,6 +309,49 @@ impl Gfx {
                 wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
             );
         }
+    }
+
+    /// The glow's colours: each cell the average of a block of the picture (sampled), moved towards
+    /// the new value a step at a time so a flash does not flicker the background.
+    fn update_glow(&mut self, scale: usize, rgba: &[u8]) {
+        let (w, h) = (256 * scale, 192 * scale);
+        let screen = w * h * 4;
+        if rgba.len() < 2 * screen {
+            return;
+        }
+        let (bw, bh) = (w / GLOW_W, h / (GLOW_H / 2));
+        let step = (bw / 4).max(1);
+        for cy in 0..GLOW_H {
+            let (s, row) = (cy / (GLOW_H / 2), cy % (GLOW_H / 2));
+            for cx in 0..GLOW_W {
+                let mut acc = [0u32; 3];
+                let mut cnt = 0u32;
+                for y in (row * bh..(row + 1) * bh).step_by(step) {
+                    for x in (cx * bw..(cx + 1) * bw).step_by(step) {
+                        let o = s * screen + (y * w + x) * 4;
+                        acc[0] += rgba[o] as u32;
+                        acc[1] += rgba[o + 1] as u32;
+                        acc[2] += rgba[o + 2] as u32;
+                        cnt += 1;
+                    }
+                }
+                for c in 0..3 {
+                    let v = acc[c] as f32 / cnt.max(1) as f32;
+                    let slot = &mut self.glow_grid[(cy * GLOW_W + cx) * 3 + c];
+                    *slot += (v - *slot) * 0.12;
+                }
+            }
+        }
+        let mut bytes = Vec::with_capacity(GLOW_W * GLOW_H * 4);
+        for p in self.glow_grid.chunks_exact(3) {
+            bytes.extend_from_slice(&[p[0] as u8, p[1] as u8, p[2] as u8, 255]);
+        }
+        self.queue.write_texture(
+            self.glow.texture.as_image_copy(),
+            &bytes,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(GLOW_W as u32 * 4), rows_per_image: Some(GLOW_H as u32) },
+            wgpu::Extent3d { width: GLOW_W as u32, height: GLOW_H as u32, depth_or_array_layers: 1 },
+        );
     }
 
     /// A window event for the menu. True if the menu used it (the game should not).
@@ -317,6 +383,11 @@ impl Gfx {
                 self.queue.write_buffer(&s.uniform, 0, bytemuck::bytes_of(&q));
             }
         }
+        if self.background {
+            // the whole window, dimmed, no screen effects
+            let q = Quad { rect: [-1.0, 1.0, 1.0, -1.0], fx: [0.0, 0.0, 0.55, 0.0], color: [1.1, 0.9, -0.2, 1.0], dims: [GLOW_W as f32, GLOW_H as f32, 0.0, 0.0] };
+            self.queue.write_buffer(&self.glow.uniform, 0, bytemuck::bytes_of(&q));
+        }
         let view = frame.texture.create_view(&Default::default());
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
@@ -334,6 +405,10 @@ impl Gfx {
                 multiview_mask: None,
             });
             pass.set_pipeline(&self.pipeline);
+            if self.background {
+                pass.set_bind_group(0, &self.glow.bind_linear, &[]);
+                pass.draw(0..4, 0..1);
+            }
             for (s, r) in self.screens.iter().zip(rects.iter()) {
                 if r.is_some() {
                     pass.set_bind_group(0, if self.linear { &s.bind_linear } else { &s.bind_nearest }, &[]);
