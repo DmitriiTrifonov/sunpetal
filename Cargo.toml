@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = ["crates/sunpetal-runtime"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+license = "Apache-2.0"
+
+# the self-test replays thousands of functions with a crc32 of main RAM after each
+[profile.test]
+opt-level = 2

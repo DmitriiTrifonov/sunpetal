@@ -1,0 +1,13 @@
+[package]
+name = "sunpetal-runtime"
+description = "Rust runtime for statically recompiled Nintendo DS programs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+corosensei = "0.2"
+png = "0.17"
+
+[build-dependencies]
+cc = "1"
