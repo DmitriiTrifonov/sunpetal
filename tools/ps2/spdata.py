@@ -24,6 +24,7 @@ import re
 import struct
 import sys
 
+ANY_PALETTE = (1 << 64) - 1
 MAGIC = b'SPDATA\0\1'
 NAME = re.compile(r'^(\d+)x(\d+)_(\d)_([0-9a-f]{16})_([0-9a-f]{16})\.png$')
 
@@ -43,7 +44,8 @@ def parse_name(name):
 
 def write(path, textures):
     """textures: iterable of (key, png_bytes); key = (data, pal, fmt, w, h). A key given twice keeps
-    the last picture."""
+    the last picture; a key whose palette hash is `ANY_PALETTE` stands for the texture with whatever
+    palette (used when no exact key is found)."""
     by_key = {}
     for key, png in textures:
         by_key[key] = png
@@ -53,10 +55,14 @@ def write(path, textures):
     blob_at = head + texs_index
     index = bytearray(struct.pack('<I', len(keys)))
     blobs = bytearray()
+    where = {}      # a picture several keys share is stored once
     for key in keys:
         data, pal, fmt, w, h = key
-        index += struct.pack('<QQBHHQI', data, pal, fmt, w, h, blob_at + len(blobs), len(by_key[key]))
-        blobs += by_key[key]
+        png = by_key[key]
+        if png not in where:
+            where[png] = blob_at + len(blobs)
+            blobs += png
+        index += struct.pack('<QQBHHQI', data, pal, fmt, w, h, where[png], len(png))
     with open(path + '.part', 'wb') as f:
         f.write(MAGIC + struct.pack('<I', 1) + b'TEXS' + struct.pack('<QQ', head, texs_index + len(blobs)))
         f.write(index)

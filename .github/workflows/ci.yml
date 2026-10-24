@@ -32,6 +32,8 @@ jobs:
           python-version: "3.12"
       - name: The Python tools compile
         run: python -m compileall -q tools
+      - name: The keys the tools work out agree with the runtime's (golden values)
+        run: python tools/ds/test_nitro.py
 
   android:
     runs-on: ubuntu-latest

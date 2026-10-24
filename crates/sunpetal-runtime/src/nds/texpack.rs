@@ -38,6 +38,9 @@ impl TexPack {
     }
 }
 
+/// A key's palette hash that stands for any palette.
+pub(super) const ANY_PALETTE: u64 = u64::MAX;
+
 /// The replacement pictures, from a folder of PNGs or a data file (`tools/ps2/spdata.py`). Each is
 /// read and decoded the first time the game draws its texture, so a pack of thousands costs only
 /// what is used.
@@ -72,7 +75,9 @@ impl Pack {
 
     /// The picture that replaces a texture, if the pack has one.
     pub(super) fn get(&self, key: &TexKey) -> Option<Arc<Image>> {
-        let e = self.entries.get(key)?;
+        // the exact key, else the picture made for the texture with any palette (a palette the
+        // game changes as it runs has no fixed key)
+        let e = self.entries.get(key).or_else(|| self.entries.get(&TexKey { pal: ANY_PALETTE, ..*key }))?;
         e.image
             .get_or_init(|| {
                 let bytes = match &e.source {
@@ -200,12 +205,22 @@ pub(super) fn texture_key(m: &Mem, tex: u32, pal: u32) -> TexKey {
     let n = w * h * bits_per_texel(fmt) / 8;
     let mut data = fnv((0..n).map(|i| tex_byte(m, base + i)), seed);
     let pal16 = pal as usize * 16;
+    // the palette, as far as the texels reach into it (the colours past the largest index in use
+    // are not the texture's: in memory they are another palette's), so that the key can also be
+    // worked out from the texture's file alone
+    let used = |from: usize, bytes_per_index: usize| -> u64 {
+        let top = match fmt {
+            1 => (0..n).map(|i| (tex_byte(m, base + i) & 31) as usize).max(),
+            2 => (0..n).flat_map(|i| { let b = tex_byte(m, base + i) as usize; [b & 3, b >> 2 & 3, b >> 4 & 3, b >> 6] }).max(),
+            3 => (0..n).flat_map(|i| { let b = tex_byte(m, base + i) as usize; [b & 15, b >> 4] }).max(),
+            4 => (0..n).map(|i| tex_byte(m, base + i) as usize).max(),
+            _ => (0..n).map(|i| (tex_byte(m, base + i) & 7) as usize).max(),
+        };
+        fnv(pal_bytes(m, from, (top.unwrap_or(0) + 1) * bytes_per_index), FNV_BASIS)
+    };
     let palette = match fmt {
-        1 => fnv(pal_bytes(m, pal16, 64), FNV_BASIS),
-        2 => fnv(pal_bytes(m, pal as usize * 8, 8), FNV_BASIS),
-        3 => fnv(pal_bytes(m, pal16, 32), FNV_BASIS),
-        4 => fnv(pal_bytes(m, pal16, 512), FNV_BASIS),
-        6 => fnv(pal_bytes(m, pal16, 16), FNV_BASIS),
+        1 | 3 | 4 | 6 => used(pal16, 2),
+        2 => used(pal as usize * 8, 2),
         5 => {
             // the palette parts the tiles' words point to, and the words with the data
             let tiles = (w / 4) * (h / 4);
@@ -385,11 +400,13 @@ mod tests {
         tex[10] = 7; // a texel inside it
         let k1 = texture_key(&m(&tex, &pal), t, 0);
         assert_ne!(k0.data, k1.data);
-        assert_eq!(k0.pal, k1.pal);
-        pal[4] = 1; // a palette entry
+        assert_ne!(k0.pal, k1.pal, "a larger index in use takes in more of the palette");
+        pal[4] = 1; // a palette entry in use (index 2 of 0..=7)
         let k2 = texture_key(&m(&tex, &pal), t, 0);
         assert_eq!(k1.data, k2.data);
         assert_ne!(k1.pal, k2.pal);
+        pal[100] = 5; // a colour past the largest index in use: another palette's
+        assert_eq!(texture_key(&m(&tex, &pal), t, 0), k2);
         tex[8 * 8] = 9; // past its end: not part of it
         assert_eq!(texture_key(&m(&tex, &pal), t, 0), k2);
     }
@@ -458,5 +475,64 @@ mod tests {
         let tiny = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/tiny.spdata");
         assert_eq!(Pack::open(&tiny).unwrap().len(), 2);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_picture_for_any_palette_serves_when_the_exact_key_is_not_there() {
+        let dir = std::env::temp_dir().join(format!("sunpetal-any-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let any = key(0x77, ANY_PALETTE, 4, 8, 8);
+        write_png(&dir.join(file_name(&any)), &Image { w: 1, h: 1, rgba: vec![1, 2, 3, 255] }).unwrap();
+        let exact = key(0x77, 0x55, 4, 8, 8);
+        write_png(&dir.join(file_name(&exact)), &Image { w: 1, h: 1, rgba: vec![4, 5, 6, 255] }).unwrap();
+        let pack = Pack::open(&dir).unwrap();
+        assert_eq!(pack.get(&exact).unwrap().rgba, vec![4, 5, 6, 255], "the exact key first");
+        assert_eq!(pack.get(&key(0x77, 0x99, 4, 8, 8)).unwrap().rgba, vec![1, 2, 3, 255], "any other palette");
+        assert!(pack.get(&key(0x78, 0x99, 4, 8, 8)).is_none(), "another texture is not served");
+        assert!(pack.get(&key(0x77, 0x99, 4, 16, 8)).is_none(), "nor the same data at another size");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The keys `tools/ds/nitro.py` works out from a ROM's files must be those the runtime works out
+    /// from memory: the same textures, laid out as the hardware has them, give the same values (the
+    /// Python side checks the same numbers in `tools/ds/test_nitro.py`).
+    #[test]
+    fn keys_agree_with_the_tools_python_side() {
+        let mut tex = vec![0u8; 0x80000];
+        let pal: Vec<u8> = (0..512usize).map(|i| (i * 7 % 256) as u8).collect();
+        let key_of = |tex: &[u8], t: u32, p: u32| texture_key(&Mem { tex, pal: &pal }, t, p);
+        // 8x8, 256 colours
+        for i in 0..64 {
+            tex[i] = (i * 3 % 251) as u8;
+        }
+        let k = key_of(&tex, texture(4, 0, 0), 0);
+        assert_eq!((k.data, k.pal), (0xa7c9424195909dfb, 0xfffe2d7271ab9e95));
+        // the same with colour 0 transparent (the flag is part of the data's key)
+        let k = key_of(&tex, texture(4, 0, 0) | 0x2000_0000, 0);
+        assert_eq!((k.data, k.pal), (0x06e0d4a067869b3c, 0xfffe2d7271ab9e95));
+        // 8x8, 4 colours
+        let mut tex = vec![0u8; 0x80000];
+        for i in 0..16 {
+            tex[i] = (i * 5 % 256) as u8;
+        }
+        let k = key_of(&tex, texture(2, 0, 0) | 0x2000_0000, 0);
+        assert_eq!((k.data, k.pal), (0x435f037b0f9d16c2, 0x4f9838d6bdc8a675));
+        // 8x8, 16 colours
+        let mut tex = vec![0u8; 0x80000];
+        for i in 0..32 {
+            tex[i] = (i * 11 % 256) as u8;
+        }
+        let k = key_of(&tex, texture(3, 0, 0), 0);
+        assert_eq!((k.data, k.pal), (0xc955aa84ddc8781c, 0xb0b2c391709c62a5));
+        // 8x8 compressed: four tiles' texels, their words in the second slot
+        let mut tex = vec![0u8; 0x80000];
+        for i in 0..16 {
+            tex[i] = (i * 13 % 256) as u8;
+        }
+        for (n, w) in [0x0004u16, 0x4008, 0x8002, 0xC00A].into_iter().enumerate() {
+            tex[0x20000 + 2 * n..0x20000 + 2 * n + 2].copy_from_slice(&w.to_le_bytes());
+        }
+        let k = key_of(&tex, texture(5, 0, 0), 0);
+        assert_eq!((k.data, k.pal), (0x65f913cef1b9d6e2, 0xb972c4060ba7c695));
     }
 }

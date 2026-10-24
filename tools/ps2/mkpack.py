@@ -109,6 +109,44 @@ def mae(a, b):
     return s / n if n else 1e9
 
 
+def luma(rgba, w, h):
+    return [(rgba[4 * i] * 299 + rgba[4 * i + 1] * 587 + rgba[4 * i + 2] * 114) // 1000 for i in range(w * h)]
+
+
+def compare(ds, small, w, h):
+    """How well the PS2 picture (shrunk to the DS texture's size) matches the DS texture: the mean
+    colour error over the texture's opaque pixels (`mae`), the worst mean error of any of 4 x 4
+    blocks (a different layout shows there), and how far the edges (luma gradients) are from the
+    DS texture's own, in proportion to the edges it has (a different layout puts them elsewhere).
+    Returns (mae, worst_block, edge_ratio)."""
+    err = mae(ds, small)
+    blocks = []
+    bw, bh = max(1, w // 4), max(1, h // 4)
+    for by in range(0, h, bh):
+        for bx in range(0, w, bw):
+            s = n = 0
+            for y in range(by, min(by + bh, h)):
+                for x in range(bx, min(bx + bw, w)):
+                    o = (y * w + x) * 4
+                    if ds[o + 3]:
+                        s += abs(ds[o] - small[o]) + abs(ds[o + 1] - small[o + 1]) + abs(ds[o + 2] - small[o + 2])
+                        n += 3
+            if n:
+                blocks.append(s / n)
+    a, b = luma(ds, w, h), luma(small, w, h)
+    gd = ge = n = 0
+    for y in range(h - 1):
+        for x in range(w - 1):
+            i = y * w + x
+            if ds[4 * i + 3]:
+                for j in (i + 1, i + w):
+                    gd += abs((a[j] - a[i]) - (b[j] - b[i]))
+                    ge += abs(a[j] - a[i])
+                    n += 1
+    ratio = (gd / n) / ((ge / n) + 2.0) if n else 0.0
+    return err, max(blocks) if blocks else 0.0, ratio
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument('iso')
