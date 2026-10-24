@@ -199,11 +199,23 @@ pub unsafe extern "C" fn arm_set_user_reg(c: *mut Cpu, n: c_int, v: u32) {
     }
 }
 
+/// How often the hot service calls ran (a diagnostic for the app's status line): polls, calls
+/// through registers, interpreted instructions.
+pub static POLLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static CALLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static INTERPRETED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub fn counters() -> (u64, u64, u64) {
+    use std::sync::atomic::Ordering::Relaxed;
+    (POLLS.load(Relaxed), CALLS.load(Relaxed), INTERPRETED.load(Relaxed))
+}
+
 // ---- calls through registers ---------------------------------------------------------------
 /// A call to `key` through a register: an entry of a module, else the code there is
 /// interpreted (code no module holds: decrypted, copied at run time).
 #[no_mangle]
 pub unsafe extern "C" fn arm_call(c: *mut Cpu, key: u32) {
+    CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     match machine(|m| m.lookup((*c).cpu, key)) {
         Some(f) => f(c),
         None => crate::interp::interpret(&mut *c, key),
@@ -223,6 +235,7 @@ pub unsafe extern "C" fn arm_jump(c: *mut Cpu, key: u32) {
 
 #[no_mangle]
 pub unsafe extern "C" fn arm_poll(c: *mut Cpu) {
+    POLLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     if machine(|m| m.sched.active) {
         crate::sched::poll(&mut *c)
     } else {

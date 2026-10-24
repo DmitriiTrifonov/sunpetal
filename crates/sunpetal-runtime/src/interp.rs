@@ -1078,6 +1078,7 @@ impl<'a> Interp<'a> {
             self.pc &= !3;
         }
         loop {
+            crate::services::INTERPRETED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             self.flow = Flow::Next;
             let size;
             if self.t {

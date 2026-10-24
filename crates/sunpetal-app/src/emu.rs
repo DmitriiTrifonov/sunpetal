@@ -72,6 +72,8 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     let stats = std::env::var_os("SUNPETAL_STATS").is_some();
     let (mut counted, mut since) = (0u32, Instant::now());
     let (mut shown, mut shown_since) = (0u32, Instant::now());
+    let (mut t_run, mut t_grab) = (Duration::ZERO, Duration::ZERO);
+    let mut prev = sunpetal_runtime::services::counters();
     let mut last_flush = Instant::now();
     while !shared.quit.load(Ordering::Relaxed) {
         if shared.paused.load(Ordering::Relaxed) {
@@ -85,15 +87,36 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         }
         nds::set_scale(shared.scale.load(Ordering::Relaxed));
         nds::set_draw(true);
+        let t0 = Instant::now();
         if !nds::run_frame() {
             break;
         }
+        let t1 = Instant::now();
         *shared.frame.lock().unwrap() = Some(nds::screens_rgba());
+        t_run += t1 - t0;
+        t_grab += t1.elapsed();
         counted += 1;
         shown += 1;
         if shown_since.elapsed() >= Duration::from_secs(1) {
             let fps = shown as f64 / shown_since.elapsed().as_secs_f64();
-            *shared.status.lock().unwrap() = format!("DS frame {}, {:.0} fps", nds::vblanks(), fps);
+            let c = sunpetal_runtime::services::counters();
+            let per = |a: u64, b: u64| (a - b) as f64 / shown as f64;
+            *shared.status.lock().unwrap() = format!(
+                "DS frame {}, {:.0} fps\nrun {:.0} ms/frame, picture {:.1} ms\nper frame: polls {:.0}\ncalls {:.0}, interpreted {:.0}",
+                nds::vblanks(),
+                fps,
+                t_run.as_secs_f64() * 1000.0 / shown as f64,
+                t_grab.as_secs_f64() * 1000.0 / shown as f64,
+                per(c.0, prev.0),
+                per(c.1, prev.1),
+                per(c.2, prev.2)
+            );
+            if stats {
+                eprintln!("{}", shared.status.lock().unwrap());
+            }
+            prev = c;
+            t_run = Duration::ZERO;
+            t_grab = Duration::ZERO;
             shown = 0;
             shown_since = Instant::now();
         }
