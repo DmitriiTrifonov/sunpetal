@@ -2,6 +2,7 @@
 //! device, played with the keyboard, a pad and the mouse, set up in a menu.
 //!
 //!     sunpetal-app ROM.nds [--out DIR] [--save FILE] [--mute] [--res N] [--menu]
+//!                          [--dump-textures DIR] [--texture-pack DIR]
 //!
 //! F1 or Esc: the settings menu (video, sound, keys, profiles). Hotkeys: F2 changes the layout, F3
 //! the filter, F4 and F5 the 3D's internal resolution (1-8 times the DS's), F11 full screen, Tab
@@ -371,6 +372,7 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let mut rom: Option<PathBuf> = None;
     let (mut out, mut save, mut mute, mut res, mut menu) = (None, None, false, None::<usize>, false);
+    let (mut dump, mut pack) = (None::<PathBuf>, None::<PathBuf>);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--out" => out = args.next().map(PathBuf::from),
@@ -378,6 +380,8 @@ fn main() {
             "--res" => res = args.next().and_then(|v| v.parse().ok()),
             "--mute" => mute = true,
             "--menu" => menu = true,
+            "--dump-textures" => dump = args.next().map(PathBuf::from),
+            "--texture-pack" => pack = args.next().map(PathBuf::from),
             _ if rom.is_none() => rom = Some(PathBuf::from(a)),
             _ => {
                 eprintln!("unknown argument {}", a);
@@ -400,6 +404,8 @@ fn main() {
     let mut cfg = Config::new(&rom);
     cfg.out = out.unwrap_or_else(|| rom.parent().map(|p| p.to_path_buf()).unwrap_or_default());
     cfg.save = save;
+    cfg.dump_textures = dump;
+    cfg.texture_pack = pack;
     let shared = Shared::new();
     shared.scale.store(settings.video.res, Ordering::Relaxed);
     // the stream must outlive the machine's use of the ring

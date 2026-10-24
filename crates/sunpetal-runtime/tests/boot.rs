@@ -66,3 +66,56 @@ fn reaches_the_save_data_menu() {
     // the music has started by then (it is silent for the first twenty seconds)
     assert!(loud > 10_000, "no sound by VBlank 1500 ({} loud samples)", loud);
 }
+
+/// One run of the game to `frames` VBlanks (START pressed through the logos), with only the last
+/// frame drawn, its picture saved; in a thread of its own, since the runtime keeps its state per
+/// thread. Returns the picture's bytes.
+fn picture_at(cfg: Config, frames: u64, shot: PathBuf) -> Vec<u8> {
+    let shot2 = shot.clone();
+    std::thread::Builder::new()
+        .stack_size(64 << 20)
+        .spawn(move || {
+            let mut cfg = cfg;
+            cfg.stop_vblanks = frames;
+            cfg.input = (400..frames).step_by(100).map(|v| format!("{}:START", v)).collect::<Vec<_>>().join(",");
+            nds::boot(cfg).expect("boot");
+            loop {
+                nds::set_draw(nds::vblanks() + 1 == frames);
+                if !nds::run_frame() {
+                    break;
+                }
+                if nds::vblanks() == frames {
+                    nds::screenshot(&shot2).expect("screenshot");
+                }
+            }
+        })
+        .unwrap()
+        .join()
+        .expect("the run");
+    std::fs::read(&shot).expect("the picture")
+}
+
+/// The texture dump and the texture pack agree: a pack of what the game dumped draws the same
+/// picture as no pack, so the keys, the names and the replacement path all hold together.
+#[test]
+fn a_pack_made_of_the_dump_changes_nothing() {
+    let Some(rom) = std::env::var_os("SUNPETAL_ROM").map(PathBuf::from) else {
+        eprintln!("skipped: SUNPETAL_ROM is not set");
+        return;
+    };
+    let tmp = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("textures");
+    let _ = std::fs::remove_dir_all(&tmp);
+    let dump = tmp.join("dump");
+    let mut cfg = Config::new(&rom);
+    cfg.out = tmp.join("a");
+    cfg.dump_textures = Some(dump.clone());
+    let plain = picture_at(cfg, 2400, tmp.join("a.png"));
+    std::thread::sleep(std::time::Duration::from_millis(500)); // the dump's writer threads
+    let n = std::fs::read_dir(&dump).map(|d| d.flatten().filter(|e| e.path().extension().map_or(false, |x| x == "png")).count()).unwrap_or(0);
+    assert!(n >= 5, "the 3D scene at VBlank 2400 uses textures ({} dumped)", n);
+    let mut cfg = Config::new(&rom);
+    cfg.out = tmp.join("b");
+    cfg.texture_pack = Some(dump);
+    let packed = picture_at(cfg, 2400, tmp.join("b.png"));
+    assert!(plain == packed, "a pack of the dump must draw the same picture");
+}

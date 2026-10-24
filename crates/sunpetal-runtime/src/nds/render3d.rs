@@ -17,6 +17,9 @@
 //! A pixel of the picture is RGB666 (r bits 0-5, g 6-11, b 12-17) and alpha in bits 18-22 (0: no
 //! pixel, the 2D layers under show), as the 2D compositor takes it.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 /// A polygon's vertex after clipping.
 #[derive(Clone, Copy, Default, Debug)]
 pub(super) struct GxVertex {
@@ -75,6 +78,47 @@ pub(super) struct Job {
     pub tex: Vec<u8>,
     /// The texture-palette slots, 96 KiB.
     pub texpal: Vec<u8>,
+    /// The key of each (TEXIMAGE_PARAM, PLTT_BASE) the frame uses (`texpack`).
+    pub keys: HashMap<(u32, u32), TexKey>,
+    /// The replacement images by key.
+    pub pack: Arc<HashMap<TexKey, Arc<Image>>>,
+}
+
+/// What a texture is, for the texture packs: hashes of its data (with its format, size and
+/// transparency flag) and of the palette it is read through (0 for direct colour).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub(super) struct TexKey {
+    pub data: u64,
+    pub pal: u64,
+    pub fmt: u8,
+    pub w: u16,
+    pub h: u16,
+}
+
+/// An RGBA picture.
+pub(super) struct Image {
+    pub w: usize,
+    pub h: usize,
+    pub rgba: Vec<u8>,
+}
+
+/// A texel of a replacement image where the DS's texture coordinates (s, t in texels of the
+/// original) point, wrapped as the texture's flags say: (r, g, b) in 6 bits, alpha in 5.
+fn sample_image(img: &Image, tex: u32, s: f32, t: f32) -> (u32, u32, u32, u32) {
+    let (ow, oh) = ((8u32 << ((tex >> 20) & 7)) as f32, (8u32 << ((tex >> 23) & 7)) as f32);
+    let wrap = |v: i32, size: i32, repeat: bool, flip: bool| -> usize {
+        let r = if repeat {
+            let m = v.rem_euclid(size);
+            if flip && v.div_euclid(size) & 1 != 0 { size - 1 - m } else { m }
+        } else {
+            v.clamp(0, size - 1)
+        };
+        r as usize
+    };
+    let x = wrap((s / ow * img.w as f32).floor() as i32, img.w as i32, tex & 0x10000 != 0, tex & 0x40000 != 0);
+    let y = wrap((t / oh * img.h as f32).floor() as i32, img.h as i32, tex & 0x20000 != 0, tex & 0x80000 != 0);
+    let p = &img.rgba[(y * img.w + x) * 4..(y * img.w + x) * 4 + 4];
+    ((p[0] >> 2) as u32, (p[1] >> 2) as u32, (p[2] >> 2) as u32, (p[3] as u32 * 31 + 127) / 255)
 }
 
 /// What `render` leaves out, by bit of the mask it returns.
@@ -93,16 +137,23 @@ fn rgb555(c: u16) -> (u32, u32, u32) {
     (c5to6(c as u32 & 31), c5to6(c as u32 >> 5 & 31), c5to6(c as u32 >> 10 & 31))
 }
 
-fn pal_color(job: &Job, off: usize) -> u16 {
-    if off + 1 < job.texpal.len() { u16::from_le_bytes([job.texpal[off], job.texpal[off + 1]]) } else { 0 }
+/// The texture memory a texel is read from: the texture slots and the texture palettes.
+#[derive(Clone, Copy)]
+pub(super) struct Mem<'a> {
+    pub tex: &'a [u8],
+    pub pal: &'a [u8],
 }
 
-fn tex8(job: &Job, off: usize) -> u8 {
-    job.tex.get(off & 0x7FFFF).copied().unwrap_or(0)
+fn pal_color(m: &Mem, off: usize) -> u16 {
+    if off + 1 < m.pal.len() { u16::from_le_bytes([m.pal[off], m.pal[off + 1]]) } else { 0 }
+}
+
+fn tex8(m: &Mem, off: usize) -> u8 {
+    m.tex.get(off & 0x7FFFF).copied().unwrap_or(0)
 }
 
 /// One texel: (r, g, b) in 6 bits and alpha in 5.
-fn sample(job: &Job, tex: u32, pal: u32, s: f32, t: f32) -> (u32, u32, u32, u32) {
+pub(super) fn sample(job: &Mem, tex: u32, pal: u32, s: f32, t: f32) -> (u32, u32, u32, u32) {
     let fmt = (tex >> 26) & 7;
     let w = 8i32 << ((tex >> 20) & 7);
     let h = 8i32 << ((tex >> 23) & 7);
@@ -236,7 +287,7 @@ pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
     if job.disp3dcnt & 0x10 != 0 {
         notes |= 1 << 1;
     }
-    let probe: Option<(usize, usize)> = std::env::var("SUNPETAL_3D_PIXEL").ok().and_then(|v| { let mut it = v.split(','); Some((it.next()?.parse().ok()?, it.next()?.parse().ok()?)) });
+    let mem = Mem { tex: &job.tex, pal: &job.texpal };
     let texture_on = job.disp3dcnt & 1 != 0;
     let highlight = job.disp3dcnt & 2 != 0;
     let alpha_test = job.disp3dcnt & 4 != 0;
@@ -249,6 +300,9 @@ pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
         let mode = (attr >> 4) & 3;
         let fmt = (p.tex >> 26) & 7;
         let textured = texture_on && fmt != 0;
+        // a texture the pack replaces: sampled from its image
+        let replacement: Option<&Image> =
+            job.keys.get(&(p.tex, p.pal)).and_then(|k| job.pack.get(k)).map(|i| &**i);
         let eq_depth = attr & 0x4000 != 0;
         let write_trans_depth = attr & 0x800 != 0;
         let wire = polyalpha == 0;
@@ -294,7 +348,10 @@ pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
             }
             let (mut or, mut og, mut ob, mut oa) = (r, g, b, va);
             if textured {
-                let (tr, tg, tb, ta) = sample(job, p.tex, p.pal, s, tt);
+                let (tr, tg, tb, ta) = match replacement {
+                    Some(img) => sample_image(img, p.tex, s, tt),
+                    None => sample(&mem, p.tex, p.pal, s, tt),
+                };
                 if mode == 1 {
                     // decal: the texture over the vertex colour by its alpha
                     if ta == 0 {
@@ -328,13 +385,6 @@ pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
             }
             if oa == 0 || (alpha_test && oa <= job.alpha_ref as u32) {
                 return;
-            }
-            if probe == Some((x, y)) {
-                for ty in 0..8 {
-                    let row: Vec<String> = (0..8).map(|tx| { let c = sample(job, p.tex, p.pal, tx as f32 * 8.0 + 0.5, ty as f32 * 8.0 + 0.5); format!("{:02}.{:02}.{:02}/{}", c.0, c.1, c.2, c.3) }).collect();
-                    eprintln!("  texel row {}: {}", ty * 8, row.join(" "));
-                }
-                eprintln!("probe {},{}: poly attr {:08X} tex {:08X} pal {:X} st {:.2},{:.2} -> rgb {} {} {} a {} (vertex {} {} {} a {})", x, y, attr, p.tex, p.pal, s, tt, or, og, ob, oa, r, g, b, va);
             }
             if oa >= 31 {
                 t.color[i] = or | og << 6 | ob << 12;

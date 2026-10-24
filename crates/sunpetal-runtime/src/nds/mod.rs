@@ -16,6 +16,7 @@ mod input;
 mod mmio;
 mod render3d;
 mod sound;
+mod texpack;
 mod spi;
 mod system;
 mod video;
@@ -50,6 +51,10 @@ pub struct Config {
     pub stop_vblanks: u64,
     /// Log the machine's events.
     pub trace: bool,
+    /// Write each texture the game draws as a PNG into this folder (`texpack`).
+    pub dump_textures: Option<PathBuf>,
+    /// A folder of PNG replacements for textures, named by their keys (`texpack`).
+    pub texture_pack: Option<PathBuf>,
     /// Ticks a safe point stands for on the ARM9 and on the ARM7.
     pub ticks9: u64,
     pub ticks7: u64,
@@ -66,6 +71,8 @@ impl Config {
             save_size: 65536,
             stop_vblanks: 0,
             trace: false,
+            dump_textures: None,
+            texture_pack: None,
             ticks9: 16,
             ticks7: 24,
             input: String::new(),
@@ -125,6 +132,7 @@ pub struct Nds {
     gpu: gpu2d::Gpu2d,
     gx: gx::Gx,
     snd: sound::Sound,
+    texpack: texpack::TexPack,
     /// The 3D picture the rendering engine drew last, 256x192 (`render3d`).
     frame3d: Vec<u32>,
     /// The scale it was drawn at.
@@ -203,6 +211,7 @@ impl Nds {
             gpu: gpu2d::Gpu2d::new(),
             gx: gx::Gx::new(),
             snd: sound::Sound::new(),
+            texpack: texpack::TexPack::new(),
             frame3d: vec![0; 256 * 192],
             frame3d_scale: 1,
             scale: 1,
@@ -373,6 +382,10 @@ pub fn boot(cfg: Config) -> Result<(), String> {
     });
     nds(|n| -> Result<(), String> {
         n.script = input::parse(&n.cfg.input)?;
+        n.texpack.dump = n.cfg.dump_textures.clone();
+        if let Some(dir) = n.cfg.texture_pack.clone() {
+            n.load_pack(&dir)?;
+        }
         n.cart_open()?;
         n.mmio_reset();
         n.spi_reset();

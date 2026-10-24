@@ -49,6 +49,11 @@ pub(super) struct Video {
     vram: Vec<u8>,
     cnt: [u8; 9],
     map: Vec<Vec<Page>>,
+    /// Counts the changes of what the 3D engine reads as textures (a write to a bank mapped as
+    /// texture or texture palette, a new mapping): caches of what a texture is hold while it stays.
+    pub(super) tex_gen: u64,
+    /// The banks mapped as texture or texture palette.
+    bank_tex: [bool; 9],
 }
 
 impl Video {
@@ -61,6 +66,8 @@ impl Video {
             vram: vec![0; VRAM_SIZE],
             cnt: [0; 9],
             map: vec![vec![Page::default(); 41]; NAREAS],
+            tex_gen: 0,
+            bank_tex: [false; 9],
         }
     }
 
@@ -86,6 +93,8 @@ impl Video {
             a.fill(Page::default());
         }
         let mut stat7 = 0u8;
+        self.bank_tex = [false; 9];
+        self.tex_gen += 1;
         for b in 0..9usize {
             let v = self.cnt[b];
             if v & 0x80 == 0 {
@@ -96,6 +105,9 @@ impl Video {
             if mst == 0 {
                 self.map_bank(VRAM_LCDC, BANK_OFF[b], b);
                 continue;
+            }
+            if mst == 3 && b <= 6 {
+                self.bank_tex[b] = true; // A-D textures, E-G texture palettes
             }
             match b {
                 0 | 1 => match mst {
@@ -261,6 +273,11 @@ impl Nds {
         self.gpu2d_line(0);
     }
 
+    /// The generation of the texture memory.
+    pub(super) fn tex_generation(&self) -> u64 {
+        self.video.tex_gen
+    }
+
     // ---- VRAM ---------------------------------------------------------------------------------
     fn set_vram_stat7(&mut self, stat7: u8) {
         let cur = self.io_reg16(7, 0x0400_0240) & 0xFF00;
@@ -339,6 +356,11 @@ impl Nds {
         while let Some(o) = self.video.page(cpu, a, k) {
             for i in 0..size {
                 self.video.vram[o + i] = (v >> (8 * i)) as u8;
+            }
+            if let Some(b) = BANK_OFF.iter().rposition(|&off| off <= o) {
+                if self.video.bank_tex[b] {
+                    self.video.tex_gen += 1;
+                }
             }
             any = true;
             k += 1;

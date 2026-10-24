@@ -1120,7 +1120,6 @@ impl Nds {
         if !g.render_manual {
             polys[nopaque..].sort_by_key(|p| p.sortkey);
         }
-        let reg32 = |o: usize| u32::from_le_bytes([g.regs[o], g.regs[o + 1], g.regs[o + 2], g.regs[o + 3]]);
         let mut fog_table = [0u8; 32];
         fog_table.copy_from_slice(&g.regs[0x360 - 0x320..0x380 - 0x320]);
         let mut toon = [0u16; 32];
@@ -1131,6 +1130,11 @@ impl Nds {
         for (i, e) in edge.iter_mut().enumerate() {
             *e = self.gx_r16(0x0400_0330 + 2 * i as u32);
         }
+        let (tex_mem, texpal_mem) = (self.vram_copy(super::video::VRAM_TEX, 0x80000), self.vram_copy(super::video::VRAM_TEXPAL, 0x18000));
+        let texture_on = self.io_reg16(9, 0x0400_0060) & 1 != 0;
+        let keys = self.texture_keys(&polys, &super::render3d::Mem { tex: &tex_mem, pal: &texpal_mem }, texture_on);
+        let g = &self.gx;
+        let reg32 = |o: usize| u32::from_le_bytes([g.regs[o], g.regs[o + 1], g.regs[o + 2], g.regs[o + 3]]);
         let job = Job {
             verts: g.render.verts.clone(),
             polys,
@@ -1144,8 +1148,10 @@ impl Nds {
             fog_offset: self.gx_r16(0x0400_035C),
             fog_table,
             toon,
-            tex: self.vram_copy(super::video::VRAM_TEX, 0x80000),
-            texpal: self.vram_copy(super::video::VRAM_TEXPAL, 0x18000),
+            tex: tex_mem,
+            texpal: texpal_mem,
+            keys,
+            pack: self.texpack.pack.clone(),
         };
         if std::env::var_os("SUNPETAL_3D_DEBUG").is_some() {
             eprintln!("3D frame: {} polys, wbuf {}, disp3dcnt {:04X}, clear {:08X}", job.polys.len(), job.wbuffer, job.disp3dcnt, job.clear_color);
