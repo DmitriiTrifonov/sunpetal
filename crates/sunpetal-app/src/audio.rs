@@ -3,6 +3,7 @@
 //! linearly, its speed nudged to keep the ring about a tenth of a second full (the machine runs on
 //! the wall clock, the device on its own).
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -13,11 +14,17 @@ const TARGET: f64 = 3200.0;
 
 pub struct Ring {
     q: Mutex<VecDeque<i16>>,
+    /// The volume (an f32's bits, 0.0-1.0); 0 is mute.
+    volume: AtomicU32,
 }
 
 impl Ring {
     fn new() -> Arc<Ring> {
-        Arc::new(Ring { q: Mutex::new(VecDeque::new()) })
+        Arc::new(Ring { q: Mutex::new(VecDeque::new()), volume: AtomicU32::new(1.0f32.to_bits()) })
+    }
+
+    pub fn set_volume(&self, v: f32) {
+        self.volume.store(v.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
     }
 
     /// Interleaved stereo samples from the machine. Past half a second the oldest go (the device
@@ -49,6 +56,7 @@ pub fn open() -> Result<(Arc<Ring>, cpal::Stream), String> {
         .build_output_stream(
             cfg.config(),
             move |out: &mut [f32], _| {
+                let vol = f32::from_bits(r.volume.load(Ordering::Relaxed));
                 let mut q = r.q.lock().unwrap();
                 let fill = (q.len() / 2) as f64;
                 // too empty: slower; too full: faster
@@ -71,7 +79,7 @@ pub fn open() -> Result<(Arc<Ring>, cpal::Stream), String> {
                         last
                     };
                     for (i, s) in frame.iter_mut().enumerate() {
-                        *s = if i == 0 { l / 32768.0 } else if i == 1 { rr / 32768.0 } else { 0.0 };
+                        *s = vol * if i == 0 { l / 32768.0 } else if i == 1 { rr / 32768.0 } else { 0.0 };
                     }
                 }
             },

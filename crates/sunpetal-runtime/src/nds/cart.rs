@@ -34,6 +34,8 @@ pub(super) struct Cart {
     bk_addr: u32,
     bk_n: u32,
     bk_sel: bool,
+    /// The first bytes of the command being sent (for the trace).
+    bk_head: [u8; 5],
 }
 
 impl Cart {
@@ -56,6 +58,7 @@ impl Cart {
             bk_addr: 0,
             bk_n: 0,
             bk_sel: false,
+            bk_head: [0; 5],
         }
     }
 }
@@ -100,16 +103,35 @@ impl Nds {
         self.cart.chip_id
     }
 
+    fn write_save(&mut self) -> Result<(), String> {
+        if !self.cart.dirty {
+            return Ok(());
+        }
+        let path = self.cart.save_path.clone();
+        if let Some(d) = path.parent() {
+            let _ = fs::create_dir_all(d);
+        }
+        // whole, then moved into place: a kill in the middle leaves the old file
+        let tmp = path.with_extension("sav.tmp");
+        fs::write(&tmp, &self.cart.save).map_err(|e| format!("cannot write {}: {}", tmp.display(), e))?;
+        fs::rename(&tmp, &path).map_err(|e| format!("cannot move {} into place: {}", tmp.display(), e))?;
+        self.cart.dirty = false;
+        Ok(())
+    }
+
     pub(super) fn cart_save(&mut self) {
         if !self.cart.dirty {
             return;
         }
-        if let Some(d) = self.cart.save_path.parent() {
-            let _ = fs::create_dir_all(d);
-        }
-        match fs::write(&self.cart.save_path, &self.cart.save) {
+        match self.write_save() {
             Ok(()) => note(&format!("backup memory written to {}", self.cart.save_path.display())),
-            Err(e) => note(&format!("cannot write {}: {}", self.cart.save_path.display(), e)),
+            Err(e) => note(&e),
+        }
+    }
+
+    pub(super) fn cart_save_quiet(&mut self) {
+        if let Err(e) = self.write_save() {
+            note(&e);
         }
     }
 
@@ -207,6 +229,9 @@ impl Nds {
         }
         let ab = self.addr_bytes();
         let c = &mut self.cart;
+        if (c.bk_n as usize) < c.bk_head.len() {
+            c.bk_head[c.bk_n as usize] = v;
+        }
         let mut out = 0xFF;
         let cmd = if ab == 1 { c.bk_cmd & 0xF7 } else { c.bk_cmd };
         match cmd {
@@ -252,6 +277,10 @@ impl Nds {
 
     fn backup_deselect(&mut self) {
         let ab = self.addr_bytes();
+        if self.cart.bk_sel {
+            let (cmd, addr, n, head) = (self.cart.bk_cmd, self.cart.bk_addr, self.cart.bk_n, self.cart.bk_head);
+            self.trace(|| format!("backup: command {:02X}, address {:06X} after {} bytes, head {:02X?}", cmd, addr, n, head));
+        }
         let c = &mut self.cart;
         if c.bk_sel && (c.bk_cmd == 0x02 || c.bk_cmd == 0x0A || ((c.bk_cmd & 0xF7) == 0x02 && ab == 1)) {
             c.bk_status &= !2; // a write ends: the latch clears

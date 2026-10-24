@@ -1,5 +1,5 @@
 //! The GPU: the two screens as separate 256x192 textures, drawn as quads wherever the layout puts
-//! them, at the window's resolution (nearest or linear filtering).
+//! them, at the window's resolution (nearest or linear filtering); and the settings menu over them.
 use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
@@ -45,6 +45,10 @@ struct Screen {
 }
 
 pub struct Gfx {
+    window: Arc<Window>,
+    egui_ctx: egui::Context,
+    egui_state: egui_winit::State,
+    egui_renderer: egui_wgpu::Renderer,
     bgl: wgpu::BindGroupLayout,
     nearest: wgpu::Sampler,
     linear_sampler: wgpu::Sampler,
@@ -101,6 +105,7 @@ fn make_screen(
 impl Gfx {
     pub fn new(window: Arc<Window>) -> Result<Gfx, String> {
         let size = window.inner_size();
+        let w = window.clone();
         let instance = wgpu::Instance::default();
         let surface = instance.create_surface(window).map_err(|e| e.to_string())?;
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -195,7 +200,17 @@ impl Gfx {
         };
         let (nearest, linear) = (sampler(wgpu::FilterMode::Nearest), sampler(wgpu::FilterMode::Linear));
         let screens = [make_screen(&device, &bgl, &nearest, &linear, 1, "upper"), make_screen(&device, &bgl, &nearest, &linear, 1, "lower")];
-        Ok(Gfx { bgl, nearest, linear_sampler: linear, scale: 1, surface, device, queue, config, pipeline, screens, linear: true })
+        let egui_ctx = egui::Context::default();
+        let egui_state = egui_winit::State::new(
+            egui_ctx.clone(),
+            egui::ViewportId::ROOT,
+            &*w,
+            Some(w.scale_factor() as f32),
+            None,
+            Some(device.limits().max_texture_dimension_2d as usize),
+        );
+        let egui_renderer = egui_wgpu::Renderer::new(&device, format, egui_wgpu::RendererOptions::default());
+        Ok(Gfx { window: w, egui_ctx, egui_state, egui_renderer, bgl, nearest, linear_sampler: linear, scale: 1, surface, device, queue, config, pipeline, screens, linear: true })
     }
 
     pub fn resize(&mut self, w: u32, h: u32) {
@@ -233,7 +248,13 @@ impl Gfx {
         }
     }
 
-    pub fn draw(&mut self, layout: &Layout) {
+    /// A window event for the menu. True if the menu used it (the game should not).
+    pub fn ui_event(&mut self, ev: &winit::event::WindowEvent) -> bool {
+        self.egui_state.on_window_event(&self.window, ev).consumed
+    }
+
+    /// Draws the screens, then, with `menu`, the menu over them.
+    pub fn draw(&mut self, layout: &Layout, menu: Option<&mut dyn FnMut(&egui::Context)>) {
         use wgpu::CurrentSurfaceTexture as T;
         let frame = match self.surface.get_current_texture() {
             T::Success(f) | T::Suboptimal(f) => f,
@@ -277,7 +298,48 @@ impl Gfx {
                 }
             }
         }
-        self.queue.submit(Some(enc.finish()));
+        let mut buffers = Vec::new();
+        let mut freed = Vec::new();
+        if let Some(menu) = menu {
+            let raw = self.egui_state.take_egui_input(&self.window);
+            let out = self.egui_ctx.run_pass(raw, |ctx| menu(ctx));
+            self.egui_state.handle_platform_output(&self.window, out.platform_output);
+            let jobs = self.egui_ctx.tessellate(out.shapes, out.pixels_per_point);
+            for (id, deltas) in &out.textures_delta.set {
+                for delta in deltas {
+                    self.egui_renderer.update_texture(&self.device, &self.queue, *id, delta);
+                }
+            }
+            let sd = egui_wgpu::ScreenDescriptor {
+                size_in_pixels: [self.config.width, self.config.height],
+                pixels_per_point: out.pixels_per_point,
+            };
+            buffers = self.egui_renderer.update_buffers(&self.device, &self.queue, &mut enc, &jobs, &sd);
+            {
+                let mut pass = enc
+                    .begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("menu"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &view,
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                        multiview_mask: None,
+                    })
+                    .forget_lifetime();
+                self.egui_renderer.render(&mut pass, &jobs, &sd);
+            }
+            freed = out.textures_delta.free.iter().copied().collect();
+        }
+        buffers.push(enc.finish());
+        self.queue.submit(buffers);
+        for id in &freed {
+            self.egui_renderer.free_texture(id);
+        }
         self.queue.present(frame);
     }
 }

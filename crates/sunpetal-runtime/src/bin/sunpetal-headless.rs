@@ -3,7 +3,7 @@
 //! the same ROM must be linked in (docs/ABI.md).
 //!
 //!     sunpetal-headless ROM.nds [--vblanks N] [--trace] [--out DIR] [--save FILE]
-//!                              [--shots V,V,...] [--shot-every N] [--input SCRIPT] [--wav FILE] [--scale N]
+//!                              [--save-size BYTES] [--shots V,V,...] [--shot-every N] [--input SCRIPT] [--wav FILE] [--scale N]
 //!
 //! Both screens are written as PNGs (DIR/v<N>.png) at the VBlanks asked for; --wav writes the sound
 //! (16-bit stereo, 32 728 Hz); --draw-all draws every frame (for timing).
@@ -17,7 +17,7 @@ fn main() -> ExitCode {
     let mut rest = Vec::new();
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--vblanks" | "--out" | "--save" | "--shots" | "--shot-every" | "--input" | "--wav" | "--scale" => rest.push((a, args.next().unwrap_or_default())),
+            "--vblanks" | "--out" | "--save" | "--save-size" | "--shots" | "--shot-every" | "--input" | "--wav" | "--scale" => rest.push((a, args.next().unwrap_or_default())),
             "--trace" | "--draw-all" => rest.push((a, String::new())),
             _ if cfg.is_none() => cfg = Some(Config::new(a)),
             _ => {
@@ -38,6 +38,7 @@ fn main() -> ExitCode {
         match k.as_str() {
             "--vblanks" => cfg.stop_vblanks = v.parse().unwrap_or(0),
             "--out" => cfg.out = v.into(),
+            "--save-size" => cfg.save_size = v.parse().unwrap_or(8192),
             "--input" => cfg.input = v,
             "--scale" => scale = v.parse().unwrap_or(1),
             "--wav" => wav = Some(v),

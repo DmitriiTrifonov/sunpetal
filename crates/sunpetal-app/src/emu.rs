@@ -29,6 +29,8 @@ pub struct Shared {
     pub quit: AtomicBool,
     /// Run without waiting for the clock.
     pub fast: AtomicBool,
+    /// The machine waits (the menu is open).
+    pub paused: AtomicBool,
     /// The emulation stopped (and why).
     pub stopped: Mutex<Option<String>>,
 }
@@ -41,6 +43,7 @@ impl Shared {
             scale: AtomicUsize::new(2),
             quit: AtomicBool::new(false),
             fast: AtomicBool::new(false),
+            paused: AtomicBool::new(false),
             stopped: Mutex::new(None),
         })
     }
@@ -64,7 +67,13 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     let mut next = Instant::now();
     let stats = std::env::var_os("SUNPETAL_STATS").is_some();
     let (mut counted, mut since) = (0u32, Instant::now());
+    let mut last_flush = Instant::now();
     while !shared.quit.load(Ordering::Relaxed) {
+        if shared.paused.load(Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(10));
+            next = Instant::now();
+            continue;
+        }
         {
             let i = shared.input.lock().unwrap();
             nds::set_input(i.keys, i.pen);
@@ -76,6 +85,10 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         }
         *shared.frame.lock().unwrap() = Some(nds::screens_rgba());
         counted += 1;
+        if last_flush.elapsed() >= Duration::from_secs(5) {
+            nds::flush_save();
+            last_flush = Instant::now();
+        }
         if stats && since.elapsed() >= Duration::from_secs(2) {
             eprintln!("{:.1} frames/s (DS frame {})", counted as f64 / since.elapsed().as_secs_f64(), nds::vblanks());
             counted = 0;

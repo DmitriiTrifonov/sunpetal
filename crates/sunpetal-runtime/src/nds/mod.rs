@@ -43,7 +43,8 @@ pub struct Config {
     pub out: PathBuf,
     /// The backup memory's file (default: out/<rom>.sav).
     pub save: Option<PathBuf>,
-    /// Its size when the file does not exist yet (the chip's type).
+    /// Its size when the file does not exist yet (the chip's type): 64 KiB, which serves the
+    /// EEPROMs with a 2-byte address (8 KiB and 64 KiB) alike. An existing file keeps its own size.
     pub save_size: usize,
     /// Stop after this many VBlanks (0: never).
     pub stop_vblanks: u64,
@@ -62,7 +63,7 @@ impl Config {
             rom: rom.into(),
             out: PathBuf::from("build/run"),
             save: None,
-            save_size: 8192,
+            save_size: 65536,
             stop_vblanks: 0,
             trace: false,
             ticks9: 16,
@@ -520,9 +521,15 @@ pub fn report() {
     }
 }
 
-/// Writes the backup memory if it changed.
+/// Writes the backup memory if it changed (the file is written whole, then moved into place).
 pub fn finish() {
     nds(|n| n.cart_save());
+}
+
+/// The same, for now and then while the game runs: a game that is closed or killed keeps what it
+/// had saved.
+pub fn flush_save() {
+    nds(|n| n.cart_save_quiet());
 }
 
 pub(crate) fn fatal(msg: String) -> ! {
