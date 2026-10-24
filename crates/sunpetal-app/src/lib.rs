@@ -418,7 +418,8 @@ impl ApplicationHandler for App {
                                 if pad_on {
                                     let info = match stopped_msg {
                                         Some(why) => format!("stopped: {}", why),
-                                        None => shared.status.lock().unwrap().clone(),
+                                        None if settings.video.show_stats => shared.status.lock().unwrap().clone(),
+                                        None => String::new(),
                                     };
                                     touchpad::paint(ctx, band, &held, &info);
                                 }

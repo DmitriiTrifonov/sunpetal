@@ -65,6 +65,7 @@ impl Menu {
                     }
                 });
                 ui.checkbox(&mut s.video.fullscreen, tx("Full screen (F11)", "Полный экран (F11)"));
+                ui.checkbox(&mut s.video.show_stats, tx("Show speed figures", "Показывать скорость"));
                 ui.horizontal(|ui| {
                     ui.label(tx("Texture pack folder:", "Папка пакета текстур:"));
                     ui.text_edit_singleline(&mut s.video.texture_pack);
