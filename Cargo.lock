@@ -100,6 +100,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc7eb209b1518d6bb87b283c20095f5228ecda460da70b44f0802523dea6da04"
 
 [[package]]
+name = "android_log-sys"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "84521a3cf562bc62942e294181d9eef17eb38ceb8c68677bc49f144e4c3d4f8d"
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2644,6 +2650,7 @@ checksum = "6637bab7722d379c8b41ba849228d680cc12d0a45ba1fa2b48f2a30577a06731"
 name = "sunpetal-app"
 version = "0.0.1"
 dependencies = [
+ "android_log-sys",
  "bytemuck",
  "cpal",
  "dirs",
@@ -2651,6 +2658,7 @@ dependencies = [
  "egui-wgpu",
  "egui-winit",
  "gilrs",
+ "libc",
  "pollster",
  "serde",
  "sunpetal-runtime",

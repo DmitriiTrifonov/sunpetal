@@ -5,6 +5,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+doctest = false
+
+[[bin]]
+name = "sunpetal-app"
+path = "src/main.rs"
+
 [dependencies]
 bytemuck = { version = "1.25.2", features = ["derive"] }
 cpal = "0.18.2"
@@ -20,3 +28,8 @@ sys-locale = "0.3.2"
 toml = "1.1.8"
 wgpu = "30.0.1"
 winit = "0.30.13"
+
+[target.'cfg(target_os = "android")'.dependencies]
+winit = { version = "0.30.13", features = ["android-native-activity"] }
+libc = "0.2"
+android_log-sys = "0.3"

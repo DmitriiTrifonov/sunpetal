@@ -111,7 +111,7 @@
 ## Этап 10. Платформы
 
 - [ ] macOS (Metal через MoltenVK или напрямую), Linux (Vulkan/GL), Windows (D3D12/Vulkan): CI-сборки
-- [ ] Android: NDK, Gradle, SAF для выбора ROM/пакетов, тач-управление, фоновые режимы
+- [ ] Android: сборка apk есть (`tools/android/build-apk.sh`, `docs/ANDROID.md`), на устройстве не проверена; не сделано: SAF для выбора ROM/пакетов, экранные кнопки, фоновые режимы
 - [ ] iOS: Xcode, нативный код без JIT (статический рекомп это допускает), загрузка ROM через Files, подпись; сторы (App Store) принимают такое с трудом, предусмотреть сайдлоад/AltStore
 - [ ] Упаковка: dmg/AppImage/exe-инсталлер/apk/ipa
 
