@@ -210,6 +210,12 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => {
                 self.poll_pads();
+                // the machine stopped (a failed boot, a fatal error): say so, do not sit black
+                if let Some(why) = self.shared.stopped.lock().unwrap().clone() {
+                    eprintln!("stopped: {}", why);
+                    el.exit();
+                    return;
+                }
                 if let Some(rgba) = self.shared.frame.lock().unwrap().take() {
                     if let Some(g) = &self.gfx {
                         g.upload(&rgba);
@@ -248,6 +254,10 @@ fn main() {
         eprintln!("usage: sunpetal-app ROM.nds [--out DIR] [--save FILE] [--mute] [--scale N]");
         std::process::exit(2);
     };
+    if !rom.is_file() {
+        eprintln!("{}: not a file (the ROM's path: sunpetal-app ROM.nds)", rom.display());
+        std::process::exit(2);
+    }
     let mut cfg = Config::new(&rom);
     if let Some(o) = out {
         cfg.out = o;
