@@ -74,6 +74,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     let (mut shown, mut shown_since) = (0u32, Instant::now());
     let (mut t_run, mut t_grab) = (Duration::ZERO, Duration::ZERO);
     let mut prev = sunpetal_runtime::services::counters();
+    let mut prev_t = nds::timing();
     let mut last_flush = Instant::now();
     while !shared.quit.load(Ordering::Relaxed) {
         if shared.paused.load(Ordering::Relaxed) {
@@ -100,21 +101,26 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         if shown_since.elapsed() >= Duration::from_secs(1) {
             let fps = shown as f64 / shown_since.elapsed().as_secs_f64();
             let c = sunpetal_runtime::services::counters();
+            let tm = nds::timing();
             let per = |a: u64, b: u64| (a - b) as f64 / shown as f64;
             *shared.status.lock().unwrap() = format!(
-                "DS frame {}, {:.0} fps\nrun {:.0} ms/frame, picture {:.1} ms\nper frame: polls {:.0}\ncalls {:.0}, interpreted {:.0}",
+                "DS frame {}, {:.0} fps\nrun {:.0} ms/frame, picture {:.1} ms\nper frame: polls {:.0}, calls {:.0}\nquanta {:.0}: guest {:.1} ms, hardware {:.1} ms, sound {:.1} ms",
                 nds::vblanks(),
                 fps,
                 t_run.as_secs_f64() * 1000.0 / shown as f64,
                 t_grab.as_secs_f64() * 1000.0 / shown as f64,
                 per(c.0, prev.0),
                 per(c.1, prev.1),
-                per(c.2, prev.2)
+                (tm.0 - prev_t.0) as f64 / shown as f64,
+                (tm.1 - prev_t.1) as f64 / 1e6 / shown as f64,
+                (tm.2 - prev_t.2) as f64 / 1e6 / shown as f64,
+                (tm.3 - prev_t.3) as f64 / 1e6 / shown as f64
             );
             if stats {
                 eprintln!("{}", shared.status.lock().unwrap());
             }
             prev = c;
+            prev_t = tm;
             t_run = Duration::ZERO;
             t_grab = Duration::ZERO;
             shown = 0;

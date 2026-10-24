@@ -202,6 +202,20 @@ impl App {
 }
 
 impl ApplicationHandler for App {
+    /// The app is no longer shown (on Android the window's surface goes with it): the picture's
+    /// resources are let go, the machine waits; `resumed` makes them again.
+    fn suspended(&mut self, _: &ActiveEventLoop) {
+        self.save();
+        self.gfx = None;
+        self.window = None;
+        self.touch = None;
+        self.pen_down = false;
+        self.pad_touches.clear();
+        self.touch_held.clear();
+        self.send_keys();
+        self.shared.paused.store(true, Ordering::Relaxed);
+    }
+
     fn resumed(&mut self, el: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
@@ -219,6 +233,7 @@ impl ApplicationHandler for App {
         }
         self.win_size = (window.inner_size().width, window.inner_size().height);
         self.window = Some(window);
+        self.shared.paused.store(self.menu.open && self.settings.emulation.pause_in_menu, Ordering::Relaxed);
         // everything that is not the first draw's business: the settings, in effect
         self.applied = Settings { video: config::Video { res: 0, fullscreen: !self.settings.video.fullscreen, ..self.settings.video.clone() }, ..self.settings.clone() };
         self.applied.input.keys.clear();

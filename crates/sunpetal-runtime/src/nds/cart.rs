@@ -63,6 +63,12 @@ impl Cart {
     }
 }
 
+/// The address mask of the cartridge's chip: a chip is a power of two in size, an image smaller
+/// than it (a rebuilt ROM) reads 0xFF past its end.
+fn chip_mask(rom_len: usize) -> u32 {
+    (rom_len.next_power_of_two() as u32).wrapping_sub(1)
+}
+
 impl Nds {
     pub(super) fn cart_open(&mut self) -> Result<(), String> {
         let path = self.cfg.rom.clone();
@@ -158,7 +164,7 @@ impl Nds {
         let op = c.cmd[0];
         if op == 0xB7 {
             let mut addr = (c.cmd[1] as u32) << 24 | (c.cmd[2] as u32) << 16 | (c.cmd[3] as u32) << 8 | c.cmd[4] as u32;
-            addr &= (c.rom.len() as u32).wrapping_sub(1);
+            addr &= chip_mask(c.rom.len());
             if addr < 0x8000 {
                 addr = 0x8000 + (addr & 0x1FF);
             }
@@ -343,5 +349,18 @@ impl Nds {
             }
             _ => 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::chip_mask;
+
+    #[test]
+    fn the_mask_follows_the_chip_not_the_image() {
+        assert_eq!(chip_mask(64 << 20), 0x03FF_FFFF);
+        // a 57 MB image sits on a 64 MB chip: addresses past 32 MB must stay as they are
+        assert_eq!(chip_mask(57_066_752), 0x03FF_FFFF);
+        assert_eq!(chip_mask(0x200), 0x1FF);
     }
 }

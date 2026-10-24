@@ -468,17 +468,37 @@ pub fn dump_backgrounds(dir: &std::path::Path) -> usize {
 }
 
 /// Runs to the next VBlank; false once stopped.
+/// How a frame's time goes (a diagnostic for the app's status line): scheduler quanta run, then
+/// nanoseconds in the guest CPUs, in the hardware (events: lines, timers, DMA), in the sound.
+pub static QUANTA: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static NS_GUEST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static NS_HW: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static NS_SOUND: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub fn timing() -> (u64, u64, u64, u64) {
+    use std::sync::atomic::Ordering::Relaxed;
+    (QUANTA.load(Relaxed), NS_GUEST.load(Relaxed), NS_HW.load(Relaxed), NS_SOUND.load(Relaxed))
+}
+
 pub fn run_frame() -> bool {
     let vbl = nds(|n| n.vblanks);
     while nds(|n| n.stop.is_none() && n.vblanks == vbl) {
         let now = machine(|m| m.sched.now);
         let next = nds(|n| n.next_event());
         let ticks = next.saturating_sub(now).min(QUANTUM);
+        use std::sync::atomic::Ordering::Relaxed;
+        let t0 = std::time::Instant::now();
         sched::run_quantum(ticks);
+        let t1 = std::time::Instant::now();
+        QUANTA.fetch_add(1, Relaxed);
+        NS_GUEST.fetch_add((t1 - t0).as_nanos() as u64, Relaxed);
         let now = machine(|m| m.sched.now);
         nds(|n| {
             n.fire_events(now);
+            let t2 = std::time::Instant::now();
+            NS_HW.fetch_add((t2 - t1).as_nanos() as u64, Relaxed);
             n.sound_sync(now); // the sound in step with the memory the CPUs write
+            NS_SOUND.fetch_add(t2.elapsed().as_nanos() as u64, Relaxed);
             let vbl = n.vblanks;
             if vbl != n.input_at {
                 n.input_at = vbl;
