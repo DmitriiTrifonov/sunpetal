@@ -260,15 +260,24 @@ fn edge(a: (f32, f32), b: (f32, f32), p: (f32, f32)) -> f32 {
 }
 
 /// Draws a frame. Returns the picture and the mask of what it left out (`NOTE`).
-pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
-    let mut notes = 0u32;
+/// How many threads draw the picture: the cores (at most 8); `SUNPETAL_3D_THREADS` sets it (1 draws
+/// in one pass, to compare).
+fn threads() -> usize {
+    std::env::var("SUNPETAL_3D_THREADS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |p| p.get()))
+        .clamp(1, 8)
+}
+
+/// The polygons drawn on the rows `ya..yb` of the picture (`s` times the DS's size).
+fn raster(job: &Job, verts: &[GxVertex], s: usize, ya: usize, yb: usize) -> Target {
     let cc = job.clear_color;
     let (cr, cg, cb) = rgb555((cc & 0x7FFF) as u16);
     let calpha = ((cc >> 16) & 31) as u8;
     let cid = ((cc >> 24) & 63) as u8;
-    let s = scale.max(1);
     let (w, h) = (256 * s, 192 * s);
-    let n = w * h;
+    let n = w * (yb - ya);
     let mut t = Target {
         color: vec![cr | cg << 6 | cb << 12; n],
         alpha: vec![calpha; n],
@@ -276,17 +285,6 @@ pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
         id: vec![cid; n],
         stencil: vec![0; n],
     };
-    let sc = s as f32;
-    let verts: Vec<GxVertex> = job.verts.iter().map(|v| GxVertex { sx: v.sx * sc, sy: v.sy * sc, ..*v }).collect();
-    if job.disp3dcnt & 0x4000 != 0 {
-        notes |= 1 << 2;
-    }
-    if job.disp3dcnt & 0x80 != 0 {
-        notes |= 1;
-    }
-    if job.disp3dcnt & 0x10 != 0 {
-        notes |= 1 << 1;
-    }
     let mem = Mem { tex: &job.tex, pal: &job.texpal };
     let texture_on = job.disp3dcnt & 1 != 0;
     let highlight = job.disp3dcnt & 2 != 0;
@@ -308,7 +306,7 @@ pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
         let wire = polyalpha == 0;
         // fill one pixel
         let put = |t: &mut Target, x: usize, y: usize, depth: f32, vr: f32, vg: f32, vb: f32, s: f32, tt: f32| {
-            let i = y * w + x;
+            let i = (y - ya) * w + x;
             let d = t.depth[i];
             let tol = 0x200 as f32 / 16_777_215.0;
             let behind = if eq_depth { (depth - d).abs() > tol } else { depth >= d };
@@ -427,7 +425,7 @@ pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
                 for s in 0..=steps {
                     let f = s as f32 / steps as f32;
                     let (x, y) = ((a.sx + dx * f).floor() as i32, (a.sy + dy * f).floor() as i32);
-                    if !(0..w as i32).contains(&x) || !(0..h as i32).contains(&y) {
+                    if !(0..w as i32).contains(&x) || !(ya as i32..yb as i32).contains(&y) {
                         continue;
                     }
                     let d = depth_of(a) + (depth_of(b) - depth_of(a)) * f;
@@ -451,8 +449,12 @@ pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
             let (pa, pb, pc) = ((a.sx, a.sy), (b.sx, b.sy), (c.sx, c.sy));
             let x0 = pa.0.min(pb.0).min(pc.0).floor().max(0.0) as usize;
             let x1 = (pa.0.max(pb.0).max(pc.0).ceil().min(w as f32 - 1.0)) as usize;
-            let y0 = pa.1.min(pb.1).min(pc.1).floor().max(0.0) as usize;
+            let y0 = (pa.1.min(pb.1).min(pc.1).floor().max(0.0) as usize).max(ya);
             let y1 = (pa.1.max(pb.1).max(pc.1).ceil().min(h as f32 - 1.0)) as usize;
+            if y0 > y1.min(yb - 1) {
+                continue;
+            }
+            let y1 = y1.min(yb - 1);
             let iw = |v: &GxVertex| 1.0 / (v.w.max(1) as f32);
             let (ia, ib, ic) = (iw(a), iw(b), iw(c));
             let (da, db, dc) = (depth_of(a), depth_of(b), depth_of(c));
@@ -482,6 +484,45 @@ pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
                 }
             }
         }
+    }
+    t
+}
+
+pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
+    let mut notes = 0u32;
+    let s = scale.max(1);
+    let (w, h) = (256 * s, 192 * s);
+    let n = w * h;
+    let sc = s as f32;
+    let verts: Vec<GxVertex> = job.verts.iter().map(|v| GxVertex { sx: v.sx * sc, sy: v.sy * sc, ..*v }).collect();
+    if job.disp3dcnt & 0x4000 != 0 {
+        notes |= 1 << 2;
+    }
+    if job.disp3dcnt & 0x80 != 0 {
+        notes |= 1;
+    }
+    if job.disp3dcnt & 0x10 != 0 {
+        notes |= 1 << 1;
+    }
+    // horizontal bands, one thread each: every band draws all the polygons in order but only its own
+    // rows, so the picture is the same as from one pass
+    let bands = if s < 2 { 1 } else { threads().min(h / 64) };
+    let per = (h + bands - 1) / bands;
+    let ranges: Vec<(usize, usize)> = (0..bands).map(|k| (k * per, ((k + 1) * per).min(h))).filter(|r| r.0 < r.1).collect();
+    let parts: Vec<Target> = if ranges.len() == 1 {
+        vec![raster(job, &verts, s, 0, h)]
+    } else {
+        std::thread::scope(|sc| {
+            let hs: Vec<_> = ranges.iter().map(|&(ya, yb)| { let v = &verts; sc.spawn(move || raster(job, v, s, ya, yb)) }).collect();
+            hs.into_iter().map(|h| h.join().expect("a band of the 3D picture")).collect()
+        })
+    };
+    let mut t = Target { color: Vec::with_capacity(n), alpha: Vec::with_capacity(n), depth: Vec::with_capacity(n), id: Vec::with_capacity(n), stencil: Vec::new() };
+    for p in parts {
+        t.color.extend(p.color);
+        t.alpha.extend(p.alpha);
+        t.depth.extend(p.depth);
+        t.id.extend(p.id);
     }
     if job.disp3dcnt & 0x20 != 0 {
         // edge marking: a pixel with a nearer-or-equal... no: a pixel beside a farther pixel of another
