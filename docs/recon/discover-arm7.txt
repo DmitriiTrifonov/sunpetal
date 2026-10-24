@@ -1,0 +1,6 @@
+943 functions (934 ARM, 9 Thumb), 37564 instructions
+  main       02380000-023801E8  code     404  data      60  unclassified      24 bytes
+  main       027E0000-027F7854  code   91344  data    3216  unclassified    1780 bytes
+  shared     037F8000-03807384  code   58156  data    2992  unclassified    1192 bytes
+40 switches (706 targets); 42 calls/jumps through registers unresolved; 0 conflicts
+python3 -m ndskit.recomp.discover "$ROM" --cpu 7 --report --out   0.58s user 0.03s system 98% cpu 0.613 total

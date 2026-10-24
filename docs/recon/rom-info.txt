@@ -1,0 +1,30 @@
+title       FSR   code YHNP   maker 99   unit 0   version 0   region 0
+capacity    64 MiB (used 0x3676007 bytes)
+header CRC  DBE3 (ok)   logo CRC CF56 (ok)
+secure area decrypted (0xE7FFDEFF marker), header CRC 4E3E
+ARM9        image 0x00004000 size 0x06E258  ram 0x02000000  entry 0x02000800
+ARM7        image 0x0008E400 size 0x026DD8  ram 0x02380000  entry 0x02380000
+ModuleParams at 0x02000BA0: SDK 4.1 (relstep 30003)
+  static BSS 0x02066560-0x020A0520; compressed: no
+  autoload 0x01FF8000 size 0x6CA0 bss 0x0  (from 0x02066560)  ITCM (SDK mirror)
+  autoload 0x027E0000 size 0x1040 bss 0x420  (from 0x0206D200)  DTCM (SDK default)
+ARM7 ModuleParams at 0x023801D0 (found by its shape)
+  autoload 0x037F8000 size 0xF384 bss 0x3E70  (from 0x023801E8)  shared WRAM
+  autoload 0x027E0000 size 0x17854 bss 0x1968  (from 0x0238F56C)  main RAM
+FNT         0x000B5200 size 0x16BAC; FAT 0x000CBE00, 6674 files in 255 directories
+overlays    ARM9 8, ARM7 0
+  ARM9 overlay 0: file 0 ram 0x020A0520 size 0x20 bss 0x0 sinit 0x020A0520-0x020A0524
+  ARM9 overlay 1: file 1 ram 0x020A0520 size 0x12A00 bss 0xA0 sinit 0x020B0B28-0x020B0B30
+  ARM9 overlay 2: file 2 ram 0x020A0520 size 0x20 bss 0x0 sinit 0x020A0520-0x020A0524
+  ARM9 overlay 3: file 3 ram 0x020A0520 size 0x5E60 bss 0x20 sinit 0x020A5434-0x020A5438
+  ARM9 overlay 4: file 4 ram 0x020A0520 size 0x1BA0 bss 0x0 sinit 0x020A1DF0-0x020A1DF4
+  ARM9 overlay 5: file 5 ram 0x020A0520 size 0x3A0 bss 0x20 sinit 0x020A0864-0x020A0868
+  ARM9 overlay 6: file 6 ram 0x020A0520 size 0xCE0 bss 0x0 sinit 0x020A1050-0x020A1054
+  ARM9 overlay 7: file 7 ram 0x020A0520 size 0x20 bss 0x0 sinit 0x020A0520-0x020A0524
+banner      version 1 at 0x000D9000
+  Japanese  Flower, Sun and Rain / Rising Star Games
+  English   Flower, Sun and Rain / Rising Star Games
+  French    Flower, Sun and Rain / Rising Star Games
+  German    Flower, Sun and Rain / Rising Star Games
+  Italian   Flower, Sun and Rain / Rising Star Games
+  Spanish   Flower, Sun and Rain / Rising Star Games

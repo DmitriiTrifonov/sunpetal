@@ -1,0 +1,6 @@
+2128 functions (1666 ARM, 462 Thumb), 78346 instructions
+  ITCM       01FF8000-01FFECA0  code   26240  data      92  unclassified    1476 bytes
+  main       02000000-02066560  code  216596  data    9752  unclassified  192820 bytes
+  DTCM       027E0000-027E1040  code       0  data       0  unclassified    4160 bytes
+61 switches (857 targets); 264 calls/jumps through registers unresolved; 0 conflicts
+python3 -m ndskit.recomp.discover "$ROM" --cpu 9 --report --out   2.85s user 0.04s system 99% cpu 2.911 total

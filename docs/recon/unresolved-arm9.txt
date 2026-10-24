@@ -1,0 +1,264 @@
+unresolved 01FF805C in 01FF8000: call bx r0
+unresolved 01FF8148 in 01FF8068: call bx r3
+unresolved 01FF854C in 01FF852C: call mov pc, r8
+unresolved 01FF855C in 01FF852C: call mov pc, r8
+unresolved 01FF85D0 in 01FF8588: call mov pc, r9
+unresolved 01FF85F4 in 01FF8588: call mov pc, r9
+unresolved 01FF863C in 01FF8588: call mov pc, r8
+unresolved 01FF8878 in 01FF8828: call mov pc, r8
+unresolved 01FF8B34 in 01FF8AC4: call mov pc, r5
+unresolved 01FF8B44 in 01FF8AC4: call mov pc, r5
+unresolved 01FF9220 in 01FF91F8: jump mov pc, r8
+unresolved 01FF925C in 01FF9224: jump mov pc, r8
+unresolved 01FF9ADC in 01FF9ACC: jump mov pc, r6
+unresolved 01FF9F10 in 01FF9F00: jump mov pc, r6
+unresolved 01FFA248 in 01FFA238: jump mov pc, r6
+unresolved 01FFA698 in 01FFA688: jump mov pc, r6
+unresolved 01FFA6D4 in 01FFA6AC: jump mov pc, r8
+unresolved 01FFA710 in 01FFA6D8: jump mov pc, r8
+unresolved 01FFAEEC in 01FFAEDC: jump mov pc, r6
+unresolved 01FFB3A4 in 01FFB394: jump mov pc, r6
+unresolved 01FFB648 in 01FFB638: jump mov pc, r6
+unresolved 01FFB91C in 01FFB90C: jump mov pc, r6
+unresolved 01FFB958 in 01FFB930: jump mov pc, r8
+unresolved 01FFB994 in 01FFB95C: jump mov pc, r8
+unresolved 01FFBFDC in 01FFBFCC: jump mov pc, r6
+unresolved 01FFC288 in 01FFC278: jump mov pc, r6
+unresolved 01FFC580 in 01FFC570: jump mov pc, r6
+unresolved 01FFC790 in 01FFC780: jump mov pc, r6
+unresolved 01FFCE20 in 01FFCE10: jump mov pc, r6
+unresolved 01FFD0F4 in 01FFD0E4: jump mov pc, r6
+unresolved 01FFD304 in 01FFD2F4: jump mov pc, r6
+unresolved 01FFD47C in 01FFD46C: jump mov pc, r6
+unresolved 01FFEBF8 in 01FFEBBC: call blx r0
+unresolved 01FFEC68 in 01FFEC54: call blx r0
+unresolved 020063B8 in 02006378: call blx r1
+unresolved 02006898 in 02006850: call blx r6
+unresolved 02006918 in 020068D4: call blx r7
+unresolved 02006D5C in 02006CCC: call blx r2
+unresolved 02006D74 in 02006CCC: call blx r2
+unresolved 02007078 in 02007054: call blx r2
+unresolved 0200754C in 02007510: jump subs pc, lr, #4
+unresolved 02008030 in 02008010: jump bx r12
+unresolved 02008184 in 02008138: call bx r12
+unresolved 0200877C in 020086DC: call blx r5
+unresolved 02008D10 in 02008CE8: call blx r8
+unresolved 02008DE4 in 02008DAC: call blx r4
+unresolved 02008E7C in 02008E44: call blx r4
+unresolved 020090B4 in 02009098: call blx r3
+unresolved 0200928C in 0200923C: call blx r1
+unresolved 020092BC in 0200929C: call blx r3
+unresolved 02009374 in 02009354: call blx r1
+unresolved 0200A558 in 0200A520: call blx r1
+unresolved 0200AD44 in 0200AC9C: call blx r3
+unresolved 0200AE60 in 0200AE10: call blx r2
+unresolved 0200AED0 in 0200AE10: call blx r1
+unresolved 0200B01C in 0200AFF0: call blx r5
+unresolved 0200B108 in 0200B0E4: call blx r12
+unresolved 0200B134 in 0200B110: call blx r12
+unresolved 0200BB10 in 0200B9EC: call blx r2
+unresolved 0200BBB8 in 0200B9EC: call blx r2
+unresolved 0200BDE4 in 0200BCD8: call blx r2
+unresolved 0200CDB0 in 0200CCE0: call blx r0
+unresolved 0200CEA8 in 0200CDD4: call blx r1
+unresolved 0200CFAC in 0200CF24: call blx r3
+unresolved 0200D008 in 0200CF24: call blx r3
+unresolved 0200D044 in 0200CF24: call blx r3
+unresolved 0200D114 in 0200D078: call blx r3
+unresolved 0200D194 in 0200D078: call blx r3
+unresolved 0200D358 in 0200D308: call blx r1
+unresolved 0200D36C in 0200D308: call blx r3
+unresolved 0200D37C in 0200D308: call blx r2
+unresolved 0200D3E4 in 0200D308: call blx r1
+unresolved 0200D3F8 in 0200D308: call blx r3
+unresolved 0200D40C in 0200D308: call blx r3
+unresolved 0200D41C in 0200D308: call blx r2
+unresolved 0200D47C in 0200D308: call blx r1
+unresolved 0200D490 in 0200D308: call blx r3
+unresolved 0200D4A4 in 0200D308: call blx r3
+unresolved 0200D4B4 in 0200D308: call blx r2
+unresolved 0200D820 in 0200D7D0: call blx r3
+unresolved 0200D8D8 in 0200D7D0: call blx r3
+unresolved 0200D9D4 in 0200D7D0: call blx r3
+unresolved 0200DA30 in 0200D7D0: call blx r3
+unresolved 0200DD50 in 0200DC84: call blx r3
+unresolved 0200DDE4 in 0200DD84: call blx r3
+unresolved 0200DE84 in 0200DE1C: call blx r3
+unresolved 0200E2BC in 0200E288: call blx r12
+unresolved 0200EC34 in 0200EC20: call blx r1
+unresolved 0200EE2C in 0200EDD8: call blx r2
+unresolved 0200EE5C in 0200EDD8: call blx r0
+unresolved 0200F310 in 0200EDD8: call blx r2
+unresolved 0200FCE0 in 0200FB14: call blx r6
+unresolved 0200FF0C in 0200FDFC: call blx r7
+unresolved 02010148 in 0201008C: call blx r5
+unresolved 02010454 in 02010434: call blx r1
+unresolved 020104BC in 02010434: call blx r5
+unresolved 020106B8 in 02010674: call blx r1
+unresolved 02010878 in 02010844: call blx r1
+unresolved 02011000 in 02010FD0: call blx r1
+unresolved 02011188 in 020110F4: call blx r1
+unresolved 020111B0 in 020110F4: call blx r2
+unresolved 020112FC in 020112D0: call blx r0
+unresolved 020113D0 in 0201131C: call blx r0
+unresolved 0201140C in 0201131C: call blx r0
+unresolved 0201153C in 020114EC: call blx r12
+unresolved 020119A4 in 02011994: call blx r3
+unresolved 02011A0C in 020119FC: call blx r2
+unresolved 02013524 in 020134C0: call blx r9
+unresolved 02013558 in 020134C0: call blx r9
+unresolved 02013B48 in 020134C0: call blx r9
+unresolved 02013BC4 in 020134C0: call blx r9
+unresolved 02013C00 in 020134C0: call blx r9
+unresolved 02013C40 in 020134C0: call blx r9
+unresolved 02013C8C in 020134C0: call blx r9
+unresolved 02014038 in 02013F28: call blx r4
+unresolved 02014470 in 020143F0: call blx r8
+unresolved 02014510 in 020143F0: call blx r8
+unresolved 02014534 in 020143F0: call blx r8
+unresolved 02014558 in 020143F0: call blx r8
+unresolved 0201459C in 020143F0: call blx r8
+unresolved 020145D4 in 020143F0: call blx r8
+unresolved 02014738 in 020143F0: call blx r8
+unresolved 02014780 in 020143F0: call blx r8
+unresolved 02015EC4 in 02015E60: call blx r9
+unresolved 02015F00 in 02015E60: call blx r9
+unresolved 020165B8 in 02015E60: call blx r9
+unresolved 02016630 in 02015E60: call blx r9
+unresolved 0201666C in 02015E60: call blx r9
+unresolved 020166AC in 02015E60: call blx r9
+unresolved 020166F4 in 02015E60: call blx r9
+unresolved 0201AC3C in 0201AC30: call blx r0
+unresolved 0201AC88 in 0201AC5C: call blx r2
+unresolved 0201ACD4 in 0201ACA0: call blx r4
+unresolved 0201AD64 in 0201ACFC: call blx r5
+unresolved 0201ADFC in 0201ADB4: call blx r4
+unresolved 0201AE4C in 0201ADB4: call blx r4
+unresolved 0201AE98 in 0201AE64: call blx r5
+unresolved 0201AF28 in 0201AEF4: call blx r5
+unresolved 0201AFA8 in 0201AF9C: call blx r0
+unresolved 0201B3FC in 0201B390: call blx r1
+unresolved 0201B9EC in 0201B9A4: call blx r3
+unresolved 0201BB60 in 0201B9A4: call blx r2
+unresolved 0201BB8C in 0201B9A4: call blx r3
+unresolved 0201BBB0 in 0201B9A4: call blx r2
+unresolved 0201BBD0 in 0201B9A4: call blx r2
+unresolved 0201BC08 in 0201B9A4: call blx r3
+unresolved 0201BC44 in 0201B9A4: call blx r2
+unresolved 0201BC64 in 0201B9A4: call blx r3
+unresolved 0201BCA4 in 0201B9A4: call blx r3
+unresolved 0201BCE0 in 0201BCC0: call blx r1
+unresolved 0201BCF8 in 0201BCC0: call blx r1
+unresolved 0201BE5C in 0201BDCC: call blx r1
+unresolved 0201BEA4 in 0201BDCC: call blx r3
+unresolved 0201BF94 in 0201BF50: call blx r2
+unresolved 0201BFBC in 0201BF50: call blx r1
+unresolved 0201BFDC in 0201BF50: call blx r3
+unresolved 0201C01C in 0201BF50: call blx r3
+unresolved 0201C520 in 0201C514: call blx r1
+unresolved 02021F3E in 02021F34: call blx r2
+unresolved 020220EE in 02022024: call blx r4
+unresolved 0202C8D6 in 0202C86C: call blx r1
+unresolved 0202C92C in 0202C91C: call blx r0
+unresolved 0202C9C2 in 0202C974: call blx r0
+unresolved 0202DA38 in 0202D9B8: call blx r4
+unresolved 0202E5BC in 0202E560: call blx r12
+unresolved 0202E740 in 0202E6D0: call blx r12
+unresolved 0202FA1C in 0202F9E0: call blx r2
+unresolved 0202FB90 in 0202F9E0: call blx r1
+unresolved 0202FC00 in 0202F9E0: call blx r1
+unresolved 0202FD04 in 0202FCA8: call blx r1
+unresolved 0202FD64 in 0202FD40: call blx r1
+unresolved 0203019C in 02030160: call blx r5
+unresolved 020301D0 in 02030160: call blx r1
+unresolved 020301EC in 02030160: call blx r2
+unresolved 02030610 in 020302A4: call blx r10
+unresolved 02030A54 in 020302A4: call blx r4
+unresolved 02031A4C in 02031A40: call blx r2
+unresolved 02031A60 in 02031A54: call blx r2
+unresolved 02032124 in 020320BC: call blx r2
+unresolved 02032170 in 020320BC: call blx r2
+unresolved 0203237C in 02032214: call blx r2
+unresolved 0203238C in 02032214: call blx r2
+unresolved 0203300C in 02032E3C: call blx r7
+unresolved 02033338 in 02033314: call blx r5
+unresolved 02033384 in 02033314: call blx r5
+unresolved 0203421C in 02034110: call blx r4
+unresolved 02034720 in 020346EC: call blx r6
+unresolved 02034768 in 020346EC: call blx r6
+unresolved 02034DAC in 02034D30: call blx r3
+unresolved 02035F08 in 02035EBC: call blx r3
+unresolved 02035FF4 in 02035F90: call blx r3
+unresolved 020360B4 in 02035F90: call blx r3
+unresolved 02036128 in 02035F90: call blx r3
+unresolved 020363D0 in 0203637C: call blx r3
+unresolved 0203642C in 020363FC: call blx r2
+unresolved 020365B8 in 02036444: call blx r1
+unresolved 02036738 in 02036724: call blx r1
+unresolved 02036760 in 0203674C: call blx r1
+unresolved 020367D4 in 02036774: call blx r1
+unresolved 02036838 in 02036774: call blx r3
+unresolved 02036874 in 02036774: call blx r1
+unresolved 020368DC in 02036774: call blx r1
+unresolved 02036938 in 020368F0: call blx r1
+unresolved 020369A8 in 020368F0: call blx r1
+unresolved 02036A18 in 020369BC: call blx r1
+unresolved 02036CE8 in 020369BC: call blx r3
+unresolved 02036D38 in 020369BC: call blx r1
+unresolved 02036DF0 in 020369BC: call blx r1
+unresolved 02036E24 in 020369BC: call blx r1
+unresolved 02036EDC in 02036E44: call blx r12
+unresolved 02036F2C in 02036EF4: call blx r1
+unresolved 02036F90 in 02036EF4: call blx r1
+unresolved 02036FC0 in 02036EF4: call blx r1
+unresolved 02037050 in 02036FC8: call blx r12
+unresolved 02037168 in 02037068: call blx r1
+unresolved 020371F4 in 02037068: call blx r3
+unresolved 020373CC in 02037068: call blx r7
+unresolved 020373F0 in 02037068: call blx r1
+unresolved 02037430 in 02037068: call blx r1
+unresolved 02037458 in 02037068: call blx r1
+unresolved 02037588 in 020374C8: call blx r1
+unresolved 02037744 in 020374C8: call blx r1
+unresolved 02037894 in 020377D0: call blx r1
+unresolved 02037AA8 in 020377D0: call blx r1
+unresolved 020382C4 in 02038290: call blx r1
+unresolved 02038358 in 02038290: call blx r1
+unresolved 0203848C in 020383DC: call blx r1
+unresolved 02038544 in 020383DC: call blx r1
+unresolved 0203861C in 020383DC: call blx r1
+unresolved 020387DC in 02038720: call blx r1
+unresolved 02038864 in 02038720: call blx r1
+unresolved 0203893C in 02038720: call blx r1
+unresolved 02038CB8 in 02038AD0: call blx r1
+unresolved 020391DC in 0203910C: call blx r3
+unresolved 0203920C in 0203910C: call blx r3
+unresolved 02039240 in 0203910C: call blx r3
+unresolved 02039278 in 0203910C: call blx r1
+unresolved 02039290 in 0203910C: call blx r1
+unresolved 020392A8 in 0203910C: call blx r1
+unresolved 02039438 in 02039344: call blx r1
+unresolved 02039450 in 02039344: call blx r1
+unresolved 0203946C in 02039344: call blx r1
+unresolved 02039F84 in 02039F00: call blx r12
+unresolved 0203A4B0 in 0203A110: call blx r4
+unresolved 0203C708 in 0203C68C: call blx r2
+unresolved 0203D260 in 0203D1E4: call blx r2
+unresolved 0203D8C8 in 0203D80C: call blx r2
+unresolved 0203E12C in 0203E108: call blx r4
+unresolved 0204DA8A in 0204DA4C: call blx r3
+unresolved 0204E048 in 0204E018: call blx r3
+unresolved 0204E06E in 0204E018: call blx r3
+unresolved 0204E07C in 0204E018: call blx r3
+unresolved 0204E09E in 0204E018: call blx r1
+unresolved 0204E0A6 in 0204E018: call blx r1
+unresolved 0204E1A0 in 0204E190: call blx r1
+unresolved 0204E1AC in 0204E190: call blx r1
+unresolved 0204FCB8 in 0204FC3C: call blx r1
+unresolved 02050098 in 02050000: call blx r1
+unresolved 020506B4 in 020505A0: call blx r1
+unresolved 02050B7C in 02050B44: call blx r3
+unresolved 02050B96 in 02050B44: call blx r3
+unresolved 02050BB6 in 02050B44: call blx r3
+unresolved 02050BE0 in 02050B44: call blx r1
+unresolved 02050BE8 in 02050B44: call blx r1

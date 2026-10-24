@@ -1,0 +1,15 @@
+# ром, образы и всё, что из них получено
+roms/
+extracted/
+generated/
+build/
+dumps/
+logs/
+*.nds
+*.iso
+*.sav
+# Rust
+target/
+# разное
+.DS_Store
+__pycache__/
