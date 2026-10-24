@@ -170,14 +170,24 @@ pub fn paint_menu_button(ctx: &egui::Context, w: f32, h: f32, info: &str, fast: 
     if let Shape::Circle { x, y, r } = menu_button(w, h) {
         let c = Pos2::new(x / k, y / k);
         painter.circle(c, r / k, Color32::from_black_alpha(90), Stroke::new(1.5, Color32::from_white_alpha(110)));
-        painter.text(c, Align2::CENTER_CENTER, "≡", FontId::proportional(r / k * 1.3), Color32::from_white_alpha(170));
+        // three bars, drawn: the bundled font has no such character
+        let (hw, gap) = (r / k * 0.5, r / k * 0.32);
+        for dy in [-gap, 0.0, gap] {
+            painter.line_segment([Pos2::new(c.x - hw, c.y + dy), Pos2::new(c.x + hw, c.y + dy)], Stroke::new(r / k * 0.14, Color32::from_white_alpha(190)));
+        }
     }
     // fast-forward: lit while it is on
     if let (Some(on), Shape::Circle { x, y, r }) = (fast, fast_button(w, h)) {
         let c = Pos2::new(x / k, y / k);
         let fill = if on { Color32::from_rgba_unmultiplied(255, 255, 255, 120) } else { Color32::from_black_alpha(90) };
         painter.circle(c, r / k, fill, Stroke::new(1.5, Color32::from_white_alpha(110)));
-        painter.text(c, Align2::CENTER_CENTER, "»", FontId::proportional(r / k * 1.3), Color32::from_white_alpha(if on { 255 } else { 170 }));
+        // two chevrons, drawn
+        let (s, a) = (r / k * 0.3, r / k * 0.3);
+        let ink = Stroke::new(r / k * 0.14, Color32::from_white_alpha(if on { 255 } else { 190 }));
+        for dx in [-a, a * 0.6] {
+            painter.line_segment([Pos2::new(c.x + dx - s * 0.5, c.y - s), Pos2::new(c.x + dx + s * 0.5, c.y)], ink);
+            painter.line_segment([Pos2::new(c.x + dx + s * 0.5, c.y), Pos2::new(c.x + dx - s * 0.5, c.y + s)], ink);
+        }
     }
 }
 
