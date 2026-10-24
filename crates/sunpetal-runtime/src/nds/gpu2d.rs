@@ -466,9 +466,9 @@ impl Nds {
         self.draw_line(1, y);
     }
 
-    fn draw_line(&mut self, e: usize, y: usize) {
+    fn new_line(&self, e: usize) -> Box<Line> {
         let io = if e == 1 { 0x0400_1000 } else { 0x0400_0000 };
-        let mut l = Box::new(Line {
+        Box::new(Line {
             e,
             io,
             dispcnt: self.g32(io),
@@ -484,7 +484,88 @@ impl Nds {
             below: [0; 256],
             toplayer: [5; 256],
             belowlayer: [5; 256],
-        });
+        })
+    }
+
+    /// Writes every background layer of both engines, as it looks on its screen (scrolled, 256 x
+    /// 192, transparent where empty), to `dir/bg{engine}{layer}_{hash}.png`. A debugging and
+    /// picture-pack aid: the hash is of the pixels.
+    pub(super) fn dump_backgrounds(&mut self, dir: &std::path::Path) -> usize {
+        let mut n = 0;
+        for e in 0..2 {
+            let l = self.new_line(e);
+            let d = l.dispcnt;
+            let on = self.io_reg16(9, 0x0400_0304) & if e == 1 { 0x200 } else { 0x2 } != 0;
+            if !on || d & 0x80 != 0 || (d >> 16) & if e == 1 { 1 } else { 3 } != 1 {
+                continue;
+            }
+            let bgmode = (d & 7) as usize;
+            const KIND: [[i8; 4]; 8] =
+                [[0, 0, 0, 0], [0, 0, 0, 1], [0, 0, 1, 1], [0, 0, 0, 2], [0, 0, 1, 2], [0, 0, 2, 2], [0, -1, 3, -1], [-1, -1, -1, -1]];
+            let saved = self.gpu.refs;
+            for bg in 0..4usize {
+                let kind = KIND[bgmode][bg];
+                if d & (0x100 << bg) == 0 || kind < 0 || (bg == 0 && e == 0 && d & 8 != 0) {
+                    continue;
+                }
+                let cnt = self.g16(l.io + 0x08 + 2 * bg as u32);
+                self.gpu.refs = saved;
+                let mut rgba = vec![0u8; 256 * 192 * 4];
+                let mut buf = [0u32; 256];
+                for y in 0..192usize {
+                    match kind {
+                        0 => self.bg_text(&l, bg, y as i32, &mut buf),
+                        1 => self.bg_affine(&l, bg, 0, &mut buf),
+                        3 => self.bg_affine(&l, bg, 4, &mut buf),
+                        _ => {
+                            let k = if cnt & 0x80 == 0 { 1 } else if cnt & 4 != 0 { 3 } else { 2 };
+                            self.bg_affine(&l, bg, k, &mut buf)
+                        }
+                    }
+                    for x in 0..256 {
+                        if buf[x] & PX_OPAQUE != 0 {
+                            let c = |sh: u32| {
+                                let v = (buf[x] >> sh & 63) as u8;
+                                v << 2 | v >> 4
+                            };
+                            rgba[(y * 256 + x) * 4..][..4].copy_from_slice(&[c(0), c(6), c(12), 255]);
+                        }
+                    }
+                    if kind != 0 {
+                        for k in 0..2 {
+                            let pr = l.io + 0x20 + 0x10 * k as u32;
+                            self.gpu.refs[e][k][0] += self.g16(pr + 2) as i16 as i32;
+                            self.gpu.refs[e][k][1] += self.g16(pr + 6) as i16 as i32;
+                        }
+                    }
+                }
+                if rgba.chunks_exact(4).all(|p| p[3] == 0) {
+                    continue;
+                }
+                let mut h = 0xcbf2_9ce4_8422_2325u64;
+                for b in &rgba {
+                    h = (h ^ *b as u64).wrapping_mul(0x100_0000_01b3);
+                }
+                let _ = std::fs::create_dir_all(dir);
+                let path = dir.join(format!("bg{}{}_{:016x}.png", e, bg, h));
+                if let Ok(f) = std::fs::File::create(path) {
+                    let mut enc = png::Encoder::new(std::io::BufWriter::new(f), 256, 192);
+                    enc.set_color(png::ColorType::Rgba);
+                    enc.set_depth(png::BitDepth::Eight);
+                    if let Ok(mut w) = enc.write_header() {
+                        let _ = w.write_image_data(&rgba);
+                        n += 1;
+                    }
+                }
+            }
+            self.gpu.refs = saved;
+        }
+        n
+    }
+
+    fn draw_line(&mut self, e: usize, y: usize) {
+        let io = if e == 1 { 0x0400_1000 } else { 0x0400_0000 };
+        let mut l = self.new_line(e);
         let mb = self.g16(io + 0x6C) as u32;
         let (mbmode, mbf) = ((mb >> 14) & 3, (mb & 0x1F).min(16));
         let w1base = if mbmode == 1 || mbmode == 2 { mbmode << 24 | mbf << 26 } else { 0 };

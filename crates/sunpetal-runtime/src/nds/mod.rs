@@ -461,6 +461,12 @@ pub fn screenshot(path: &std::path::Path) -> Result<(), String> {
     w.write_image_data(&rgb).map_err(|e| e.to_string())
 }
 
+/// Writes both engines' background layers as PNGs into `dir` (see `gpu2d::dump_backgrounds`);
+/// returns how many.
+pub fn dump_backgrounds(dir: &std::path::Path) -> usize {
+    nds(|n| n.dump_backgrounds(dir))
+}
+
 /// Runs to the next VBlank; false once stopped.
 pub fn run_frame() -> bool {
     let vbl = nds(|n| n.vblanks);
