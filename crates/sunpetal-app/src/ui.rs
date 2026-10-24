@@ -159,12 +159,12 @@ impl Menu {
             });
             egui::CollapsingHeader::new(tx("Emulation", "Эмуляция")).show(ui, |ui| {
                 ui.checkbox(&mut s.emulation.pause_in_menu, tx("Pause while the menu is open", "Пауза, пока открыто меню"));
-                ui.label(tx("F2 layout, F3 filter, F4/F5 3D resolution, F6 effects, F11 full screen, Tab fast forward, F1 or Esc menu.", "F2 раскладка, F3 фильтр, F4/F5 разрешение 3D, F6 эффекты, F11 полный экран, Tab ускорение, F1 или Esc меню."));
+                ui.label(tx("F2 layout, F3 filter, F4/F5 3D resolution, F6 effects, F7 skip, F11 full screen, Tab fast forward, F1 or Esc menu.", "F2 раскладка, F3 фильтр, F4/F5 разрешение 3D, F6 эффекты, F7 пропуск, F11 полный экран, Tab ускорение, F1 или Esc меню."));
             });
             egui::CollapsingHeader::new(tx("Debug", "Отладка")).show(ui, |ui| {
                 ui.checkbox(&mut s.video.show_stats, tx("Show speed figures", "Показывать скорость"));
                 ui.checkbox(&mut s.emulation.fast_button, tx("Fast-forward button beside the menu button (phone, no on-screen buttons)", "Кнопка ускорения рядом с кнопкой меню (телефон, без экранных кнопок)"));
-                ui.checkbox(&mut s.emulation.skip_button, tx("Skip button beside them (fast-forward until the game waits for you)", "Кнопка пропуска рядом с ними (перемотка, пока игра не станет ждать тебя)"));
+                ui.checkbox(&mut s.emulation.skip_button, tx("Skip button beside them (the screen goes dark and the game races on until it waits for you)", "Кнопка пропуска рядом с ними (экран темнеет, игра мчится вперёд, пока не станет ждать тебя)"));
             });
             egui::CollapsingHeader::new(tx("Profiles", "Профили")).show(ui, |ui| {
                 ui.horizontal(|ui| {

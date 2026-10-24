@@ -82,6 +82,8 @@ struct App {
     dial_scene: bool,
     /// A finger turning the dial.
     dial: Option<dial::Dial>,
+    /// How black the screen is for a skip (0 none, 1 all): it goes dark while one runs and back after.
+    skip_fade: f32,
     /// Fingers on the on-screen controls, by id.
     pad_touches: HashMap<u64, (f32, f32)>,
     /// The buttons those fingers hold.
@@ -325,6 +327,10 @@ impl ApplicationHandler for App {
                     KeyCode::Tab => self.shared.fast.store(true, Ordering::Relaxed),
                     KeyCode::F2 => self.cycle_layout(),
                     KeyCode::F3 => self.settings.video.linear = !self.settings.video.linear,
+                    KeyCode::F7 => {
+                        let on = !self.shared.skip.load(Ordering::Relaxed);
+                        self.shared.skip.store(on, Ordering::Relaxed);
+                    }
                     KeyCode::F6 => self.settings.effects = self.settings.effects.next_preset(),
                     KeyCode::F4 => self.settings.video.res = self.settings.video.res.saturating_sub(1).max(1),
                     KeyCode::F5 => self.settings.video.res = (self.settings.video.res + 1).min(8),
@@ -440,6 +446,10 @@ impl ApplicationHandler for App {
                 if let (Some((scale, rgba)), Some(g)) = (frame, &mut self.gfx) {
                     g.upload(scale, &rgba);
                 }
+                // the picture goes dark for a skip and comes back after it
+                let target = if self.shared.skip.load(Ordering::Relaxed) { 1.0 } else { 0.0 };
+                self.skip_fade += (target - self.skip_fade).clamp(-0.07, 0.07);
+                let fade = self.skip_fade;
                 let mut action = None;
                 {
                     let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, .. } = self;
@@ -453,9 +463,14 @@ impl ApplicationHandler for App {
                         let band = touchpad::band(ww, wh);
                         g.reserve = if pad_on { band.h } else { 0.0 };
                         let corner_on = cfg!(target_os = "android") && !pad_on;
-                        if menu.open || pad_on || corner_on {
+                        if menu.open || pad_on || corner_on || fade > 0.0 {
                             let held = touch_held.clone();
                             let mut f = |ctx: &egui::Context| {
+                                if fade > 0.0 {
+                                    // first, so that the buttons stay on top of it and can cancel the skip
+                                    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("skipfade")));
+                                    p.rect_filled(ctx.content_rect(), 0.0, egui::Color32::from_black_alpha((fade * 255.0) as u8));
+                                }
                                 if corner_on {
                                     let info = match stopped_msg {
                                         Some(why) => format!("stopped: {}", why),
@@ -582,6 +597,7 @@ pub fn run(o: Options, el: EventLoop<()>) {
         touch: None,
         dial_scene: false,
         dial: None,
+        skip_fade: 0.0,
         pad_touches: HashMap::new(),
         touch_held: Vec::new(),
         stopped_msg: None,
