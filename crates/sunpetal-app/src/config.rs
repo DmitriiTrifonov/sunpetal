@@ -51,6 +51,8 @@ pub struct Input {
     pub keys: BTreeMap<String, String>,
     /// How far a stick must go to count as the D-pad (0.1-0.9).
     pub stick_threshold: f32,
+    /// On-screen buttons: "auto" (on a phone), "on" or "off".
+    pub touch_controls: String,
 }
 
 impl Default for Input {
@@ -72,6 +74,7 @@ impl Default for Input {
                 k("RIGHT", "ArrowRight"),
             ]),
             stick_threshold: 0.5,
+            touch_controls: "auto".into(),
         }
     }
 }
@@ -162,6 +165,15 @@ pub fn parse_key(name: &str) -> Option<KeyCode> {
 }
 
 impl Settings {
+    /// Whether the on-screen buttons are shown.
+    pub fn touch_controls_on(&self) -> bool {
+        match self.input.touch_controls.as_str() {
+            "on" => true,
+            "off" => false,
+            _ => cfg!(target_os = "android"),
+        }
+    }
+
     /// Fixes what a hand-edited file may have got wrong.
     pub fn sanitize(&mut self) {
         if !matches!(self.interface.language.as_str(), "auto" | "en" | "ru") {
@@ -169,6 +181,9 @@ impl Settings {
         }
         self.video.res = self.video.res.clamp(1, 8);
         self.video.window = [self.video.window[0].clamp(128, 16384), self.video.window[1].clamp(128, 16384)];
+        if !matches!(self.input.touch_controls.as_str(), "auto" | "on" | "off") {
+            self.input.touch_controls = "auto".into();
+        }
         self.effects.sanitize();
         self.audio.volume = self.audio.volume.clamp(0.0, 1.0);
         self.input.stick_threshold = self.input.stick_threshold.clamp(0.1, 0.9);

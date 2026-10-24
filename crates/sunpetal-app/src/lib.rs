@@ -18,6 +18,7 @@ mod effects;
 mod emu;
 mod gfx;
 mod layout;
+mod touchpad;
 mod ui;
 
 use std::collections::HashMap;
@@ -76,6 +77,10 @@ struct App {
     pen_down: bool,
     /// The finger that is the stylus.
     touch: Option<u64>,
+    /// Fingers on the on-screen controls, by id.
+    pad_touches: HashMap<u64, (f32, f32)>,
+    /// The buttons those fingers hold.
+    touch_held: Vec<&'static str>,
     /// Buttons held on the keyboard and on the pad (both go to the machine).
     kb: u32,
     pad: u32,
@@ -89,7 +94,8 @@ impl App {
     }
 
     fn send_keys(&self) {
-        self.shared.input.lock().unwrap().keys = self.kb | self.pad;
+        let touch = self.touch_held.iter().fold(0, |a, n| a | bit(n));
+        self.shared.input.lock().unwrap().keys = self.kb | self.pad | touch;
     }
 
     fn save(&mut self) {
@@ -314,23 +320,49 @@ impl ApplicationHandler for App {
                 }
                 self.update_pen();
             }
-            WindowEvent::Touch(t) if !consumed => {
+            WindowEvent::Touch(t) => {
                 use winit::event::TouchPhase::*;
-                self.mouse = (t.location.x as f32, t.location.y as f32);
+                let p = (t.location.x as f32, t.location.y as f32);
+                let band = self.gfx.as_ref().filter(|_| self.settings.touch_controls_on()).map(|g| {
+                    let (w, h) = g.window_size();
+                    touchpad::band(w, h)
+                });
                 match t.phase {
-                    Started if self.touch.is_none() && !self.menu.open => {
-                        let on_screen = self.gfx.as_ref().map_or(false, |g| self.layout().touch(g.size(), self.mouse, false).is_some());
-                        if on_screen {
+                    Started if !self.menu.open && !consumed => {
+                        let on_screen = self.gfx.as_ref().map_or(false, |g| self.layout().touch(g.size(), p, false).is_some());
+                        if on_screen && self.touch.is_none() {
                             self.touch = Some(t.id);
                             self.pen_down = true;
+                            self.mouse = p;
+                        } else if let Some(b) = band {
+                            if touchpad::on_menu(b, p) {
+                                self.toggle_menu();
+                            } else {
+                                self.pad_touches.insert(t.id, p);
+                            }
                         }
                     }
-                    Ended | Cancelled if self.touch == Some(t.id) => {
-                        self.touch = None;
-                        self.pen_down = false;
+                    Moved => {
+                        if self.touch == Some(t.id) {
+                            self.mouse = p;
+                        } else if let Some(q) = self.pad_touches.get_mut(&t.id) {
+                            *q = p;
+                        }
+                    }
+                    Ended | Cancelled => {
+                        if self.touch == Some(t.id) {
+                            self.touch = None;
+                            self.pen_down = false;
+                        }
+                        self.pad_touches.remove(&t.id);
                     }
                     _ => {}
                 }
+                self.touch_held = match band {
+                    Some(b) if !self.pad_touches.is_empty() => touchpad::pressed(b, &self.pad_touches.values().copied().collect::<Vec<_>>()),
+                    _ => Vec::new(),
+                };
+                self.send_keys();
                 self.update_pen();
             }
             WindowEvent::RedrawRequested => {
@@ -349,14 +381,26 @@ impl ApplicationHandler for App {
                 }
                 let mut action = None;
                 {
-                    let App { gfx, menu, settings, layouts, .. } = self;
+                    let App { gfx, menu, settings, layouts, touch_held, .. } = self;
                     if let Some(g) = gfx {
                         let layout = layouts.iter().find(|l| l.name == settings.video.layout).unwrap_or(&layouts[0]).clone();
                         let names: Vec<&str> = layouts.iter().map(|l| l.name).collect();
                         let fx = settings.effects.clone();
                         let internal = (256 * settings.video.res as u32, 192 * settings.video.res as u32);
-                        if menu.open {
-                            let mut f = |ctx: &egui::Context| action = menu.show(ctx, settings, &names, internal);
+                        let pad_on = settings.touch_controls_on();
+                        let (ww, wh) = g.window_size();
+                        let band = touchpad::band(ww, wh);
+                        g.reserve = if pad_on { band.h } else { 0.0 };
+                        if menu.open || pad_on {
+                            let held = touch_held.clone();
+                            let mut f = |ctx: &egui::Context| {
+                                if pad_on {
+                                    touchpad::paint(ctx, band, &held);
+                                }
+                                if menu.open {
+                                    action = menu.show(ctx, settings, &names, internal);
+                                }
+                            };
                             g.draw(&layout, &fx, Some(&mut f));
                         } else {
                             g.draw(&layout, &fx, None);
@@ -459,6 +503,8 @@ pub fn run(o: Options, el: EventLoop<()>) {
         mouse: (0.0, 0.0),
         pen_down: false,
         touch: None,
+        pad_touches: HashMap::new(),
+        touch_held: Vec::new(),
         kb: 0,
         pad: 0,
         pads: gilrs::Gilrs::new().map_err(|e| eprintln!("no pads: {}", e)).ok(),

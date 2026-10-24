@@ -93,6 +93,8 @@ pub struct Gfx {
     pipeline: wgpu::RenderPipeline,
     screens: [Screen; 2],
     pub linear: bool,
+    /// Pixels kept free at the bottom of the window (the touch controls' band).
+    pub reserve: f32,
 }
 
 fn make_screen(
@@ -242,7 +244,7 @@ impl Gfx {
             Some(device.limits().max_texture_dimension_2d as usize),
         );
         let egui_renderer = egui_wgpu::Renderer::new(&device, format, egui_wgpu::RendererOptions::default());
-        Ok(Gfx { window: w, egui_ctx, egui_state, egui_renderer, bgl, nearest, linear_sampler: linear, scale: 1, surface, device, queue, config, pipeline, screens, linear: true })
+        Ok(Gfx { window: w, egui_ctx, egui_state, egui_renderer, bgl, nearest, linear_sampler: linear, scale: 1, surface, device, queue, config, pipeline, screens, linear: true, reserve: 0.0 })
     }
 
     pub fn resize(&mut self, w: u32, h: u32) {
@@ -254,8 +256,14 @@ impl Gfx {
         self.surface.configure(&self.device, &self.config);
     }
 
-    pub fn size(&self) -> (f32, f32) {
+    /// The window's size in pixels.
+    pub fn window_size(&self) -> (f32, f32) {
         (self.config.width as f32, self.config.height as f32)
+    }
+
+    /// The size of the part of the window the screens are fitted into.
+    pub fn size(&self) -> (f32, f32) {
+        (self.config.width as f32, (self.config.height as f32 - self.reserve).max(1.0))
     }
 
     /// Uploads a picture at `scale` (both screens, RGBA, the upper first); the textures are made
@@ -296,8 +304,8 @@ impl Gfx {
             }
             _ => return,
         };
-        let (w, h) = self.size();
-        let rects = layout.fit((w, h));
+        let (w, h) = self.window_size();
+        let rects = layout.fit(self.size());
         for (s, r) in self.screens.iter().zip(rects.iter()) {
             if let Some(r) = r {
                 let q = Quad {
