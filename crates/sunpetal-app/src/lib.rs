@@ -344,7 +344,11 @@ impl ApplicationHandler for App {
                     let (w, h) = g.window_size();
                     touchpad::band(w, h)
                 });
+                let corner = self.gfx.as_ref().filter(|_| cfg!(target_os = "android") && !self.settings.touch_controls_on()).map(|g| g.window_size());
                 match t.phase {
+                    Started if !self.menu.open && !consumed && corner.map_or(false, |(w, h)| touchpad::on_menu_button(w, h, p)) => {
+                        self.toggle_menu();
+                    }
                     Started if !self.menu.open && !consumed => {
                         let on_screen = self.gfx.as_ref().map_or(false, |g| self.layout().touch(g.size(), p, false).is_some());
                         if on_screen && self.touch.is_none() {
@@ -389,7 +393,7 @@ impl ApplicationHandler for App {
                 if let Some(why) = stopped {
                     eprintln!("stopped: {}", why);
                     self.save();
-                    if !self.settings.touch_controls_on() {
+                    if !self.settings.touch_controls_on() && !cfg!(target_os = "android") {
                         el.exit();
                         return;
                     }
@@ -412,9 +416,18 @@ impl ApplicationHandler for App {
                         let (ww, wh) = g.window_size();
                         let band = touchpad::band(ww, wh);
                         g.reserve = if pad_on { band.h } else { 0.0 };
-                        if menu.open || pad_on {
+                        let corner_on = cfg!(target_os = "android") && !pad_on;
+                        if menu.open || pad_on || corner_on {
                             let held = touch_held.clone();
                             let mut f = |ctx: &egui::Context| {
+                                if corner_on {
+                                    let info = match stopped_msg {
+                                        Some(why) => format!("stopped: {}", why),
+                                        None if settings.video.show_stats => shared.status.lock().unwrap().clone(),
+                                        None => String::new(),
+                                    };
+                                    touchpad::paint_menu_button(ctx, ww, wh, &info);
+                                }
                                 if pad_on {
                                     let info = match stopped_msg {
                                         Some(why) => format!("stopped: {}", why),

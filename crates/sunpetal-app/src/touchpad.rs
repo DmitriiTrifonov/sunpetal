@@ -140,6 +140,30 @@ pub fn paint(ctx: &egui::Context, area: Rect, held: &[&'static str], info: &str)
     }
 }
 
+/// The small menu button in the top-right corner, for a phone with the controls off.
+pub fn menu_button(w: f32, h: f32) -> Shape {
+    let r = w.min(h) * 0.045;
+    Shape::Circle { x: w - 1.8 * r, y: 3.0 * r, r }
+}
+
+/// Whether a finger landing at `p` is on that button.
+pub fn on_menu_button(w: f32, h: f32, p: (f32, f32)) -> bool {
+    menu_button(w, h).contains(p)
+}
+
+/// Draws that button; it stays faint so as not to be in the way.
+pub fn paint_menu_button(ctx: &egui::Context, w: f32, h: f32, info: &str) {
+    use egui::{Align2, Color32, FontId, Pos2, Stroke};
+    let k = ctx.pixels_per_point();
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("menubutton")));
+    painter.text(Pos2::new(8.0, 40.0), Align2::LEFT_TOP, info, FontId::proportional(14.0), Color32::from_rgb(255, 80, 80));
+    if let Shape::Circle { x, y, r } = menu_button(w, h) {
+        let c = Pos2::new(x / k, y / k);
+        painter.circle(c, r / k, Color32::from_black_alpha(90), Stroke::new(1.5, Color32::from_white_alpha(110)));
+        painter.text(c, Align2::CENTER_CENTER, "≡", FontId::proportional(r / k * 1.3), Color32::from_white_alpha(170));
+    }
+}
+
 /// The band under the screens for a window `w` x `h` pixels: tall enough for the DS's two screens
 /// to fill the width of a phone, and no less than 28% nor more than 50% of the window.
 pub fn band(w: f32, h: f32) -> Rect {
@@ -199,6 +223,14 @@ mod tests {
         let a = area();
         let got = pressed(a, &[centre(Kind::Button("L")), centre(Kind::Button("START"))]);
         assert_eq!(got, vec!["L", "START"]);
+    }
+
+    #[test]
+    fn the_corner_button_is_where_the_status_bar_is_not() {
+        let Shape::Circle { x, y, r } = menu_button(1080.0, 2400.0) else { unreachable!() };
+        assert!(x + r <= 1080.0 && y - r > 0.0);
+        assert!(on_menu_button(1080.0, 2400.0, (x, y)));
+        assert!(!on_menu_button(1080.0, 2400.0, (x - 3.0 * r, y)));
     }
 
     #[test]
