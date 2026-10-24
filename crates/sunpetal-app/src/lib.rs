@@ -534,10 +534,10 @@ pub fn run(o: Options, el: EventLoop<()>) {
         let p = PathBuf::from(&settings.video.texture_pack);
         if settings.video.texture_pack.is_empty() {
             None
-        } else if p.is_dir() {
+        } else if p.exists() {
             Some(p)
         } else {
-            eprintln!("texture pack {}: not a folder, ignored", p.display());
+            eprintln!("texture pack {}: no such folder or file, ignored", p.display());
             None
         }
     });

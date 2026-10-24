@@ -166,14 +166,18 @@ def to_rgba(img, clut=None):
     return bytes(out)
 
 
-def write_png(path, w, h, rgba):
+def png_bytes(w, h, rgba):
     def chunk(t, b):
         c = struct.pack('>I', len(b)) + t + b
         return c + struct.pack('>I', zlib.crc32(t + b))
     raw = b''.join(b'\0' + rgba[y * w * 4:(y + 1) * w * 4] for y in range(h))
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 6, 0, 0, 0))
+            + chunk(b'IDAT', zlib.compress(raw, 6)) + chunk(b'IEND', b''))
+
+
+def write_png(path, w, h, rgba):
     with open(path, 'wb') as f:
-        f.write(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 6, 0, 0, 0))
-                + chunk(b'IDAT', zlib.compress(raw, 6)) + chunk(b'IEND', b''))
+        f.write(png_bytes(w, h, rgba))
 
 
 def read_png(path):

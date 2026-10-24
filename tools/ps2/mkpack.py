@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Пакет текстур из PS2-диска: сопоставляет выгрузку DS с картинками PS2.
 
-    mkpack.py DISC.iso DUMP_DIR OUT_DIR [--max-mae 12] [--cache FILE]
+    mkpack.py DISC.iso DUMP_DIR OUT [--max-mae 12] [--cache FILE]
 
 DUMP_DIR — результат `--dump-textures` (PNG с ключами в именах). Для каждой текстуры DS
 ищется картинка PS2 с той же раскладкой (в 1, 2, 4 или 8 раз больше): сначала по
 уменьшенным копиям, потом точная проверка в разрешении DS. Найденная картинка PS2 в полном
 размере пишется в OUT_DIR под именем DS-текстуры; рендерер подставляет её по ключу.
-Отчёт: OUT_DIR/report.csv (имя, источник, ошибка; без совпадения — пустой источник).
+Если OUT заканчивается на `.spdata`, пишется файл данных (tools/ps2/spdata.py) вместо папки.
+Отчёт: report.csv рядом с OUT (имя, источник, ошибка; без совпадения — пустой источник).
 """
 import argparse
 import os
@@ -17,6 +18,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import iso
 import lf
+import spdata
 
 G = 12            # сетка уменьшенной копии
 SHAPES = (0x00, 0x01, 0x02, 0x0A, 0x13, 0x14)
@@ -117,7 +119,10 @@ def main():
     a = ap.parse_args()
     disc = iso.Iso(a.iso)
     idx = build_index(disc, a.cache)
-    os.makedirs(a.out, exist_ok=True)
+    as_file = a.out.endswith('.spdata')
+    out_dir = os.path.dirname(os.path.abspath(a.out)) if as_file else a.out
+    os.makedirs(out_dir, exist_ok=True)
+    packed = []
     loaded = {}      # путь -> {(entry, image): rgba}
     report = []
     for name in sorted(n for n in os.listdir(a.dump) if n.endswith('.png')):
@@ -138,12 +143,17 @@ def main():
             if best is None or err < best[0]:
                 best = (err, f, e, i, pw, ph, prgba)
         if best and best[0] <= a.max_mae:
-            lf.write_png(os.path.join(a.out, name), best[4], best[5], best[6])
+            if as_file:
+                packed.append((spdata.parse_name(name), lf.png_bytes(best[4], best[5], best[6])))
+            else:
+                lf.write_png(os.path.join(a.out, name), best[4], best[5], best[6])
             report.append((name, f'{best[1]}#{best[2]}.{best[3]}', f'{best[0]:.2f}'))
         else:
             report.append((name, '', f'{best[0]:.2f}' if best else ''))
         print(*report[-1])
-    with open(os.path.join(a.out, 'report.csv'), 'w') as f:
+    if as_file:
+        spdata.write(a.out, [p for p in packed if p[0]])
+    with open(os.path.join(out_dir, 'report.csv'), 'w') as f:
         f.write('name,source,mae\n' + ''.join(','.join(r) + '\n' for r in report))
     print(f'найдено {sum(1 for r in report if r[1])} из {len(report)}', file=sys.stderr)
 

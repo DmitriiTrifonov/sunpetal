@@ -22,7 +22,7 @@ pub struct Video {
     pub background: String,
     /// Speed figures over the picture (frame, fps, time per frame).
     pub show_stats: bool,
-    /// A folder of replacement textures (empty: none); read when the game starts.
+    /// A data file (`.spdata`) or a folder of replacement textures (empty: none); read when the game starts.
     pub texture_pack: String,
     /// The window's size in logical points when it was closed.
     pub window: [u32; 2],

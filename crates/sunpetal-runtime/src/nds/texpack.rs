@@ -10,9 +10,9 @@
 //! a multiple of the original's: it is sampled over the same texture coordinates).
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::Write as _;
+use std::io::{Read, Seek, SeekFrom, Write as _};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use super::render3d::{sample, GxPoly, Image, Mem, TexKey};
 use super::{note, Nds};
@@ -21,7 +21,7 @@ pub(super) struct TexPack {
     /// Where to write what the game uses (None: nowhere).
     pub dump: Option<PathBuf>,
     /// The replacements.
-    pub pack: Arc<HashMap<TexKey, Arc<Image>>>,
+    pub pack: Arc<Pack>,
     seen: HashSet<TexKey>,
     /// The key of a (TEXIMAGE_PARAM, PLTT_BASE) as of a generation of the texture memory.
     cache: HashMap<(u32, u32), (u64, TexKey)>,
@@ -30,11 +30,131 @@ pub(super) struct TexPack {
 
 impl TexPack {
     pub(super) fn new() -> TexPack {
-        TexPack { dump: None, pack: Arc::new(HashMap::new()), seen: HashSet::new(), cache: HashMap::new(), dumped: 0 }
+        TexPack { dump: None, pack: Arc::new(Pack::empty()), seen: HashSet::new(), cache: HashMap::new(), dumped: 0 }
     }
 
     pub(super) fn active(&self) -> bool {
         self.dump.is_some() || !self.pack.is_empty()
+    }
+}
+
+/// The replacement pictures, from a folder of PNGs or a data file (`tools/ps2/spdata.py`). Each is
+/// read and decoded the first time the game draws its texture, so a pack of thousands costs only
+/// what is used.
+pub(super) struct Pack {
+    entries: HashMap<TexKey, Entry>,
+    /// The data file the `Slice` entries are read from.
+    file: Option<Mutex<fs::File>>,
+}
+
+enum Source {
+    Path(PathBuf),
+    Slice { off: u64, len: u32 },
+}
+
+struct Entry {
+    source: Source,
+    image: OnceLock<Option<Arc<Image>>>,
+}
+
+impl Pack {
+    pub(super) fn empty() -> Pack {
+        Pack { entries: HashMap::new(), file: None }
+    }
+
+    pub(super) fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// The picture that replaces a texture, if the pack has one.
+    pub(super) fn get(&self, key: &TexKey) -> Option<Arc<Image>> {
+        let e = self.entries.get(key)?;
+        e.image
+            .get_or_init(|| {
+                let bytes = match &e.source {
+                    Source::Path(p) => fs::read(p).map_err(|x| x.to_string()),
+                    Source::Slice { off, len } => self.read_slice(*off, *len),
+                };
+                match bytes.and_then(|b| decode_png(&b)) {
+                    Ok(img) => Some(Arc::new(img)),
+                    Err(x) => {
+                        note(&format!("texture pack: {}: {}", file_name(key), x));
+                        None
+                    }
+                }
+            })
+            .clone()
+    }
+
+    fn read_slice(&self, off: u64, len: u32) -> Result<Vec<u8>, String> {
+        let mut f = self.file.as_ref().ok_or("no data file")?.lock().map_err(|_| "data file lock")?;
+        f.seek(SeekFrom::Start(off)).map_err(|e| e.to_string())?;
+        let mut buf = vec![0; len as usize];
+        f.read_exact(&mut buf).map_err(|e| e.to_string())?;
+        Ok(buf)
+    }
+
+    /// A folder of pictures named by `file_name`.
+    pub(super) fn from_dir(dir: &Path) -> Result<Pack, String> {
+        let rd = fs::read_dir(dir).map_err(|e| format!("texture pack {}: {}", dir.display(), e))?;
+        let mut entries = HashMap::new();
+        for e in rd.flatten() {
+            let p = e.path();
+            if let Some(key) = p.file_name().and_then(|n| n.to_str()).and_then(parse_name) {
+                entries.insert(key, Entry { source: Source::Path(p), image: OnceLock::new() });
+            }
+        }
+        Ok(Pack { entries, file: None })
+    }
+
+    /// A data file: the index is read now, the pictures later.
+    pub(super) fn from_file(path: &Path) -> Result<Pack, String> {
+        let bad = |why: &str| format!("data file {}: {}", path.display(), why);
+        let mut f = fs::File::open(path).map_err(|e| bad(&e.to_string()))?;
+        let mut head = [0u8; 12];
+        f.read_exact(&mut head).map_err(|_| bad("too short"))?;
+        if &head[..8] != b"SPDATA\0\x01" {
+            return Err(bad("not a Sunpetal data file, or a newer version of it"));
+        }
+        let sections = u32::from_le_bytes(head[8..12].try_into().unwrap());
+        let mut texs = None;
+        for _ in 0..sections.min(64) {
+            let mut s = [0u8; 20];
+            f.read_exact(&mut s).map_err(|_| bad("section table cut short"))?;
+            if &s[..4] == b"TEXS" {
+                texs = Some(u64::from_le_bytes(s[4..12].try_into().unwrap()));
+            }
+        }
+        let mut entries = HashMap::new();
+        if let Some(at) = texs {
+            f.seek(SeekFrom::Start(at)).map_err(|e| bad(&e.to_string()))?;
+            let mut r = std::io::BufReader::new(&mut f);
+            let mut n = [0u8; 4];
+            r.read_exact(&mut n).map_err(|_| bad("texture index cut short"))?;
+            for _ in 0..u32::from_le_bytes(n) {
+                let mut e = [0u8; 33];
+                r.read_exact(&mut e).map_err(|_| bad("texture index cut short"))?;
+                let key = TexKey {
+                    data: u64::from_le_bytes(e[0..8].try_into().unwrap()),
+                    pal: u64::from_le_bytes(e[8..16].try_into().unwrap()),
+                    fmt: e[16],
+                    w: u16::from_le_bytes([e[17], e[18]]),
+                    h: u16::from_le_bytes([e[19], e[20]]),
+                };
+                let source = Source::Slice { off: u64::from_le_bytes(e[21..29].try_into().unwrap()), len: u32::from_le_bytes(e[29..33].try_into().unwrap()) };
+                entries.insert(key, Entry { source, image: OnceLock::new() });
+            }
+        }
+        Ok(Pack { entries, file: Some(Mutex::new(f)) })
+    }
+
+    /// A folder or a data file, whichever the path is.
+    pub(super) fn open(path: &Path) -> Result<Pack, String> {
+        if path.is_dir() { Pack::from_dir(path) } else { Pack::from_file(path) }
     }
 }
 
@@ -149,9 +269,8 @@ fn write_png(path: &Path, img: &Image) -> Result<(), String> {
     w.write_image_data(&img.rgba).map_err(|e| e.to_string())
 }
 
-fn read_png(path: &Path) -> Result<Image, String> {
-    let f = fs::File::open(path).map_err(|e| e.to_string())?;
-    let mut dec = png::Decoder::new(std::io::BufReader::new(f));
+fn decode_png(bytes: &[u8]) -> Result<Image, String> {
+    let mut dec = png::Decoder::new(std::io::Cursor::new(bytes));
     dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut r = dec.read_info().map_err(|e| e.to_string())?;
     let mut buf = vec![0; r.output_buffer_size()];
@@ -172,31 +291,10 @@ fn read_png(path: &Path) -> Result<Image, String> {
 }
 
 impl Nds {
-    /// Reads a folder of replacements (pictures named as `file_name` makes them).
-    pub(super) fn load_pack(&mut self, dir: &Path) -> Result<(), String> {
-        let rd = fs::read_dir(dir).map_err(|e| format!("texture pack {}: {}", dir.display(), e))?;
-        let mut pack = HashMap::new();
-        let mut skipped = 0;
-        for e in rd.flatten() {
-            let p = e.path();
-            let Some(name) = p.file_name().and_then(|n| n.to_str()) else { continue };
-            let Some(key) = parse_name(name) else {
-                if name.ends_with(".png") {
-                    skipped += 1;
-                }
-                continue;
-            };
-            match read_png(&p) {
-                Ok(img) => {
-                    pack.insert(key, Arc::new(img));
-                }
-                Err(e) => {
-                    skipped += 1;
-                    note(&format!("texture pack: {}: {}", name, e));
-                }
-            }
-        }
-        note(&format!("texture pack {}: {} textures{}", dir.display(), pack.len(), if skipped != 0 { format!(", {} pictures skipped", skipped) } else { String::new() }));
+    /// Opens a pack: a folder of pictures named as `file_name` makes them, or a data file.
+    pub(super) fn load_pack(&mut self, path: &Path) -> Result<(), String> {
+        let pack = Pack::open(path)?;
+        note(&format!("texture pack {}: {} textures", path.display(), pack.len()));
         self.texpack.pack = Arc::new(pack);
         Ok(())
     }
@@ -306,5 +404,59 @@ mod tests {
         assert_eq!((img.w, img.h), (8, 8));
         assert_eq!(&img.rgba[..4], &[255, 0, 0, 255]);
         assert_eq!(img.rgba[7], 0, "the next texel is transparent");
+    }
+
+    fn key(data: u64, pal: u64, fmt: u8, w: u16, h: u16) -> TexKey {
+        TexKey { data, pal, fmt, w, h }
+    }
+
+    #[test]
+    fn a_data_file_gives_its_pictures_by_key() {
+        // tests/data/tiny.spdata is made by tools/ps2/spdata.py (the same file the Python side reads)
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/tiny.spdata");
+        let pack = Pack::from_file(&path).expect("the fixture opens");
+        assert_eq!(pack.len(), 2);
+        let red = pack.get(&key(0x1111, 0x2222, 4, 8, 8)).expect("the red one");
+        assert_eq!((red.w, red.h), (2, 2));
+        assert_eq!(&red.rgba[..4], &[255, 0, 0, 255]);
+        let blue = pack.get(&key(0x3333, 0, 7, 16, 8)).expect("the blue one");
+        assert_eq!((blue.w, blue.h, &blue.rgba[..4]), (4, 2, &[0u8, 0, 255, 255][..]));
+        assert!(pack.get(&key(1, 2, 3, 8, 8)).is_none());
+        // the second ask is the same picture, decoded once
+        assert!(Arc::ptr_eq(&red, &pack.get(&key(0x1111, 0x2222, 4, 8, 8)).unwrap()));
+    }
+
+    #[test]
+    fn something_that_is_not_a_data_file_is_refused() {
+        let dir = std::env::temp_dir().join(format!("sunpetal-spdata-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let bad = dir.join("bad.spdata");
+        fs::write(&bad, b"not a data file at all").unwrap();
+        assert!(Pack::from_file(&bad).is_err());
+        let cut = dir.join("cut.spdata");
+        let whole = fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/tiny.spdata")).unwrap();
+        fs::write(&cut, &whole[..60]).unwrap();
+        assert!(Pack::from_file(&cut).is_err(), "an index cut short");
+        // a newer version: the last magic byte
+        let mut newer = whole.clone();
+        newer[7] = 2;
+        fs::write(&dir.join("newer.spdata"), &newer).unwrap();
+        assert!(Pack::from_file(&dir.join("newer.spdata")).is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_folder_of_pictures_loads_lazily_and_open_takes_either() {
+        let dir = std::env::temp_dir().join(format!("sunpetal-folder-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let k = key(0xAB, 0, 7, 8, 8);
+        write_png(&dir.join(file_name(&k)), &Image { w: 1, h: 1, rgba: vec![9, 8, 7, 255] }).unwrap();
+        fs::write(dir.join("notes.txt"), b"ignored").unwrap();
+        let pack = Pack::open(&dir).unwrap();
+        assert_eq!(pack.len(), 1);
+        assert_eq!(pack.get(&k).unwrap().rgba, vec![9, 8, 7, 255]);
+        let tiny = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/tiny.spdata");
+        assert_eq!(Pack::open(&tiny).unwrap().len(), 2);
+        let _ = fs::remove_dir_all(&dir);
     }
 }

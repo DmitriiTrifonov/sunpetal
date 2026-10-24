@@ -83,7 +83,7 @@ pub(super) struct Job {
     /// The key of each (TEXIMAGE_PARAM, PLTT_BASE) the frame uses (`texpack`).
     pub keys: HashMap<(u32, u32), TexKey>,
     /// The replacement images by key.
-    pub pack: Arc<HashMap<TexKey, Arc<Image>>>,
+    pub pack: Arc<super::texpack::Pack>,
 }
 
 /// What a texture is, for the texture packs: hashes of its data (with its format, size and
@@ -371,8 +371,7 @@ fn raster(job: &Job, verts: &[GxVertex], s: usize, ya: usize, yb: usize) -> Targ
         let fmt = (p.tex >> 26) & 7;
         let textured = texture_on && fmt != 0;
         // a texture the pack replaces: sampled from its image
-        let replacement: Option<&Image> =
-            job.keys.get(&(p.tex, p.pal)).and_then(|k| job.pack.get(k)).map(|i| &**i);
+        let replacement: Option<Arc<Image>> = job.keys.get(&(p.tex, p.pal)).and_then(|k| job.pack.get(k));
         let eq_depth = attr & 0x4000 != 0;
         let fog_attr = attr & 0x8000 != 0;
         let write_trans_depth = attr & 0x800 != 0;
@@ -420,7 +419,7 @@ fn raster(job: &Job, verts: &[GxVertex], s: usize, ya: usize, yb: usize) -> Targ
             let (mut or, mut og, mut ob, mut oa) = (r, g, b, va);
             if textured {
                 let (tr, tg, tb, ta) = match replacement {
-                    Some(img) => sample_image(img, p.tex, s, tt),
+                    Some(ref img) => sample_image(img, p.tex, s, tt),
                     None => sample(&mem, p.tex, p.pal, s, tt),
                 };
                 if mode == 1 {
@@ -647,7 +646,7 @@ mod tests {
             tex: vec![0; 0x80000],
             texpal: vec![0; 0x18000],
             keys: HashMap::new(),
-            pack: Arc::new(HashMap::new()),
+            pack: Arc::new(crate::nds::texpack::Pack::empty()),
         }
     }
 
