@@ -164,7 +164,7 @@ impl Menu {
             egui::CollapsingHeader::new(tx("Debug", "Отладка")).show(ui, |ui| {
                 ui.checkbox(&mut s.video.show_stats, tx("Show speed figures", "Показывать скорость"));
                 ui.checkbox(&mut s.emulation.fast_button, tx("Fast-forward button beside the menu button (phone, no on-screen buttons)", "Кнопка ускорения рядом с кнопкой меню (телефон, без экранных кнопок)"));
-                ui.checkbox(&mut s.emulation.skip_button, tx("Skip button (Start) beside them", "Кнопка пропуска (Start) рядом с ними"));
+                ui.checkbox(&mut s.emulation.skip_button, tx("Skip button beside them (fast-forward until the game waits for you)", "Кнопка пропуска рядом с ними (перемотка, пока игра не станет ждать тебя)"));
             });
             egui::CollapsingHeader::new(tx("Profiles", "Профили")).show(ui, |ui| {
                 ui.horizontal(|ui| {

@@ -156,7 +156,7 @@ pub fn on_fast_button(w: f32, h: f32, p: (f32, f32)) -> bool {
     fast_button(w, h).contains(p)
 }
 
-/// The skip button (the DS's Start), left of the fast-forward button.
+/// The skip button (fast-forward until the game waits), left of the fast-forward button.
 pub fn skip_button(w: f32, h: f32) -> Shape {
     let Shape::Circle { x, y, r } = fast_button(w, h) else { unreachable!() };
     Shape::Circle { x: x - 2.4 * r, y, r }
@@ -186,7 +186,7 @@ pub fn paint_menu_button(ctx: &egui::Context, w: f32, h: f32, info: &str, fast: 
             painter.line_segment([Pos2::new(c.x - hw, c.y + dy), Pos2::new(c.x + hw, c.y + dy)], Stroke::new(r / k * 0.14, Color32::from_white_alpha(190)));
         }
     }
-    // skip (Start): a triangle and a bar, lit while held
+    // skip: a triangle and a bar, lit while a skip is running
     if let (Some(on), Shape::Circle { x, y, r }) = (skip, skip_button(w, h)) {
         let c = Pos2::new(x / k, y / k);
         let fill = if on { Color32::from_rgba_unmultiplied(255, 255, 255, 120) } else { Color32::from_black_alpha(90) };

@@ -96,7 +96,7 @@ pub struct Emulation {
     pub pause_in_menu: bool,
     /// A fast-forward button beside the menu button (a phone with the controls off).
     pub fast_button: bool,
-    /// A skip button (the DS's Start) beside them.
+    /// A skip button beside them: fast-forward until the picture stops changing.
     pub skip_button: bool,
 }
 

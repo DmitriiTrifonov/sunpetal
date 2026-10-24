@@ -9,6 +9,23 @@ use sunpetal_runtime::nds::{self, Config};
 
 use crate::audio::Ring;
 
+/// A skip ends when the picture has not changed for this many frames (a second of the game's time),
+/// or after this many in all (five minutes of it).
+const STILL_FRAMES: u32 = 60;
+const SKIP_LIMIT: u32 = 18_000;
+
+/// A fingerprint of a picture from a sample of its pixels: it changes when the picture moves.
+fn fingerprint(rgba: &[u8]) -> u64 {
+    let step = (rgba.len() / 4 / 3000).max(1) * 4;
+    let mut h = 0xcbf2_9ce4_8422_2325u64;
+    for px in rgba.chunks_exact(4).step_by(step / 4) {
+        for &b in &px[..3] {
+            h = (h ^ b as u64).wrapping_mul(0x100_0000_01b3);
+        }
+    }
+    h
+}
+
 /// The DS's frame rate (33 513 982 Hz / (6 x 355 x 263 x 2 / 2)).
 const FRAME_RATE: f64 = 59.8261;
 
@@ -29,6 +46,8 @@ pub struct Shared {
     pub quit: AtomicBool,
     /// Run without waiting for the clock.
     pub fast: AtomicBool,
+    /// Skip: run without waiting until the picture stops changing (the game waits for the player).
+    pub skip: AtomicBool,
     /// The machine waits (the menu is open).
     pub paused: AtomicBool,
     /// The emulation stopped (and why).
@@ -45,6 +64,7 @@ impl Shared {
             scale: AtomicUsize::new(2),
             quit: AtomicBool::new(false),
             fast: AtomicBool::new(false),
+            skip: AtomicBool::new(false),
             paused: AtomicBool::new(false),
             stopped: Mutex::new(None),
             status: Mutex::new(String::from("starting")),
@@ -76,6 +96,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     let mut prev = sunpetal_runtime::services::counters();
     let mut prev_t = nds::timing();
     let mut last_flush = Instant::now();
+    let (mut still, mut skipped, mut last_print) = (0u32, 0u32, 0u64);
     while !shared.quit.load(Ordering::Relaxed) {
         if shared.paused.load(Ordering::Relaxed) {
             std::thread::sleep(Duration::from_millis(10));
@@ -93,7 +114,20 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             break;
         }
         let t1 = Instant::now();
-        *shared.frame.lock().unwrap() = Some(nds::screens_rgba());
+        let picture = nds::screens_rgba();
+        let skipping = shared.skip.load(Ordering::Relaxed);
+        if skipping {
+            let print = fingerprint(&picture.1);
+            still = if print == last_print { still + 1 } else { 0 };
+            last_print = print;
+            skipped += 1;
+            if still >= STILL_FRAMES || skipped >= SKIP_LIMIT {
+                shared.skip.store(false, Ordering::Relaxed);
+            }
+        } else {
+            (still, skipped) = (0, 0);
+        }
+        *shared.frame.lock().unwrap() = Some(picture);
         t_run += t1 - t0;
         t_grab += t1.elapsed();
         counted += 1;
@@ -137,9 +171,11 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         }
         let samples = nds::take_samples();
         if let Some(a) = &audio {
-            a.push(&samples);
+            if !skipping {
+                a.push(&samples);
+            }
         }
-        if shared.fast.load(Ordering::Relaxed) {
+        if shared.fast.load(Ordering::Relaxed) || skipping {
             next = Instant::now();
             continue;
         }
@@ -162,4 +198,32 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
 #[allow(dead_code)]
 pub fn default_out(rom: &std::path::Path) -> PathBuf {
     rom.parent().map(|p| p.to_path_buf()).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn picture(seed: u8) -> Vec<u8> {
+        (0..2 * 256 * 192 * 4).map(|i| if i % 4 == 3 { 255 } else { (i as u32 * 7 + seed as u32 * 13) as u8 }).collect()
+    }
+
+    #[test]
+    fn a_still_picture_has_one_fingerprint_and_a_moving_one_another() {
+        assert_eq!(fingerprint(&picture(1)), fingerprint(&picture(1)));
+        assert_ne!(fingerprint(&picture(1)), fingerprint(&picture(2)));
+        // a change of one pixel in the middle of a row the sample takes
+        let mut a = picture(1);
+        let before = fingerprint(&a);
+        let step = (a.len() / 4 / 3000).max(1) * 4;
+        a[step * 100] ^= 0x40;
+        assert_ne!(before, fingerprint(&a));
+    }
+
+    #[test]
+    fn a_skip_is_long_enough_to_see_a_pause_and_short_enough_to_stop() {
+        // a second of the game's time still, and never more than five minutes
+        assert_eq!(STILL_FRAMES, 60);
+        assert_eq!(SKIP_LIMIT / 60, 300);
+    }
 }
