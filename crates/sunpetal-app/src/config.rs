@@ -139,6 +139,7 @@ pub struct Settings {
     pub audio: Audio,
     pub input: Input,
     pub emulation: Emulation,
+    pub effects: crate::effects::Effects,
 }
 
 /// The keys the menu offers for a button, by the name `KeyCode`'s `Debug` gives them.
@@ -168,6 +169,7 @@ impl Settings {
         }
         self.video.res = self.video.res.clamp(1, 8);
         self.video.window = [self.video.window[0].clamp(128, 16384), self.video.window[1].clamp(128, 16384)];
+        self.effects.sanitize();
         self.audio.volume = self.audio.volume.clamp(0.0, 1.0);
         self.input.stick_threshold = self.input.stick_threshold.clamp(0.1, 0.9);
         let defaults = Input::default().keys;

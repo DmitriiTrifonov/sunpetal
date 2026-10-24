@@ -14,6 +14,7 @@
 //! and at exit.
 mod audio;
 mod config;
+mod effects;
 mod emu;
 mod gfx;
 mod layout;
@@ -288,6 +289,7 @@ impl ApplicationHandler for App {
                     KeyCode::Tab => self.shared.fast.store(true, Ordering::Relaxed),
                     KeyCode::F2 => self.cycle_layout(),
                     KeyCode::F3 => self.settings.video.linear = !self.settings.video.linear,
+                    KeyCode::F6 => self.settings.effects = self.settings.effects.next_preset(),
                     KeyCode::F4 => self.settings.video.res = self.settings.video.res.saturating_sub(1).max(1),
                     KeyCode::F5 => self.settings.video.res = (self.settings.video.res + 1).min(8),
                     KeyCode::F11 => self.settings.video.fullscreen = !self.settings.video.fullscreen,
@@ -330,12 +332,13 @@ impl ApplicationHandler for App {
                     if let Some(g) = gfx {
                         let layout = layouts.iter().find(|l| l.name == settings.video.layout).unwrap_or(&layouts[0]).clone();
                         let names: Vec<&str> = layouts.iter().map(|l| l.name).collect();
+                        let fx = settings.effects.clone();
                         let internal = (256 * settings.video.res as u32, 192 * settings.video.res as u32);
                         if menu.open {
                             let mut f = |ctx: &egui::Context| action = menu.show(ctx, settings, &names, internal);
-                            g.draw(&layout, Some(&mut f));
+                            g.draw(&layout, &fx, Some(&mut f));
                         } else {
-                            g.draw(&layout, None);
+                            g.draw(&layout, &fx, None);
                         }
                     }
                 }

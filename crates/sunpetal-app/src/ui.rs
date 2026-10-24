@@ -74,6 +74,44 @@ impl Menu {
                 }
                 ui.label(tx("Takes effect the next time the game starts.", "Применится при следующем запуске игры."));
             });
+            egui::CollapsingHeader::new(tx("Effects", "Эффекты")).show(ui, |ui| {
+                let label = |id: &str| -> &'static str {
+                    match (id, lang == Lang::Ru) {
+                        ("none", false) => "none",
+                        ("none", true) => "без эффектов",
+                        ("sharp", false) => "sharp pixels",
+                        ("sharp", true) => "чёткие пиксели",
+                        ("lcd", false) => "LCD grid",
+                        ("lcd", true) => "сетка LCD",
+                        ("crt", false) => "CRT",
+                        ("crt", true) => "ЭЛТ",
+                        ("vivid", false) => "vivid colours",
+                        ("vivid", true) => "яркие цвета",
+                        (_, false) => "custom",
+                        (_, true) => "свои настройки",
+                    }
+                };
+                egui::ComboBox::from_label(tx("Preset (F6)", "Пресет (F6)")).selected_text(label(&s.effects.preset)).show_ui(ui, |ui| {
+                    for p in crate::effects::PRESETS {
+                        if ui.selectable_label(s.effects.preset == p, label(p)).clicked() {
+                            s.effects = crate::effects::Effects::preset(p);
+                        }
+                    }
+                });
+                let before = s.effects.clone();
+                let e = &mut s.effects;
+                ui.checkbox(&mut e.sharp, tx("Sharp pixels", "Чёткие пиксели"));
+                ui.add(egui::Slider::new(&mut e.scanlines, 0.0..=1.0).text(tx("Scanlines", "Строки")));
+                ui.add(egui::Slider::new(&mut e.grid, 0.0..=1.0).text(tx("Pixel grid", "Сетка пикселей")));
+                ui.add(egui::Slider::new(&mut e.vignette, 0.0..=1.0).text(tx("Vignette", "Виньетка")));
+                ui.add(egui::Slider::new(&mut e.saturation, 0.0..=2.0).text(tx("Saturation", "Насыщенность")));
+                ui.add(egui::Slider::new(&mut e.contrast, 0.5..=1.5).text(tx("Contrast", "Контраст")));
+                ui.add(egui::Slider::new(&mut e.brightness, -0.3..=0.3).text(tx("Brightness", "Яркость")));
+                ui.add(egui::Slider::new(&mut e.gamma, 0.5..=2.0).text(tx("Gamma", "Гамма")));
+                if *e != before {
+                    e.preset = "custom".into();
+                }
+            });
             egui::CollapsingHeader::new(tx("Sound", "Звук")).default_open(true).show(ui, |ui| {
                 ui.add(egui::Slider::new(&mut s.audio.volume, 0.0..=1.0).text(tx("Volume", "Громкость")));
                 ui.checkbox(&mut s.audio.mute, tx("Mute", "Без звука"));
@@ -99,7 +137,7 @@ impl Menu {
             });
             egui::CollapsingHeader::new(tx("Emulation", "Эмуляция")).show(ui, |ui| {
                 ui.checkbox(&mut s.emulation.pause_in_menu, tx("Pause while the menu is open", "Пауза, пока открыто меню"));
-                ui.label(tx("F2 layout, F3 filter, F4/F5 3D resolution, F11 full screen, Tab fast forward, F1 or Esc menu.", "F2 раскладка, F3 фильтр, F4/F5 разрешение 3D, F11 полный экран, Tab ускорение, F1 или Esc меню."));
+                ui.label(tx("F2 layout, F3 filter, F4/F5 3D resolution, F6 effects, F11 full screen, Tab fast forward, F1 or Esc menu.", "F2 раскладка, F3 фильтр, F4/F5 разрешение 3D, F6 эффекты, F11 полный экран, Tab ускорение, F1 или Esc меню."));
             });
             egui::CollapsingHeader::new(tx("Profiles", "Профили")).show(ui, |ui| {
                 ui.horizontal(|ui| {

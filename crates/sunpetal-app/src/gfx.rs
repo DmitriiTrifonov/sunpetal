@@ -5,10 +5,16 @@ use std::sync::Arc;
 use bytemuck::{Pod, Zeroable};
 use winit::window::Window;
 
+use crate::effects::Effects;
 use crate::layout::Layout;
 
 const SHADER: &str = r#"
-struct Quad { rect: vec4<f32> };   // x0, y0, x1, y1 in clip space
+struct Quad {
+    rect: vec4<f32>,   // x0, y0, x1, y1 in clip space
+    fx: vec4<f32>,     // scanlines, grid, vignette, sharp
+    color: vec4<f32>,  // saturation, contrast, brightness, gamma
+    dims: vec4<f32>,   // the texture's width and height, the window's pixels per DS pixel
+};
 @group(0) @binding(0) var<uniform> q: Quad;
 @group(0) @binding(1) var tex: texture_2d<f32>;
 @group(0) @binding(2) var samp: sampler;
@@ -27,7 +33,30 @@ fn vs(@builtin(vertex_index) i: u32) -> Out {
 
 @fragment
 fn fs(in: Out) -> @location(0) vec4<f32> {
-    return textureSample(tex, samp, in.uv);
+    let ts = q.dims.xy;
+    var uv = in.uv;
+    if (q.fx.w > 0.5) {
+        // sharp pixels: nearest in the middle of a texel, a linear blend only over the edge
+        let p = uv * ts;
+        let pi = floor(p);
+        let w = max(fwidth(p), vec2<f32>(0.0001));
+        uv = (pi + 0.5 + clamp((p - pi - 0.5) / w, vec2<f32>(-0.5), vec2<f32>(0.5))) / ts;
+    }
+    var c = textureSample(tex, samp, uv).rgb;
+    // the DS's own pixels and lines, only where the window has room to show them
+    let room = clamp(q.dims.z - 1.0, 0.0, 1.0);
+    let fr = fract(in.uv * vec2<f32>(256.0, 192.0));
+    let line = 0.5 + 0.5 * cos((fr.y - 0.5) * 6.2831853);
+    c = c * (1.0 - q.fx.x * room * (1.0 - line));
+    let e = min(min(fr.x, 1.0 - fr.x), min(fr.y, 1.0 - fr.y));
+    c = c * (1.0 - q.fx.y * room * (1.0 - smoothstep(0.0, 0.3, e)));
+    let d = in.uv - vec2<f32>(0.5);
+    c = c * (1.0 - q.fx.z * dot(d, d) * 2.0);
+    let luma = dot(c, vec3<f32>(0.299, 0.587, 0.114));
+    c = mix(vec3<f32>(luma), c, q.color.x);
+    c = (c - vec3<f32>(0.5)) * q.color.y + vec3<f32>(0.5 + q.color.z);
+    c = pow(max(c, vec3<f32>(0.0)), vec3<f32>(1.0 / q.color.w));
+    return vec4<f32>(c, 1.0);
 }
 "#;
 
@@ -35,6 +64,9 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Quad {
     rect: [f32; 4],
+    fx: [f32; 4],
+    color: [f32; 4],
+    dims: [f32; 4],
 }
 
 struct Screen {
@@ -84,7 +116,7 @@ fn make_screen(
     let view = texture.create_view(&Default::default());
     let uniform = device.create_buffer(&wgpu::BufferDescriptor {
         label: None,
-        size: 16,
+        size: std::mem::size_of::<Quad>() as u64,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
@@ -139,7 +171,7 @@ impl Gfx {
             [
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -254,7 +286,7 @@ impl Gfx {
     }
 
     /// Draws the screens, then, with `menu`, the menu over them.
-    pub fn draw(&mut self, layout: &Layout, menu: Option<&mut dyn FnMut(&egui::Context)>) {
+    pub fn draw(&mut self, layout: &Layout, fx: &Effects, menu: Option<&mut dyn FnMut(&egui::Context)>) {
         use wgpu::CurrentSurfaceTexture as T;
         let frame = match self.surface.get_current_texture() {
             T::Success(f) | T::Suboptimal(f) => f,
@@ -270,6 +302,9 @@ impl Gfx {
             if let Some(r) = r {
                 let q = Quad {
                     rect: [r.x / w * 2.0 - 1.0, 1.0 - r.y / h * 2.0, (r.x + r.w) / w * 2.0 - 1.0, 1.0 - (r.y + r.h) / h * 2.0],
+                    fx: [fx.scanlines, fx.grid, fx.vignette, if fx.sharp { 1.0 } else { 0.0 }],
+                    color: [fx.saturation, fx.contrast, fx.brightness, fx.gamma],
+                    dims: [256.0 * self.scale as f32, 192.0 * self.scale as f32, r.w / 256.0, 0.0],
                 };
                 self.queue.write_buffer(&s.uniform, 0, bytemuck::bytes_of(&q));
             }
