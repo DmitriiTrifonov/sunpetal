@@ -538,6 +538,22 @@ pub fn script_mark() -> Option<u32> {
     })?
 }
 
+/// Whether the game's script is at a `WAIT`, a command that waits for the player's A (a line of speech is
+/// followed by one), by the command the runner holds (`0207596C + 0x1C`); `None` as `script_idle`.
+pub fn script_waits() -> Option<bool> {
+    nds(|n| n.cart.rom.get(0xC..0x10) == Some(b"YHNP".as_slice())).then(|| {
+        crate::machine::machine(|m| {
+            let mut w = [0u8; 4];
+            m.mem.read_bytes(9, 0x0207_5988, &mut w).then(|| u32::from_le_bytes(w)).and_then(|cmd| {
+                m.mem.read_bytes(9, cmd, &mut w).then(|| u32::from_le_bytes(w) == OP_WAIT)
+            })
+        })
+    })?
+}
+
+/// The command `<WAIT>` compiles to.
+const OP_WAIT: u32 = 9;
+
 /// The report of a run's end: the time, each CPU's state, the interrupts taken.
 pub fn report() {
     let (vbl, t) = (vblanks(), now());

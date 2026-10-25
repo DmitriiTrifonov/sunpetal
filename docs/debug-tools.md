@@ -101,7 +101,7 @@ python3 tools/debug/check_log.py out/c04.jsonl --scene C04_16 --s patched/Chapte
 
 `--repl` читает команды, по одной в строке; ответ — строка `{"ok":true,"vblank":N,…}` или `{"error":"…"}`:
 
-`skip [FRAMES]` (A пачками, пока скрипт не простоит свободным 45 кадров: метка игры `0206577C == -2`, как у F7 в приложении) | `request N` | `setvalue I V` | `value I` | `teleport X Y Z` | `changemap MAP X Y Z` (приложение обработчика: действует только внутри идущего скрипта) | `run N` | `press KEYS [FRAMES]` | `tap X Y [FRAMES]` | `shot FILE` | `log FILE|off` | `advance [FRAMES]` | `walk N [FRAMES]` | `shown` | `quit`.
+`skip [FRAMES]` (как F7 в приложении: без нажатий, до команды `WAIT` скрипта или до свободной ходьбы; ответ `stopped`: waits/idle/limit) | `request N` | `setvalue I V` | `value I` | `teleport X Y Z` | `changemap MAP X Y Z` (приложение обработчика: действует только внутри идущего скрипта) | `run N` | `press KEYS [FRAMES]` | `tap X Y [FRAMES]` | `shot FILE` | `log FILE|off` | `advance [FRAMES]` | `walk N [FRAMES]` | `shown` | `quit`.
 
 Кнопки: `A B SELECT START RIGHT LEFT UP DOWN R L X Y`, через `+`. Остальные команды (`peek`, `find`, `findhex`, `slots`, `calls`, `callsarg`, `callsstr`) — разведка движка, не часть схемы.
 

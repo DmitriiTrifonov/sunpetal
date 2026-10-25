@@ -102,8 +102,8 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             done(json!({}))
         }
         "skip" => {
-            let (frames, ended) = s.skip(number(w.first(), "FRAMES", Some(18000))?)?;
-            done(json!({"frames": frames, "ended": ended}))
+            let (frames, why) = s.skip(number(w.first(), "FRAMES", Some(18000))?)?;
+            done(json!({"frames": frames, "stopped": why}))
         }
         "goto" => {
             s.goto(w.first().ok_or("goto Cnn_yy")?, None)?;

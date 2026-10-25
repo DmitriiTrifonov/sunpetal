@@ -376,21 +376,23 @@ impl Session {
         Ok(Stop::MaxLines)
     }
 
-    /// Plays on with A pulsed (4 frames held in each 16) until the game's script has been idle for 45 frames, as the
-    /// app's skip does, for at most `max` frames. The frames it took, and whether the script ended.
-    pub fn skip(&mut self, max: u64) -> Result<(u64, bool), String> {
-        let mut idle = 0;
+    /// Plays on as the app's skip does: undisturbed, until the game's script waits for the player's A (a line of
+    /// speech, a `WAIT`) or has been idle for 45 frames, for at most `max` frames. The frames it took, and why it
+    /// stopped: "waits", "idle" or "limit".
+    pub fn skip(&mut self, max: u64) -> Result<(u64, &'static str), String> {
+        let (mut idle, mut waits) = (0, 0);
         for i in 0..max {
-            self.keys = if i % 16 < 4 { 1 } else { 0 };
-            let r = self.run(1);
-            self.keys = 0;
-            r?;
+            self.run(1)?;
             idle = if nds::script_idle() == Some(true) { idle + 1 } else { 0 };
+            waits = if nds::script_waits() == Some(true) { waits + 1 } else { 0 };
+            if waits >= 2 {
+                return Ok((i + 1, "waits"));
+            }
             if idle >= 45 {
-                return Ok((i + 1, true));
+                return Ok((i + 1, "idle"));
             }
         }
-        Ok((max, false))
+        Ok((max, "limit"))
     }
 
     /// The state now: scene, line shown, face, and the game's frame.
