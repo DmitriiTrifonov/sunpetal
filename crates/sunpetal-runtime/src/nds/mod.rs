@@ -527,7 +527,9 @@ pub fn vblanks() -> u64 {
 /// by the mark the game keeps for it (`0206577C` is -2 then). Only the European dump (`YHNP`) is known; `None`
 /// for any other game, or before the game has set the mark up.
 pub fn script_idle() -> Option<bool> {
-    script_mark().map(|w| w == 0xFFFF_FFFE)
+    // a running script holds -1 or the count of a wait (a few hundred at most); -2 is idle; anything else is
+    // what an old scene left behind (the title after a reset shows `000047C4`): no script runs
+    script_mark().map(|w| !(w == u32::MAX || w <= 0x1000))
 }
 
 /// The game's mark of a running script itself (`0xFFFFFFFE` when idle), for the European dump.
