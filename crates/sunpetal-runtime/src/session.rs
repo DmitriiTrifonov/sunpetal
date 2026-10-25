@@ -296,9 +296,9 @@ impl Session {
             self.run(60)?;
         }
         let y = *REQUEST_ROWS.get((n % 3) as usize).ok_or("request row")?;
-        self.tap(150, y, 9)?;
+        self.tap(230, y, 9)?;
         self.run(60)?;
-        self.tap(150, y, 9)?;
+        self.tap(230, y, 9)?;
         let want = format!("C{:02}_01", n);
         for _ in 0..1500 {
             if self.scene.as_deref() == Some(want.as_str()) {
