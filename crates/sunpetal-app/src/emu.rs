@@ -144,40 +144,46 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         {
             let i = shared.input.lock().unwrap();
             // a skip through a dialogue presses A
-            let a = shared.skip.load(Ordering::Relaxed) && shared.marks.load(Ordering::Relaxed) && shared.dialogue.load(Ordering::Relaxed) && skipped % PULSE < 4;
+            // (not once the script is idle: that A would be the player's)
+            let a = shared.skip.load(Ordering::Relaxed) && shared.marks.load(Ordering::Relaxed) && !shared.idle.load(Ordering::Relaxed) && skipped % PULSE < 4;
             nds::set_input(i.keys | if a { KEY_A } else { 0 }, i.pen);
         }
-        // a skip is hidden by the fade: draw it at the native size, the cheapest
-        let scale = if shared.skip.load(Ordering::Relaxed) { 1 } else { shared.scale.load(Ordering::Relaxed) };
-        nds::set_scale(scale);
-        nds::set_draw(true);
+        // with the game's marks a skip draws nothing (the screen is dark for it: the frames cost only the game's
+        // own time); without them it needs the picture, at the native size, the cheapest
+        let skipping_now = shared.skip.load(Ordering::Relaxed);
+        let draw = !(skipping_now && shared.marks.load(Ordering::Relaxed));
+        nds::set_scale(if skipping_now { 1 } else { shared.scale.load(Ordering::Relaxed) });
+        nds::set_draw(draw);
         let t0 = Instant::now();
         if !nds::run_frame() {
             break;
         }
         let t1 = Instant::now();
-        let picture = nds::screens_rgba();
         let skipping = shared.skip.load(Ordering::Relaxed);
         let idle = nds::script_idle();
         shared.marks.store(idle.is_some(), Ordering::Relaxed);
         shared.idle.store(idle == Some(true), Ordering::Relaxed);
-        let dialogue = dialogue_shown(picture.0, &picture.1);
-        shared.dialogue.store(dialogue, Ordering::Relaxed);
+        if draw {
+            let picture = nds::screens_rgba();
+            shared.dialogue.store(dialogue_shown(picture.0, &picture.1), Ordering::Relaxed);
+            if skipping {
+                let print = fingerprint(&picture.1);
+                still = if print == last_print { still + 1 } else { 0 };
+                last_print = print;
+            }
+            *shared.frame.lock().unwrap() = Some(picture);
+        }
         if skipping {
-            let print = fingerprint(&picture.1);
-            still = if print == last_print { still + 1 } else { 0 };
-            last_print = print;
             skipped += 1;
             idle_for = if idle == Some(true) { idle_for + 1 } else { 0 };
-            // a still picture over a dialogue is the game waiting for the A that this skip presses
-            let stuck = still >= STILL_FRAMES && !(idle.is_some() && dialogue);
+            // a still picture means the game waits, which only a skip without the game's marks can tell
+            let stuck = idle.is_none() && still >= STILL_FRAMES;
             if idle_for >= IDLE_FRAMES || stuck || skipped >= SKIP_LIMIT {
                 shared.skip.store(false, Ordering::Relaxed);
             }
         } else {
             (still, skipped, idle_for) = (0, 0, 0);
         }
-        *shared.frame.lock().unwrap() = Some(picture);
         t_run += t1 - t0;
         t_grab += t1.elapsed();
         counted += 1;
