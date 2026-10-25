@@ -188,7 +188,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             let tm = nds::timing();
             let per = |a: u64, b: u64| (a - b) as f64 / shown as f64;
             *shared.status.lock().unwrap() = format!(
-                "DS frame {}, {:.0} fps\nrun {:.0} ms/frame, picture {:.1} ms\nper frame: polls {:.0}, calls {:.0}\nquanta {:.0}: guest {:.1} ms, hardware {:.1} ms, sound {:.1} ms",
+                "DS frame {}, {:.0} fps\nrun {:.0} ms/frame, picture {:.1} ms\nper frame: polls {:.0}, calls {:.0}\nquanta {:.0}: guest {:.1} ms, hardware {:.1} ms, sound {:.1} ms\nskip {} (marks {}, idle {}, dialogue {}), script mark {:08X}",
                 nds::vblanks(),
                 fps,
                 t_run.as_secs_f64() * 1000.0 / shown as f64,
@@ -198,7 +198,12 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
                 (tm.0 - prev_t.0) as f64 / shown as f64,
                 (tm.1 - prev_t.1) as f64 / 1e6 / shown as f64,
                 (tm.2 - prev_t.2) as f64 / 1e6 / shown as f64,
-                (tm.3 - prev_t.3) as f64 / 1e6 / shown as f64
+                (tm.3 - prev_t.3) as f64 / 1e6 / shown as f64,
+                skipping,
+                shared.marks.load(Ordering::Relaxed),
+                shared.idle.load(Ordering::Relaxed),
+                shared.dialogue.load(Ordering::Relaxed),
+                nds::script_mark().unwrap_or(0)
             );
             if stats {
                 eprintln!("{}", shared.status.lock().unwrap());

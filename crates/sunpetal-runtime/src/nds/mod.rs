@@ -527,9 +527,14 @@ pub fn vblanks() -> u64 {
 /// by the mark the game keeps for it (`0206577C` is -2 then). Only the European dump (`YHNP`) is known; `None`
 /// for any other game, or before the game has set the mark up.
 pub fn script_idle() -> Option<bool> {
+    script_mark().map(|w| w == 0xFFFF_FFFE)
+}
+
+/// The game's mark of a running script itself (`0xFFFFFFFE` when idle), for the European dump.
+pub fn script_mark() -> Option<u32> {
     nds(|n| n.cart.rom.get(0xC..0x10) == Some(b"YHNP".as_slice())).then(|| {
         let mut w = [0u8; 4];
-        crate::machine::machine(|m| m.mem.read_bytes(9, 0x0206_577C, &mut w)).then(|| u32::from_le_bytes(w) == 0xFFFF_FFFE)
+        crate::machine::machine(|m| m.mem.read_bytes(9, 0x0206_577C, &mut w)).then(|| u32::from_le_bytes(w))
     })?
 }
 
