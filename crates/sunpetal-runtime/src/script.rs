@@ -54,8 +54,11 @@ pub fn lines(src: &str) -> Vec<Line> {
         if id.is_empty() || !id.bytes().all(|b| b.is_ascii_digit()) {
             continue;
         }
+        // a line that starts with `//` is the translator's note, not text; blank lines round the text are not either
+        let body: Vec<&str> = body.split('\n').filter(|l| !l.trim_start().starts_with("//")).collect();
+        let body = body.join("\n");
         // the file puts a line end each side of `<R>`: together they are one break
-        let text = body.trim_end_matches('\n').replace("\n<R>\n", "\n").replace("<R>\n", "\n").replace("\n<R>", "\n").replace("<R>", "\n");
+        let text = body.trim_matches('\n').replace("\n<R>\n", "\n").replace("<R>\n", "\n").replace("\n<R>", "\n").replace("<R>", "\n");
         out.push(Line { id, text });
     }
     out
@@ -157,6 +160,12 @@ mod tests {
         assert_eq!(map_target(t), Some(45));
         assert_eq!(map_target("<WAIT>\n</WAIT>\n"), None);
         assert_eq!(utf16le(&[0xFF, 0xFE, b'a', 0, b'b', 0]), "ab");
+    }
+
+    #[test]
+    fn note_lines_are_not_text() {
+        let l = lines("[[01015\r\n//...Is what this feels\r\n//<R>\r\n//like.\r\n\r\nfirst<R>\r\nsecond\r\n\r\n[[01018\r\n//Final, huh...\r\n\r\nOne.\r\n\r\n");
+        assert_eq!(l, vec![Line { id: "01015".into(), text: "first\nsecond".into() }, Line { id: "01018".into(), text: "One.".into() }]);
     }
 
     #[test]

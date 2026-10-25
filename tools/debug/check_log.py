@@ -17,7 +17,7 @@ def lines_of(path):
         head, _, body = chunk.partition("\n")
         if not head.strip().isdigit():
             continue
-        out.append((head.strip(), re.sub(r"\n?<R>\n?", "\n", body.rstrip("\n"))))
+        out.append((head.strip(), re.sub(r"\n?<R>\n?", "\n", "\n".join(l for l in body.split("\n") if not l.lstrip().startswith("//")).strip("\n"))))
     return out
 
 
