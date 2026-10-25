@@ -72,6 +72,8 @@ pub struct Shared {
     pub dialogue: AtomicBool,
     /// The game says when its script runs, so a skip can go through dialogues (set by the emulation).
     pub marks: AtomicBool,
+    /// The script is idle (the player has the control): there is nothing to skip (set by the emulation).
+    pub idle: AtomicBool,
     /// The machine waits (the menu is open).
     pub paused: AtomicBool,
     /// The emulation stopped (and why).
@@ -81,10 +83,12 @@ pub struct Shared {
 }
 
 impl Shared {
-    /// A skip starts, or a running one is cancelled; without the game's marks none starts over a dialogue.
+    /// A skip starts, or a running one is cancelled; none starts while the game's script is idle (nothing to skip: the
+    /// title, a free walk), and without the game's marks none starts over a dialogue.
     pub fn toggle_skip(&self) {
         let on = !self.skip.load(Ordering::Relaxed);
-        let blocked = self.dialogue.load(Ordering::Relaxed) && !self.marks.load(Ordering::Relaxed);
+        let marks = self.marks.load(Ordering::Relaxed);
+        let blocked = (self.dialogue.load(Ordering::Relaxed) && !marks) || (marks && self.idle.load(Ordering::Relaxed));
         self.skip.store(on && !blocked, Ordering::Relaxed);
     }
 
@@ -98,6 +102,7 @@ impl Shared {
             skip: AtomicBool::new(false),
             dialogue: AtomicBool::new(false),
             marks: AtomicBool::new(false),
+            idle: AtomicBool::new(false),
             paused: AtomicBool::new(false),
             stopped: Mutex::new(None),
             status: Mutex::new(String::from("starting")),
@@ -155,6 +160,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         let skipping = shared.skip.load(Ordering::Relaxed);
         let idle = nds::script_idle();
         shared.marks.store(idle.is_some(), Ordering::Relaxed);
+        shared.idle.store(idle == Some(true), Ordering::Relaxed);
         let dialogue = dialogue_shown(picture.0, &picture.1);
         shared.dialogue.store(dialogue, Ordering::Relaxed);
         if skipping {
@@ -288,5 +294,42 @@ mod tests {
         // a second of the game's time still, and never more than five minutes
         assert_eq!(STILL_FRAMES, 60);
         assert_eq!(SKIP_LIMIT / 60, 300);
+    }
+}
+
+#[cfg(test)]
+mod skip_tests {
+    use super::*;
+
+    /// F7 on the title screen starts nothing (the game's script is idle there). Needs the
+    /// ROM (`SUNPETAL_ROM`) and runs the machine for real: skipped without it.
+    #[test]
+    fn a_skip_on_the_title_screen_does_not_start() {
+        let Some(rom) = std::env::var_os("SUNPETAL_ROM").map(PathBuf::from) else {
+            eprintln!("skipped: SUNPETAL_ROM is not set");
+            return;
+        };
+        let mut cfg = Config::new(&rom);
+        cfg.out = std::env::temp_dir();
+        cfg.save = Some(std::env::temp_dir().join("skip_title.sav"));
+        let shared = Shared::new();
+        shared.fast.store(true, Ordering::Relaxed);
+        let _machine = spawn(cfg, shared.clone(), None);
+        let frame_of = |s: &Shared| -> u64 { s.status.lock().unwrap().split_whitespace().nth(2).and_then(|n| n.trim_end_matches(',').parse().ok()).unwrap_or(0) };
+        let t = Instant::now();
+        while frame_of(&shared) < 2700 && t.elapsed() < Duration::from_secs(120) {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let at = frame_of(&shared);
+        assert!(at >= 2700, "the game did not reach the title: frame {}", at);
+        eprintln!("marks {}", shared.marks.load(Ordering::Relaxed));
+        // the title has no script running: F7 does nothing, the screen does not go dark
+        shared.toggle_skip();
+        assert!(!shared.skip.load(Ordering::Relaxed), "a skip started with nothing to skip");
+        std::thread::sleep(Duration::from_millis(500));
+        let (_, rgba) = shared.frame.lock().unwrap().clone().expect("a picture");
+        let bright = rgba.chunks_exact(4).map(|p| p[0] as u64 + p[1] as u64 + p[2] as u64).sum::<u64>() / (rgba.len() as u64 / 4);
+        assert!(bright > 30, "the picture is black");
+        shared.quit.store(true, Ordering::Relaxed);
     }
 }
