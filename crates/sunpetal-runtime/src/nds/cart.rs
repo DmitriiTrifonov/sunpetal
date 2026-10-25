@@ -174,6 +174,8 @@ impl Nds {
                     c.data[i] = u32::from_le_bytes([c.rom[a], c.rom[a + 1], c.rom[a + 2], c.rom[a + 3]]);
                 }
             }
+            #[cfg(feature = "debug-tools")]
+            super::debug::on_card_read(addr, len);
             self.trace(|| format!("card: read {:08X}, {} bytes", addr, len));
         } else if op == 0xB8 {
             let id = c.chip_id;

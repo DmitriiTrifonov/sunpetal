@@ -8,6 +8,16 @@ pub mod nds;
 pub mod sched;
 pub mod selftest;
 pub mod services;
+#[cfg(feature = "debug-tools")]
+pub mod dialogue;
+#[cfg(feature = "debug-tools")]
+pub mod script;
+#[cfg(feature = "debug-tools")]
+pub mod evn;
+#[cfg(feature = "debug-tools")]
+pub mod nitrofs;
+#[cfg(feature = "debug-tools")]
+pub mod session;
 
 pub use abi::{modules, ArmModule, Cpu};
 pub use machine::{machine, Hardware, Machine, NoHardware};

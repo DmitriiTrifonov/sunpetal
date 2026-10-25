@@ -8,6 +8,18 @@ license.workspace = true
 [dependencies]
 corosensei = "0.2"
 png = "0.17"
+clap = { version = "4", features = ["derive"], optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+
+[features]
+# Tools for proofreading the translation (docs/DEBUG-TOOLS-PLAN.md); off in an ordinary build.
+debug-tools = ["dep:clap", "dep:serde", "dep:serde_json"]
+
+[[bin]]
+name = "sunpetal-debug"
+path = "src/bin/sunpetal-debug.rs"
+required-features = ["debug-tools"]
 
 [build-dependencies]
 cc = "1"

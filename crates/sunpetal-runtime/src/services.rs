@@ -277,7 +277,10 @@ pub unsafe extern "C" fn arm_interpret(c: *mut Cpu, key: u32) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn arm_trace_enter(_c: *mut Cpu, _key: u32) {}
+pub unsafe extern "C" fn arm_trace_enter(_c: *mut Cpu, _key: u32) {
+    #[cfg(feature = "debug-tools")]
+    crate::nds::debug::on_enter(&mut *_c, _key);
+}
 
 // ---- CP15 ------------------------------------------------------------------------------------
 // Without the machine (`Machine::cp15_real` off): keeps what is written to it and gives it back,

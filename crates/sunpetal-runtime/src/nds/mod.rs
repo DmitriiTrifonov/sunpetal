@@ -10,6 +10,8 @@
 //! borrows; nothing may call `nds()` from inside them (the DMA, the timers and the rest use
 //! their own `&mut self`).
 mod cart;
+#[cfg(feature = "debug-tools")]
+pub mod debug;
 mod gpu2d;
 mod gx;
 mod input;
