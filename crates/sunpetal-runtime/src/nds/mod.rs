@@ -526,10 +526,27 @@ pub fn vblanks() -> u64 {
 /// Whether the game's script runner is idle (the scene's script has ended and the player has the control),
 /// by the mark the game keeps for it (`0206577C` is -2 then). Only the European dump (`YHNP`) is known; `None`
 /// for any other game, or before the game has set the mark up.
+/// Whether a scene's script is loaded and the runner is at one of its commands: the command the runner holds
+/// (`02075988`) is one of the scene's table of commands (`02074BEC`, `020740A0` of them). The title, the logos and
+/// the menus have none, whatever their memory holds from an earlier scene.
+pub fn script_loaded() -> Option<bool> {
+    nds(|n| n.cart.rom.get(0xC..0x10) == Some(b"YHNP".as_slice())).then(|| {
+        crate::machine::machine(|m| {
+            let word = |m: &mut crate::machine::Machine, a: u32| {
+                let mut w = [0u8; 4];
+                m.mem.read_bytes(9, a, &mut w).then(|| u32::from_le_bytes(w))
+            };
+            let (cmd, count) = (word(m, 0x0207_5988)?, word(m, 0x0207_40A0)?);
+            Some(count > 0 && count < 4096 && (0..count).any(|i| word(m, 0x0207_4BEC + 4 * i) == Some(cmd)))
+        })
+    })?
+}
+
 pub fn script_idle() -> Option<bool> {
     // a running script holds -1 or the count of a wait (a few hundred at most); -2 is idle; anything else is
     // what an old scene left behind (the title after a reset shows `000047C4`): no script runs
-    script_mark().map(|w| !(w == u32::MAX || w <= 0x1000))
+    let loaded = script_loaded()?;
+    script_mark().map(|w| !loaded || !(w == u32::MAX || w <= 0x1000))
 }
 
 /// The game's mark of a running script itself (`0xFFFFFFFE` when idle), for the European dump.

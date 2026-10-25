@@ -101,6 +101,7 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             s.change_map(number(w.first(), "MAP", None)?, [number(w.get(1), "X", None)?, number(w.get(2), "Y", None)?, number(w.get(3), "Z", None)?])?;
             done(json!({}))
         }
+        "scriptstate" => done(json!({"loaded": sunpetal_runtime::nds::script_loaded(), "idle": sunpetal_runtime::nds::script_idle(), "waits": sunpetal_runtime::nds::script_waits(), "mark": sunpetal_runtime::nds::script_mark()})),
         "skip" => {
             let (frames, why) = s.skip(number(w.first(), "FRAMES", Some(18000))?)?;
             done(json!({"frames": frames, "stopped": why}))

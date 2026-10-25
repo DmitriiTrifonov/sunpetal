@@ -630,6 +630,8 @@ pub fn desktop_main() {
             "--save" => o.save = args.next().map(PathBuf::from),
             "--res" => o.res = args.next().and_then(|v| v.parse().ok()),
             "--mute" => o.mute = true,
+            // the speed figures and the skip's marks on the terminal each two seconds (as SUNPETAL_STATS=1)
+            "--stats" => std::env::set_var("SUNPETAL_STATS", "1"),
             "--menu" => o.menu = true,
             "--dump-textures" => o.dump = args.next().map(PathBuf::from),
             "--texture-pack" => o.pack = args.next().map(PathBuf::from),
