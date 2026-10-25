@@ -17,6 +17,9 @@ const SKIP_LIMIT: u32 = 18_000;
 /// script waits for the player's A (a line of speech, a `WAIT`) or has been idle this long (so a gap between two
 /// scenes does not end it). It presses nothing: the lines are the player's.
 const IDLE_FRAMES: u32 = 45;
+/// A skip ends when the script has made no step (the command it is at, the count of a wait) for this many frames:
+/// the game waits for something the script does not name (a menu, a report page), and nothing would end the skip.
+const NO_STEP_FRAMES: u32 = 300;
 
 /// A fingerprint of a picture from a sample of its pixels: it changes when the picture moves.
 fn fingerprint(rgba: &[u8]) -> u64 {
@@ -136,6 +139,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     let mut prev_t = nds::timing();
     let mut last_flush = Instant::now();
     let (mut still, mut skipped, mut last_print, mut idle_for, mut wait_for) = (0u32, 0u32, 0u64, 0u32, 0u32);
+    let (mut step, mut no_step) = ((0u32, 0u32), 0u32);
     while !shared.quit.load(Ordering::Relaxed) {
         if shared.paused.load(Ordering::Relaxed) {
             std::thread::sleep(Duration::from_millis(10));
@@ -177,13 +181,16 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             skipped += 1;
             idle_for = if idle == Some(true) { idle_for + 1 } else { 0 };
             wait_for = if waits { wait_for + 1 } else { 0 };
+            let now = nds::script_step().unwrap_or((0, 0));
+            no_step = if now == step { no_step + 1 } else { 0 };
+            step = now;
             // a still picture means the game waits, which only a skip without the game's marks can tell
             let stuck = idle.is_none() && still >= STILL_FRAMES;
-            if idle_for >= IDLE_FRAMES || wait_for >= 2 || stuck || skipped >= SKIP_LIMIT {
+            if idle_for >= IDLE_FRAMES || wait_for >= 2 || no_step >= NO_STEP_FRAMES || stuck || skipped >= SKIP_LIMIT {
                 shared.skip.store(false, Ordering::Relaxed);
             }
         } else {
-            (still, skipped, idle_for, wait_for) = (0, 0, 0, 0);
+            (still, skipped, idle_for, wait_for, no_step) = (0, 0, 0, 0, 0);
         }
         t_run += t1 - t0;
         t_grab += t1.elapsed();

@@ -551,6 +551,16 @@ pub fn script_waits() -> Option<bool> {
     })?
 }
 
+/// Where the game's script is: the command the runner holds and the mark (`script_mark`: the count of a
+/// `WAITFRAME` running down). Changes while the script goes on; `None` as `script_idle`.
+pub fn script_step() -> Option<(u32, u32)> {
+    let cmd = nds(|n| n.cart.rom.get(0xC..0x10) == Some(b"YHNP".as_slice())).then(|| {
+        let mut w = [0u8; 4];
+        crate::machine::machine(|m| m.mem.read_bytes(9, 0x0207_5988, &mut w)).then(|| u32::from_le_bytes(w))
+    })??;
+    Some((cmd, script_mark()?))
+}
+
 /// The command `<WAIT>` compiles to.
 const OP_WAIT: u32 = 9;
 
