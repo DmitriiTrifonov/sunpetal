@@ -26,6 +26,20 @@ fn fingerprint(rgba: &[u8]) -> u64 {
     h
 }
 
+/// A dialogue box at the foot of the upper screen: a pure red rule across it, grey panel below.
+/// The game waits for the player there, so a skip has nothing to cross.
+fn dialogue_shown(scale: usize, rgba: &[u8]) -> bool {
+    let width = 256 * scale;
+    let at = |x: usize, y: usize| {
+        let o = (y * width + x) * 4;
+        rgba.get(o..o + 3).map_or([0; 3], |p| [p[0], p[1], p[2]])
+    };
+    let rule = 143 * scale + scale / 2;
+    let red = (16..240).step_by(4).filter(|&x| at(x * scale, rule) == [255, 0, 0]).count();
+    let [r, g, b] = at(128 * scale, 165 * scale);
+    red >= 50 && r > 120 && r.abs_diff(g) < 16 && r.abs_diff(b) < 16
+}
+
 /// The DS's frame rate (33 513 982 Hz / (6 x 355 x 263 x 2 / 2)).
 const FRAME_RATE: f64 = 59.8261;
 
@@ -48,6 +62,8 @@ pub struct Shared {
     pub fast: AtomicBool,
     /// Skip: run without waiting until the picture stops changing (the game waits for the player).
     pub skip: AtomicBool,
+    /// A dialogue box is on the screen (set by the emulation each frame).
+    pub dialogue: AtomicBool,
     /// The machine waits (the menu is open).
     pub paused: AtomicBool,
     /// The emulation stopped (and why).
@@ -57,6 +73,12 @@ pub struct Shared {
 }
 
 impl Shared {
+    /// A skip starts, or a running one is cancelled; none starts over a dialogue.
+    pub fn toggle_skip(&self) {
+        let on = !self.skip.load(Ordering::Relaxed);
+        self.skip.store(on && !self.dialogue.load(Ordering::Relaxed), Ordering::Relaxed);
+    }
+
     pub fn new() -> Arc<Shared> {
         Arc::new(Shared {
             input: Mutex::new(Input::default()),
@@ -65,6 +87,7 @@ impl Shared {
             quit: AtomicBool::new(false),
             fast: AtomicBool::new(false),
             skip: AtomicBool::new(false),
+            dialogue: AtomicBool::new(false),
             paused: AtomicBool::new(false),
             stopped: Mutex::new(None),
             status: Mutex::new(String::from("starting")),
@@ -107,7 +130,9 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             let i = shared.input.lock().unwrap();
             nds::set_input(i.keys, i.pen);
         }
-        nds::set_scale(shared.scale.load(Ordering::Relaxed));
+        // a skip is hidden by the fade: draw it at the native size, the cheapest
+        let scale = if shared.skip.load(Ordering::Relaxed) { 1 } else { shared.scale.load(Ordering::Relaxed) };
+        nds::set_scale(scale);
         nds::set_draw(true);
         let t0 = Instant::now();
         if !nds::run_frame() {
@@ -126,6 +151,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             }
         } else {
             (still, skipped) = (0, 0);
+            shared.dialogue.store(dialogue_shown(picture.0, &picture.1), Ordering::Relaxed);
         }
         *shared.frame.lock().unwrap() = Some(picture);
         t_run += t1 - t0;
@@ -218,6 +244,25 @@ mod tests {
         let step = (a.len() / 4 / 3000).max(1) * 4;
         a[step * 100] ^= 0x40;
         assert_ne!(before, fingerprint(&a));
+    }
+
+    #[test]
+    fn a_dialogue_box_is_a_red_rule_over_a_grey_panel() {
+        let mut p = vec![255u8; 2 * 256 * 192 * 4];
+        for px in p.chunks_exact_mut(4) {
+            px[..3].copy_from_slice(&[40, 90, 30]);
+        }
+        assert!(!dialogue_shown(1, &p));
+        for x in 0..256 {
+            p[(143 * 256 + x) * 4..][..3].copy_from_slice(&[255, 0, 0]);
+        }
+        assert!(!dialogue_shown(1, &p));
+        for y in 144..192 {
+            for x in 0..256 {
+                p[(y * 256 + x) * 4..][..3].copy_from_slice(&[170, 170, 170]);
+            }
+        }
+        assert!(dialogue_shown(1, &p));
     }
 
     #[test]

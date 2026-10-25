@@ -324,12 +324,11 @@ impl ApplicationHandler for App {
                 }
                 match code {
                     KeyCode::F1 | KeyCode::Escape => self.toggle_menu(),
-                    KeyCode::Tab => self.shared.fast.store(true, Ordering::Relaxed),
+                    KeyCode::Tab if self.settings.emulation.fast_key => self.shared.fast.store(true, Ordering::Relaxed),
                     KeyCode::F2 => self.cycle_layout(),
                     KeyCode::F3 => self.settings.video.linear = !self.settings.video.linear,
                     KeyCode::F7 => {
-                        let on = !self.shared.skip.load(Ordering::Relaxed);
-                        self.shared.skip.store(on, Ordering::Relaxed);
+                        self.shared.toggle_skip();
                     }
                     KeyCode::F6 => self.settings.effects = self.settings.effects.next_preset(),
                     KeyCode::F4 => self.settings.video.res = self.settings.video.res.saturating_sub(1).max(1),
@@ -368,8 +367,7 @@ impl ApplicationHandler for App {
                     }
                     Started if !self.menu.open && !consumed && self.settings.emulation.skip_button && corner.map_or(false, |(w, h)| touchpad::on_skip_button(w, h, p)) => {
                         // a tap starts a skip, another cancels it
-                        let on = !self.shared.skip.load(Ordering::Relaxed);
-                        self.shared.skip.store(on, Ordering::Relaxed);
+                        self.shared.toggle_skip();
                     }
                     Started if !self.menu.open && !consumed && self.settings.emulation.fast_button && corner.map_or(false, |(w, h)| touchpad::on_fast_button(w, h, p)) => {
                         let on = !self.shared.fast.load(Ordering::Relaxed);

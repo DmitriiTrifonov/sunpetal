@@ -163,6 +163,7 @@ impl Menu {
             });
             egui::CollapsingHeader::new(tx("Debug", "Отладка")).show(ui, |ui| {
                 ui.checkbox(&mut s.video.show_stats, tx("Show speed figures", "Показывать скорость"));
+                ui.checkbox(&mut s.emulation.fast_key, tx("Tab fast-forwards while held", "Tab ускоряет, пока зажат"));
                 ui.checkbox(&mut s.emulation.fast_button, tx("Fast-forward button beside the menu button (phone, no on-screen buttons)", "Кнопка ускорения рядом с кнопкой меню (телефон, без экранных кнопок)"));
                 ui.checkbox(&mut s.emulation.skip_button, tx("Skip button beside them (the screen goes dark and the game races on until it waits for you)", "Кнопка пропуска рядом с ними (экран темнеет, игра мчится вперёд, пока не станет ждать тебя)"));
             });

@@ -94,6 +94,8 @@ impl Default for Input {
 pub struct Emulation {
     /// The machine waits while the menu is open.
     pub pause_in_menu: bool,
+    /// Tab fast-forwards while held.
+    pub fast_key: bool,
     /// A fast-forward button beside the menu button (a phone with the controls off).
     pub fast_button: bool,
     /// A skip button beside them: fast-forward until the picture stops changing.
@@ -102,7 +104,7 @@ pub struct Emulation {
 
 impl Default for Emulation {
     fn default() -> Emulation {
-        Emulation { pause_in_menu: true, fast_button: true, skip_button: true }
+        Emulation { pause_in_menu: true, fast_key: true, fast_button: true, skip_button: true }
     }
 }
 
