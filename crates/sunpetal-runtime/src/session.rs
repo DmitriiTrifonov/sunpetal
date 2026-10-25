@@ -376,6 +376,23 @@ impl Session {
         Ok(Stop::MaxLines)
     }
 
+    /// Plays on with A pulsed (4 frames held in each 16) until the game's script has been idle for 45 frames, as the
+    /// app's skip does, for at most `max` frames. The frames it took, and whether the script ended.
+    pub fn skip(&mut self, max: u64) -> Result<(u64, bool), String> {
+        let mut idle = 0;
+        for i in 0..max {
+            self.keys = if i % 16 < 4 { 1 } else { 0 };
+            let r = self.run(1);
+            self.keys = 0;
+            r?;
+            idle = if nds::script_idle() == Some(true) { idle + 1 } else { 0 };
+            if idle >= 45 {
+                return Ok((i + 1, true));
+            }
+        }
+        Ok((max, false))
+    }
+
     /// The state now: scene, line shown, face, and the game's frame.
     pub fn state(&self) -> Option<&Event> {
         self.events.last()

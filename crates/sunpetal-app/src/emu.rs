@@ -13,6 +13,12 @@ use crate::audio::Ring;
 /// or after this many in all (five minutes of it).
 const STILL_FRAMES: u32 = 60;
 const SKIP_LIMIT: u32 = 18_000;
+/// With the game's own mark of a running script (`nds::script_idle`), a skip ends when the script has been
+/// idle this long (so a gap between two scenes does not end it), and presses A for the player on dialogue.
+const IDLE_FRAMES: u32 = 45;
+/// A is held 4 frames in each 16 while a skip passes a dialogue (the first finishes the line, the next turns it).
+const PULSE: u32 = 16;
+const KEY_A: u32 = 1;
 
 /// A fingerprint of a picture from a sample of its pixels: it changes when the picture moves.
 fn fingerprint(rgba: &[u8]) -> u64 {
@@ -64,6 +70,8 @@ pub struct Shared {
     pub skip: AtomicBool,
     /// A dialogue box is on the screen (set by the emulation each frame).
     pub dialogue: AtomicBool,
+    /// The game says when its script runs, so a skip can go through dialogues (set by the emulation).
+    pub marks: AtomicBool,
     /// The machine waits (the menu is open).
     pub paused: AtomicBool,
     /// The emulation stopped (and why).
@@ -73,10 +81,11 @@ pub struct Shared {
 }
 
 impl Shared {
-    /// A skip starts, or a running one is cancelled; none starts over a dialogue.
+    /// A skip starts, or a running one is cancelled; without the game's marks none starts over a dialogue.
     pub fn toggle_skip(&self) {
         let on = !self.skip.load(Ordering::Relaxed);
-        self.skip.store(on && !self.dialogue.load(Ordering::Relaxed), Ordering::Relaxed);
+        let blocked = self.dialogue.load(Ordering::Relaxed) && !self.marks.load(Ordering::Relaxed);
+        self.skip.store(on && !blocked, Ordering::Relaxed);
     }
 
     pub fn new() -> Arc<Shared> {
@@ -88,6 +97,7 @@ impl Shared {
             fast: AtomicBool::new(false),
             skip: AtomicBool::new(false),
             dialogue: AtomicBool::new(false),
+            marks: AtomicBool::new(false),
             paused: AtomicBool::new(false),
             stopped: Mutex::new(None),
             status: Mutex::new(String::from("starting")),
@@ -119,7 +129,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     let mut prev = sunpetal_runtime::services::counters();
     let mut prev_t = nds::timing();
     let mut last_flush = Instant::now();
-    let (mut still, mut skipped, mut last_print) = (0u32, 0u32, 0u64);
+    let (mut still, mut skipped, mut last_print, mut idle_for) = (0u32, 0u32, 0u64, 0u32);
     while !shared.quit.load(Ordering::Relaxed) {
         if shared.paused.load(Ordering::Relaxed) {
             std::thread::sleep(Duration::from_millis(10));
@@ -128,7 +138,9 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         }
         {
             let i = shared.input.lock().unwrap();
-            nds::set_input(i.keys, i.pen);
+            // a skip through a dialogue presses A
+            let a = shared.skip.load(Ordering::Relaxed) && shared.marks.load(Ordering::Relaxed) && shared.dialogue.load(Ordering::Relaxed) && skipped % PULSE < 4;
+            nds::set_input(i.keys | if a { KEY_A } else { 0 }, i.pen);
         }
         // a skip is hidden by the fade: draw it at the native size, the cheapest
         let scale = if shared.skip.load(Ordering::Relaxed) { 1 } else { shared.scale.load(Ordering::Relaxed) };
@@ -141,17 +153,23 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         let t1 = Instant::now();
         let picture = nds::screens_rgba();
         let skipping = shared.skip.load(Ordering::Relaxed);
+        let idle = nds::script_idle();
+        shared.marks.store(idle.is_some(), Ordering::Relaxed);
+        let dialogue = dialogue_shown(picture.0, &picture.1);
+        shared.dialogue.store(dialogue, Ordering::Relaxed);
         if skipping {
             let print = fingerprint(&picture.1);
             still = if print == last_print { still + 1 } else { 0 };
             last_print = print;
             skipped += 1;
-            if still >= STILL_FRAMES || skipped >= SKIP_LIMIT {
+            idle_for = if idle == Some(true) { idle_for + 1 } else { 0 };
+            // a still picture over a dialogue is the game waiting for the A that this skip presses
+            let stuck = still >= STILL_FRAMES && !(idle.is_some() && dialogue);
+            if idle_for >= IDLE_FRAMES || stuck || skipped >= SKIP_LIMIT {
                 shared.skip.store(false, Ordering::Relaxed);
             }
         } else {
-            (still, skipped) = (0, 0);
-            shared.dialogue.store(dialogue_shown(picture.0, &picture.1), Ordering::Relaxed);
+            (still, skipped, idle_for) = (0, 0, 0);
         }
         *shared.frame.lock().unwrap() = Some(picture);
         t_run += t1 - t0;

@@ -101,6 +101,10 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             s.change_map(number(w.first(), "MAP", None)?, [number(w.get(1), "X", None)?, number(w.get(2), "Y", None)?, number(w.get(3), "Z", None)?])?;
             done(json!({}))
         }
+        "skip" => {
+            let (frames, ended) = s.skip(number(w.first(), "FRAMES", Some(18000))?)?;
+            done(json!({"frames": frames, "ended": ended}))
+        }
         "goto" => {
             s.goto(w.first().ok_or("goto Cnn_yy")?, None)?;
             done(json!({}))

@@ -523,6 +523,16 @@ pub fn vblanks() -> u64 {
     nds(|n| n.vblanks)
 }
 
+/// Whether the game's script runner is idle (the scene's script has ended and the player has the control),
+/// by the mark the game keeps for it (`0206577C` is -2 then). Only the European dump (`YHNP`) is known; `None`
+/// for any other game, or before the game has set the mark up.
+pub fn script_idle() -> Option<bool> {
+    nds(|n| n.cart.rom.get(0xC..0x10) == Some(b"YHNP".as_slice())).then(|| {
+        let mut w = [0u8; 4];
+        crate::machine::machine(|m| m.mem.read_bytes(9, 0x0206_577C, &mut w)).then(|| u32::from_le_bytes(w) == 0xFFFF_FFFE)
+    })?
+}
+
 /// The report of a run's end: the time, each CPU's state, the interrupts taken.
 pub fn report() {
     let (vbl, t) = (vblanks(), now());
