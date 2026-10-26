@@ -69,6 +69,17 @@ impl NitroFs {
         (offset < f.1).then_some(f.2.as_str())
     }
 
+    /// The paths of all the files.
+    pub fn paths(&self) -> impl Iterator<Item = &str> {
+        self.files.iter().map(|f| f.2.as_str())
+    }
+
+    /// The bytes of the file `path` in `rom`.
+    pub fn file<'a>(&self, rom: &'a [u8], path: &str) -> Option<&'a [u8]> {
+        let (start, end) = self.place(path)?;
+        rom.get(start as usize..end as usize)
+    }
+
     /// Where the file `path` is in the ROM: (start, end).
     pub fn place(&self, path: &str) -> Option<(u32, u32)> {
         self.by_path.get(path).map(|i| (self.files[*i].0, self.files[*i].1))

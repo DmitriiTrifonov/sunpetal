@@ -1,0 +1,8 @@
+[package]
+name = "sunpetal-data"
+description = "The game's data: the ROM's file system, LZ10, the dialogue scripts, the translation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

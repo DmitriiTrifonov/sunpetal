@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+sunpetal-data = { path = "../sunpetal-data" }
 corosensei = "0.2"
 png = "0.17"
 clap = { version = "4", features = ["derive"], optional = true }

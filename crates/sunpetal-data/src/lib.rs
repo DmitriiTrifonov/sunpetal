@@ -1,0 +1,6 @@
+//! The game's data, shared by the runtime and the data builder: the ROM's file system, the LZ10
+//! compression, the dialogue scripts and the translation that goes into them (docs/TRANSLATION-RECON.md).
+pub mod lz10;
+pub mod nitrofs;
+pub mod script;
+pub mod translate;

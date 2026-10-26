@@ -2808,6 +2808,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "sunpetal-data"
+version = "0.0.1"
+
+[[package]]
 name = "sunpetal-runtime"
 version = "0.0.1"
 dependencies = [
@@ -2817,6 +2821,7 @@ dependencies = [
  "png 0.17.16",
  "serde",
  "serde_json",
+ "sunpetal-data",
 ]
 
 [[package]]

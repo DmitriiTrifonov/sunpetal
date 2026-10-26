@@ -14,7 +14,7 @@ pub mod dialogue;
 pub mod script;
 #[cfg(feature = "debug-tools")]
 pub mod evn;
-pub mod nitrofs;
+pub use sunpetal_data::nitrofs;
 #[cfg(feature = "debug-tools")]
 pub mod session;
 
