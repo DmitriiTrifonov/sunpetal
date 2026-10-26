@@ -138,6 +138,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     let mut prev = sunpetal_runtime::services::counters();
     let mut prev_t = nds::timing();
     let mut last_flush = Instant::now();
+    nds::track_script();
     let (mut still, mut skipped, mut last_print, mut idle_for, mut wait_for) = (0u32, 0u32, 0u64, 0u32, 0u32);
     let (mut step, mut no_step) = ((0u32, 0u32), 0u32);
     while !shared.quit.load(Ordering::Relaxed) {

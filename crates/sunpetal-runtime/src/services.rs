@@ -278,6 +278,7 @@ pub unsafe extern "C" fn arm_interpret(c: *mut Cpu, key: u32) {
 
 #[no_mangle]
 pub unsafe extern "C" fn arm_trace_enter(_c: *mut Cpu, _key: u32) {
+    crate::nds::note_enter(&*_c, _key);
     #[cfg(feature = "debug-tools")]
     crate::nds::debug::on_enter(&mut *_c, _key);
 }

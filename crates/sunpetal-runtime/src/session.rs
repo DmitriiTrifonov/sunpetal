@@ -45,6 +45,24 @@ pub struct Session {
     frames: u64,
 }
 
+/// Lines in a row, all shown before in a scene, after which autoplay counts the scene as stalled.
+const REPEATS: usize = 6;
+
+/// The lines of a scene shown so far, and how many in a row were shown before.
+#[derive(Default)]
+struct Repeats {
+    seen: std::collections::HashSet<Option<String>>,
+    run: usize,
+}
+
+impl Repeats {
+    /// Takes the next line shown; true once `REPEATS` of them in a row were seen already.
+    fn stalled(&mut self, id: &Option<String>) -> bool {
+        self.run = if self.seen.insert(id.clone()) { 0 } else { self.run + 1 };
+        self.run >= REPEATS
+    }
+}
+
 /// The mask of `+`-joined button names (A B SELECT START RIGHT LEFT UP DOWN R L X Y).
 pub fn buttons(names: &str) -> Result<u32, String> {
     let mut mask = 0;
@@ -67,6 +85,7 @@ impl Session {
         nds::boot(cfg)?;
         nds::set_sound_keep(false);
         debug::log_card_reads();
+        nds::track_script();
         let tracker = Tracker::install();
         Ok(Session { keys: 0, pen: None, tracker, fs, rom: rom_path, scene: None, shown: None, log: None, events: Vec::new(), texts: None, frames: 0 })
     }
@@ -93,11 +112,8 @@ impl Session {
 
     /// After a frame: the scene the game reads, and the line the window shows.
     fn watch(&mut self) -> Result<(), String> {
-        for (addr, _) in debug::take_card_reads() {
-            let scene = self.fs.at(addr).and_then(|p| p.strip_prefix("Chapter/Pack/")).and_then(|p| p.rsplit('/').next()).and_then(|f| f.strip_suffix(".txt.z"));
-            if let Some(scene) = scene {
-                self.scene = Some(scene.to_string());
-            }
+        if let Some(scene) = nds::script_scene() {
+            self.scene = Some(scene);
         }
         let now = self.tracker.shown();
         let key = now.as_ref().map(|l| (l.ptr, l.text.clone()));
@@ -261,7 +277,8 @@ pub enum Stop {
     MaxLines,
     /// The scene changed: its last line has been passed.
     SceneEnd,
-    /// No new line in ten seconds of A: an answer to choose, a puzzle, a walk or a cut scene.
+    /// No new line in ten seconds of A, or the same lines again and again: a puzzle, a walk, a cut scene, or
+    /// a wait for an event or a timer that A does not end.
     Stalled,
 }
 
@@ -347,6 +364,8 @@ impl Session {
     pub fn autoplay(&mut self, o: &Autoplay) -> Result<Stop, String> {
         let scene = self.scene.clone();
         let mut first = self.events.last().filter(|e| e.scene == scene).cloned();
+        // lines of this scene seen so far, and the run of shown lines that were seen before
+        let mut seen = Repeats::default();
         for n in 0.. {
             if n >= o.max_lines {
                 return Ok(Stop::MaxLines);
@@ -367,6 +386,10 @@ impl Session {
             };
             if event.scene != scene {
                 return Ok(Stop::SceneEnd);
+            }
+            // the same line again and again: the scene waits for something A does not give (an event, a timer)
+            if seen.stalled(&event.id) {
+                return Ok(Stop::Stalled);
             }
             if let (Some(dir), Some(name), Some(id)) = (&o.out, &event.scene, &event.id) {
                 self.run(o.delay)?;
@@ -541,6 +564,9 @@ const CHANGEMAP: u32 = 0x0204_8669;
 const VALUES: u32 = 0x0207_42EC;
 /// The pointer to the world (its first word the hero, whose position is at +0x18).
 const WORLD: u32 = 0x0206_B45C + 4;
+/// In the world: the number of events and the table of their records (the loop `EVENT_LOOP` goes over it).
+const EVENT_COUNT: u32 = 0x1E80C;
+const EVENT_TABLE: u32 = 0x1E810;
 
 impl Session {
     /// Runs the game's handler `handler` on a command whose parameters (from the third word on) are `params`.
@@ -605,6 +631,11 @@ impl Session {
     }
 
     /// The map the hero is on.
+    /// The scene whose script the game read last.
+    pub fn scene(&self) -> Option<&str> {
+        self.scene.as_deref()
+    }
+
     pub fn map(&self) -> Option<i32> {
         let word = |a: u32| debug::peek(a, 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
         let hero = word(WORLD).and_then(|w| word(w)).filter(|h| *h != 0)?;
@@ -652,11 +683,16 @@ impl Session {
         if stop == Stop::MaxLines {
             return Err(format!("the opening of chapter {} did not end in 1000 lines", chapter));
         }
+        // the opening runs on into the scene (C04_01 into C04_02): it is there already
+        if self.scene.as_deref() == Some(scene) {
+            return Ok(());
+        }
         self.set_value(0, value.unwrap_or(event.value_min))?;
         let here = self.map().ok_or("the hero is not on a map: the opening has not ended")?;
         for door in route(&doors, here, event.map).ok_or_else(|| format!("no way from map {} to map {} by the {} doors of chapter {} ({:?})", here, event.map, doors.len(), chapter, doors.iter().map(|d| (d.event.map, d.target)).collect::<Vec<_>>()))? {
             self.take_door(&door)?;
         }
+        let silenced = self.silence_rivals(scene);
         if !self.teleport(event.pos) {
             return Err("no hero to move".into());
         }
@@ -664,13 +700,33 @@ impl Session {
             if self.scene.as_deref() == Some(scene) {
                 return Ok(());
             }
-            if i == 60 {
+            // a scene started by a talk wants A while the hero stands there
+            if i % 90 == 60 {
                 self.press("A", 9)?;
             } else {
                 self.run(1)?;
             }
         }
-        Err(format!("the hero stands at the place of {} (map {}) but the game did not start it: more of the story is needed (--set value0=N), or another place", scene, event.map))
+        Err(format!("the hero stands at the place of {} (map {}) but the game did not start it: more of the story is needed (--set value0=N), or another place (the other events of the chapter were put out: {})", scene, event.map, silenced))
+    }
+
+    /// Puts out the scene events of the chapter other than `scene` (the first byte of the name in the game's
+    /// event table becomes 0, so its loop passes them by): at the same place and story step, the game starts
+    /// the first of them that holds (C04_06 before C04_08, as both are met at step 30). The doors stay. The
+    /// number put out.
+    fn silence_rivals(&mut self, scene: &str) -> usize {
+        let word = |a: u32| debug::peek(a, 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+        let Some(world) = word(WORLD) else { return 0 };
+        let count = word(world + EVENT_COUNT).unwrap_or(0).min(512);
+        let mut out = 0;
+        for i in 0..count {
+            let Some(event) = word(world + EVENT_TABLE + 4 * i).filter(|e| *e != 0) else { continue };
+            let Some(name) = debug::peek(event, 8) else { continue };
+            if name[0] != 0 && !name.starts_with(scene.as_bytes()) && !name.starts_with(b"A") && debug::poke(event, &[0]) {
+                out += 1;
+            }
+        }
+        out
     }
 }
 
@@ -713,6 +769,18 @@ mod tests {
 
     fn door(scene: &str, from: i32, target: i32) -> Door {
         Door { event: Event { scene: scene.into(), map: from, pos: [0; 3], value_min: 0, flags: 0, low: 0, high: 0 }, target }
+    }
+
+    #[test]
+    fn lines_shown_again_and_again_are_a_stall() {
+        let mut r = Repeats::default();
+        let id = |n: u32| Some(format!("{:05}", n));
+        // two lines taking turns: new ones stay at two, the sixth repeat stops it
+        let stops: Vec<_> = (0..10).map(|i| r.stalled(&id(3001 + i % 2))).collect();
+        assert_eq!(stops.iter().position(|s| *s), Some(7));
+        // lines that go on are no stall, whatever came before
+        let mut r = Repeats::default();
+        assert!((0..50).all(|i| !r.stalled(&id(i))));
     }
 
     #[test]

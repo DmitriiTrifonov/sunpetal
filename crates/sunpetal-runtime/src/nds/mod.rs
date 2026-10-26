@@ -542,11 +542,64 @@ pub fn script_loaded() -> Option<bool> {
     })?
 }
 
+/// The game's step of its script (ARM9 `02045BC5`), called once a frame while a script runs.
+const SCRIPT_STEP: u32 = 0x0204_5BC5;
+
+thread_local! {
+    static LAST_STEP: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+}
+
+/// Starts noting the script's steps (`script_stepping`); costs a call per function entry of the guest.
+pub fn track_script() {
+    unsafe { crate::services::g_arm_trace = 1 };
+    debug::log_card_reads();
+}
+
+/// `ARM_ENTER`'s service: notes the vblank of the script's step.
+pub(crate) fn note_enter(c: &crate::abi::Cpu, key: u32) {
+    if key == SCRIPT_STEP && c.cpu == 9 {
+        let v = vblanks();
+        LAST_STEP.with(|l| l.set(Some(v)));
+    }
+}
+
+/// Whether the game's script took a step in the last frames (needs `track_script`): outside a scene (the
+/// title, the logos, the menus) nothing steps, whatever the memory holds from an earlier scene.
+pub fn script_stepping() -> bool {
+    LAST_STEP.with(|l| l.get()).is_some_and(|v| vblanks().saturating_sub(v) <= 2)
+}
+
+thread_local! {
+    static SCENE: std::cell::RefCell<(Option<crate::nitrofs::NitroFs>, Option<String>)> = const { std::cell::RefCell::new((None, None)) };
+}
+
+/// The scene whose script (`Chapter/Pack/<scene>.txt.z`) the game read last, by the cartridge's reads (needs
+/// `debug::log_card_reads`); call it every frame or so. `C19_01` is the title's demo behind "Press START Button".
+pub fn script_scene() -> Option<String> {
+    let reads = debug::take_card_reads();
+    SCENE.with(|s| {
+        let mut s = s.borrow_mut();
+        if s.0.is_none() {
+            s.0 = nds(|n| crate::nitrofs::NitroFs::parse(&n.cart.rom).ok());
+        }
+        let found = s.0.as_ref().and_then(|fs| {
+            reads.iter().rev().find_map(|(a, _)| {
+                let p = fs.at(*a)?;
+                p.strip_prefix("Chapter/Pack/")?.rsplit('/').next()?.strip_suffix(".txt.z").map(str::to_string)
+            })
+        });
+        if found.is_some() {
+            s.1 = found;
+        }
+        s.1.clone()
+    })
+}
+
 pub fn script_idle() -> Option<bool> {
     // a running script holds -1 or the count of a wait (a few hundred at most); -2 is idle; anything else is
     // what an old scene left behind (the title after a reset shows `000047C4`): no script runs
     let loaded = script_loaded()?;
-    script_mark().map(|w| !loaded || !(w == u32::MAX || w <= 0x1000))
+    script_mark().map(|w| !loaded || !script_stepping() || script_scene().as_deref() == Some("C19_01") || !(w == u32::MAX || w <= 0x1000))
 }
 
 /// The game's mark of a running script itself (`0xFFFFFFFE` when idle), for the European dump.
