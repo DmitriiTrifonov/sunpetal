@@ -1,7 +1,7 @@
 //! The machine on its own thread: the runtime keeps its state per thread, and the window's thread
 //! belongs to the window. Frames and sound go out, input comes in, through `Shared`.
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -64,6 +64,10 @@ pub struct Shared {
     pub frame: Mutex<Option<(usize, Vec<u8>)>>,
     /// The internal resolution, times 256x192 (1-8): the 3D is drawn that large.
     pub scale: AtomicUsize,
+    /// The 3D's extra outline, 0-1, as the bits of an f32.
+    pub outline: AtomicU32,
+    /// Its width in DS pixels, as the bits of an f32.
+    pub outline_width: AtomicU32,
     pub quit: AtomicBool,
     /// Run without waiting for the clock.
     pub fast: AtomicBool,
@@ -100,6 +104,8 @@ impl Shared {
             input: Mutex::new(Input::default()),
             frame: Mutex::new(None),
             scale: AtomicUsize::new(2),
+            outline: AtomicU32::new(0),
+            outline_width: AtomicU32::new(0.5f32.to_bits()),
             quit: AtomicBool::new(false),
             fast: AtomicBool::new(false),
             skip: AtomicBool::new(false),
@@ -156,6 +162,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         let skipping_now = shared.skip.load(Ordering::Relaxed);
         let draw = !(skipping_now && shared.marks.load(Ordering::Relaxed));
         nds::set_scale(if skipping_now { 1 } else { shared.scale.load(Ordering::Relaxed) });
+        nds::set_outline(f32::from_bits(shared.outline.load(Ordering::Relaxed)), f32::from_bits(shared.outline_width.load(Ordering::Relaxed)));
         nds::set_draw(draw);
         let t0 = Instant::now();
         if !nds::run_frame() {

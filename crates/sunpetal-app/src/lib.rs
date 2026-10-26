@@ -121,6 +121,12 @@ impl App {
         if s.video.res != a.video.res {
             self.shared.scale.store(s.video.res, Ordering::Relaxed);
         }
+        if s.effects.outline != a.effects.outline {
+            self.shared.outline.store(s.effects.outline.to_bits(), Ordering::Relaxed);
+        }
+        if s.effects.outline_width != a.effects.outline_width {
+            self.shared.outline_width.store(s.effects.outline_width.to_bits(), Ordering::Relaxed);
+        }
         if let Some(g) = &mut self.gfx {
             g.linear = s.video.linear;
             g.background = s.video.background == "glow";
@@ -563,6 +569,8 @@ pub fn run(o: Options, el: EventLoop<()>) {
     });
     let shared = Shared::new();
     shared.scale.store(settings.video.res, Ordering::Relaxed);
+    shared.outline.store(settings.effects.outline.to_bits(), Ordering::Relaxed);
+    shared.outline_width.store(settings.effects.outline_width.to_bits(), Ordering::Relaxed);
     // the stream must outlive the machine's use of the ring
     let (ring, _stream) = if o.mute {
         (None, None)

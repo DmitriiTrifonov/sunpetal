@@ -118,6 +118,8 @@ impl Menu {
                 ui.add(egui::Slider::new(&mut e.brightness, -0.3..=0.3).text(tx("Brightness", "Яркость")));
                 ui.add(egui::Slider::new(&mut e.gamma, 0.5..=2.0).text(tx("Gamma", "Гамма")));
                 ui.add(egui::Slider::new(&mut e.bloom, 0.0..=1.0).text(tx("Bloom", "Свечение")));
+                ui.add(egui::Slider::new(&mut e.outline, 0.0..=1.0).text(tx("3D outline", "Контур 3D")));
+                ui.add_enabled(e.outline > 0.0, egui::Slider::new(&mut e.outline_width, 0.25..=2.0).text(tx("Outline width", "Толщина контура")));
                 ui.checkbox(&mut e.fxaa, tx("Smooth edges (FXAA)", "Сглаживание краёв (FXAA)"));
                 if *e != before {
                     e.preset = "custom".into();

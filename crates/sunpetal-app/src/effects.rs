@@ -29,11 +29,15 @@ pub struct Effects {
     pub bloom: f32,
     /// Smooths jagged edges (FXAA) over the whole picture.
     pub fxaa: bool,
+    /// 0-1: an outline round the 3D objects, drawn by the 3D renderer from its depth (`render3d`).
+    pub outline: f32,
+    /// 0.25-2: the outline's width, in DS pixels.
+    pub outline_width: f32,
 }
 
 impl Default for Effects {
     fn default() -> Effects {
-        Effects { preset: "none".into(), sharp: false, scanlines: 0.0, grid: 0.0, vignette: 0.0, saturation: 1.0, contrast: 1.0, brightness: 0.0, gamma: 1.0, bloom: 0.0, fxaa: false }
+        Effects { preset: "none".into(), sharp: false, scanlines: 0.0, grid: 0.0, vignette: 0.0, saturation: 1.0, contrast: 1.0, brightness: 0.0, gamma: 1.0, bloom: 0.0, fxaa: false, outline: 0.0, outline_width: 0.5 }
     }
 }
 
@@ -68,6 +72,8 @@ impl Effects {
         self.contrast = c(self.contrast, 0.5, 1.5);
         self.brightness = if self.brightness.is_finite() { self.brightness.clamp(-0.3, 0.3) } else { 0.0 };
         self.gamma = c(self.gamma, 0.5, 2.0);
+        self.outline = if self.outline.is_finite() { self.outline.clamp(0.0, 1.0) } else { 0.0 };
+        self.outline_width = if self.outline_width.is_finite() { self.outline_width.clamp(0.25, 2.0) } else { 0.5 };
         self.bloom = if self.bloom.is_finite() { self.bloom.clamp(0.0, 1.0) } else { 0.0 };
         if !PRESETS.contains(&self.preset.as_str()) {
             self.preset = "custom".into();

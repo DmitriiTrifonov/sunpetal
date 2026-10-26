@@ -71,6 +71,10 @@ pub(super) struct Job {
     /// CLRIMAGE_OFFSET: where the rear-plane bitmap starts (x, then y << 8).
     pub clrimage_offset: u16,
     pub alpha_ref: u8,
+    /// 0-1: the extra outline (`outline_pass`); 0 is off.
+    pub outline: f32,
+    /// The outline's width in DS pixels.
+    pub outline_width: f32,
     pub edge: [u16; 8],
     pub fog_color: u32,
     pub fog_offset: u16,
@@ -256,6 +260,12 @@ struct Target {
     stencil: Vec<u8>,
     /// The pixel takes the fog (its polygon's attribute, or the clear plane's).
     fog: Vec<bool>,
+    /// The pixel's depth is a translucent polygon's (the outline leaves such pixels alone).
+    trans: Vec<bool>,
+    /// The ID of the last opaque polygon at the pixel (a translucent one overwrites `id`).
+    oid: Vec<u8>,
+    /// How much of the scene the translucent polygons drawn over its last opaque pixel hide, 0-31.
+    cover: Vec<u8>,
 }
 
 fn edge(a: (f32, f32), b: (f32, f32), p: (f32, f32)) -> f32 {
@@ -353,6 +363,9 @@ fn raster(job: &Job, verts: &[GxVertex], s: usize, ya: usize, yb: usize) -> Targ
         id: vec![cid; n],
         stencil: vec![0; n],
         fog: vec![cc & 0x8000 != 0; n],
+        trans: vec![false; n],
+        oid: vec![cid; n],
+        cover: vec![0; n],
     };
     if job.disp3dcnt & 0x4000 != 0 {
         rear_plane(job, &mut t, s, ya, yb);
@@ -463,6 +476,9 @@ fn raster(job: &Job, verts: &[GxVertex], s: usize, ya: usize, yb: usize) -> Targ
                 t.id[i] = pid;
                 t.stencil[i] = 0;
                 t.fog[i] = fog_attr;
+                t.trans[i] = false;
+                t.oid[i] = pid;
+                t.cover[i] = 0;
             } else {
                 if t.id[i] == pid && t.alpha[i] > 0 && t.alpha[i] < 31 {
                     return; // translucent polygons do not draw over their own ID
@@ -475,9 +491,11 @@ fn raster(job: &Job, verts: &[GxVertex], s: usize, ya: usize, yb: usize) -> Targ
                     let mix = |s: u32, dd: u32| (s * (oa + 1) + dd * (31 - oa)) / 32;
                     t.color[i] = mix(or, d & 63) | mix(og, d >> 6 & 63) << 6 | mix(ob, d >> 12 & 63) << 12;
                     t.alpha[i] = t.alpha[i].max(oa as u8);
+                    t.cover[i] = t.cover[i].max(oa as u8);
                 }
                 if write_trans_depth {
                     t.depth[i] = depth;
+                    t.trans[i] = true;
                 }
                 t.id[i] = pid;
                 t.stencil[i] = 0;
@@ -562,6 +580,71 @@ fn raster(job: &Job, verts: &[GxVertex], s: usize, ya: usize, yb: usize) -> Targ
     t
 }
 
+/// How much nearer than the mean of its two neighbours a pixel's depth must be (0-1 of the 24
+/// bits) to count as an object's edge.
+const OUTLINE_STEP: f32 = 0.002;
+
+/// Depth (0-1 of the 24 bits) under which a pixel is the game's interface drawn in 3D (flat quads
+/// at the near plane: the logo at 0.0006, the panels at 0.01), not a part of the scene (which lies at
+/// 0.9 and farther): no outline there.
+const INTERFACE_DEPTH: f32 = 0.05;
+
+/// The alpha (0-31) from which a translucent polygon over the scene hides it, and its outline, for good.
+const HIDING_ALPHA: u8 = 12;
+
+/// How strong the line along the 3D's border with the 2D layers is, against one between objects.
+const SILHOUETTE: f32 = 0.5;
+
+/// An outline of our own, beyond the DS's edge marking: each pixel's line level, 0-15 (0 none; the
+/// compositor darkens the 3D's colour by it, only where the 3D is on show, in bits 24-27 of the
+/// picture's word). A pixel on the near side of a jump in depth, or of another polygon ID, gets
+/// `strength`; one beside a pixel with no 3D (the silhouette against the 2D layers) half of that. A plane's depth is a straight line over the
+/// screen, so its second difference is zero and only the jumps show. Pixels whose depth a
+/// translucent polygon wrote (the game's overlays and effects), and their neighbours, are not lines;
+/// a translucent polygon over the picture does not change which polygon the pixel belongs to.
+/// The game's interface drawn in 3D (`INTERFACE_DEPTH`) gets no line either.
+/// The line is `width` DS pixels wide (one pixel at least).
+fn outline_pass(strength: f32, width: f32, t: &Target, w: usize, h: usize, s: usize) -> Vec<u8> {
+    let k = ((width * s as f32).round() as usize).max(1);
+    let (depth, alpha, id, trans) = (t.depth.clone(), t.alpha.clone(), t.oid.clone(), t.trans.clone());
+    // a translucent polygon over the pixel (the dialogue's plate, the glass) hides the scene, and the
+    // line: weaker by its alpha, none from `HIDING_ALPHA`
+    let level = |f: f32, cover: u8| {
+        if cover >= HIDING_ALPHA {
+            return 0;
+        }
+        ((strength * f).min(1.0) * (31 - cover) as f32 / 31.0 * 15.0).round() as u8
+    };
+    let mut lines = vec![0u8; w * h];
+    for y in k..h.saturating_sub(k) {
+        for x in k..w.saturating_sub(k) {
+            let i = y * w + x;
+            if alpha[i] < 31 || trans[i] || depth[i] < INTERFACE_DEPTH {
+                continue;
+            }
+            let pairs = [(i - k, i + k), (i - k * w, i + k * w)];
+            let (mut edge, mut silhouette) = (false, false);
+            for (a, b) in pairs {
+                if trans[a] || trans[b] || depth[a] < INTERFACE_DEPTH || depth[b] < INTERFACE_DEPTH {
+                    continue;
+                }
+                if alpha[a] == 0 || alpha[b] == 0 {
+                    silhouette = true;
+                } else if depth[a] + depth[b] - 2.0 * depth[i] > OUTLINE_STEP * 2.0
+                    || (id[a] != id[i] && depth[a] > depth[i])
+                    || (id[b] != id[i] && depth[b] > depth[i])
+                {
+                    edge = true;
+                }
+            }
+            if edge || silhouette {
+                lines[i] = level(if edge { 1.0 } else { SILHOUETTE }, t.cover[i]);
+            }
+        }
+    }
+    lines
+}
+
 /// Draws a frame. Returns the picture and the mask of what it left out (`NOTE`).
 pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
     let mut notes = 0u32;
@@ -586,13 +669,16 @@ pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
             hs.into_iter().map(|h| h.join().expect("a band of the 3D picture")).collect()
         })
     };
-    let mut t = Target { color: Vec::with_capacity(n), alpha: Vec::with_capacity(n), depth: Vec::with_capacity(n), id: Vec::with_capacity(n), stencil: Vec::new(), fog: Vec::with_capacity(n) };
+    let mut t = Target { color: Vec::with_capacity(n), alpha: Vec::with_capacity(n), depth: Vec::with_capacity(n), id: Vec::with_capacity(n), stencil: Vec::new(), fog: Vec::with_capacity(n), trans: Vec::with_capacity(n), oid: Vec::with_capacity(n), cover: Vec::with_capacity(n) };
     for p in parts {
         t.color.extend(p.color);
         t.alpha.extend(p.alpha);
         t.depth.extend(p.depth);
         t.id.extend(p.id);
         t.fog.extend(p.fog);
+        t.trans.extend(p.trans);
+        t.oid.extend(p.oid);
+        t.cover.extend(p.cover);
     }
     if job.disp3dcnt & 0x20 != 0 {
         // edge marking: a pixel with a nearer-or-equal... no: a pixel beside a farther pixel of another
@@ -617,10 +703,12 @@ pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
             }
         }
     }
+    let lines = if job.outline > 0.0 { outline_pass(job.outline, job.outline_width, &t, w, h, s) } else { Vec::new() };
     if job.disp3dcnt & 0x80 != 0 {
         apply_fog(job, &mut t);
     }
-    let out = (0..n).map(|i| if t.alpha[i] == 0 { 0 } else { t.color[i] | (t.alpha[i] as u32) << 18 }).collect();
+    let line = |i: usize| lines.get(i).map_or(0, |&l| l as u32) << 24;
+    let out = (0..n).map(|i| if t.alpha[i] == 0 { 0 } else { t.color[i] | (t.alpha[i] as u32) << 18 | line(i) }).collect();
     (out, notes)
 }
 
@@ -638,6 +726,8 @@ mod tests {
             clear_depth: 0x7FFF,
             clrimage_offset: 0,
             alpha_ref: 0,
+            outline: 0.0,
+            outline_width: 0.5,
             edge: [0; 8],
             fog_color: 31 << 16,
             fog_offset: 0,
@@ -662,6 +752,73 @@ mod tests {
 
     const BLUE: u16 = 0x7C00;
     const RED: u16 = 0x001F;
+
+    #[test]
+    fn the_outline_marks_the_near_side_of_a_depth_jump_and_leaves_a_slope_alone() {
+        let (w, h) = (8, 8);
+        let mut t = Target { color: vec![0x3FFFF; w * h], alpha: vec![31; w * h], depth: vec![0.0; w * h], id: vec![0; w * h], stencil: vec![], fog: vec![false; w * h], trans: vec![false; w * h], oid: vec![0; w * h], cover: vec![0; w * h] };
+        for y in 0..h {
+            for x in 0..w {
+                // a slope on the left, then a jump to something farther
+                t.depth[y * w + x] = if x < 4 { 0.1 + 0.01 * x as f32 } else { 0.8 };
+            }
+        }
+        let lines = outline_pass(1.0, 0.5, &t, w, h, 1);
+        let dark = |x: usize| lines[3 * w + x] != 0;
+        assert!(dark(3), "the near side of the jump");
+        assert!(!dark(4), "the far side stays");
+        assert!(!dark(1) && !dark(2), "a plane's slope is not an edge");
+    }
+
+    #[test]
+    fn the_outline_leaves_the_interface_at_the_near_plane_alone() {
+        let (w, h) = (8, 8);
+        let mut t = Target { color: vec![0x3FFFF; w * h], alpha: vec![31; w * h], depth: vec![0.5; w * h], id: vec![0; w * h], stencil: vec![], fog: vec![false; w * h], trans: vec![false; w * h], oid: vec![0; w * h], cover: vec![0; w * h] };
+        for y in 0..h {
+            for x in 4..w {
+                t.depth[y * w + x] = 0.0006;
+            }
+        }
+        assert!(outline_pass(1.0, 0.5, &t, w, h, 1).iter().all(|&l| l == 0));
+    }
+
+    #[test]
+    fn a_translucent_panel_over_the_scene_dims_the_line_under_it() {
+        let (w, h) = (8, 8);
+        let mut t = Target { color: vec![0x3FFFF; w * h], alpha: vec![31; w * h], depth: vec![0.0; w * h], id: vec![0; w * h], stencil: vec![], fog: vec![false; w * h], trans: vec![false; w * h], oid: vec![0; w * h], cover: vec![0; w * h] };
+        for y in 0..h {
+            for x in 0..w {
+                t.depth[y * w + x] = if x < 4 { 0.9 } else { 0.99 };
+            }
+        }
+        let bare = outline_pass(1.0, 0.5, &t, w, h, 1)[3 * w + 3];
+        t.cover = vec![8; w * h];
+        let under = outline_pass(1.0, 0.5, &t, w, h, 1)[3 * w + 3];
+        assert!(bare == 15 && under > 0 && under < 15, "{bare} {under}");
+        t.cover = vec![14; w * h];
+        assert!(outline_pass(1.0, 0.5, &t, w, h, 1).iter().all(|&l| l == 0), "a plate that hides the scene hides its line");
+    }
+
+    #[test]
+    fn the_outline_skips_translucent_pixels_and_draws_the_silhouette_lighter() {
+        let (w, h) = (8, 8);
+        let fresh = || Target { color: vec![0x3FFFF; w * h], alpha: vec![31; w * h], depth: vec![0.1; w * h], id: vec![0; w * h], stencil: vec![], fog: vec![false; w * h], trans: vec![false; w * h], oid: vec![0; w * h], cover: vec![0; w * h] };
+        // a translucent strip of another ID over the picture: no line at its edge
+        let mut t = fresh();
+        for y in 0..h {
+            for x in 4..w {
+                t.oid[y * w + x] = 5;
+                t.trans[y * w + x] = true;
+            }
+        }
+        assert!(outline_pass(1.0, 0.5, &t, w, h, 1).iter().all(|&l| l == 0));
+        // the border with the 2D layers: darker than nothing, lighter than an edge between objects
+        let mut t = fresh();
+        for y in 0..h {
+            t.alpha[y * w + 4] = 0;
+        }
+        let l = outline_pass(1.0, 0.5, &t, w, h, 1)[3 * w + 3];
+        assert!(l > 0 && l < 15, "lighter than a line between objects");    }
 
     #[test]
     fn fog_takes_the_clear_plane_to_the_fog_colour_when_the_plane_asks_for_it() {

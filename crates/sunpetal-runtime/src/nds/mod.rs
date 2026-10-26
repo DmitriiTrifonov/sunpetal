@@ -142,6 +142,10 @@ pub struct Nds {
     /// The picture's scale: the 3D is drawn, and the screens put together, this many times as large
     /// each way (1-8).
     scale: usize,
+    /// 0-1: the 3D's extra outline (`render3d`), 0 is off.
+    outline: f32,
+    /// The outline's width in DS pixels.
+    outline_width: f32,
     script: Vec<input::Press>,
     cart: cart::Cart,
     spi: spi::Spi,
@@ -217,6 +221,8 @@ impl Nds {
             frame3d: vec![0; 256 * 192],
             frame3d_scale: 1,
             scale: 1,
+            outline: 0.0,
+            outline_width: 0.5,
             script: Vec::new(),
             cart: cart::Cart::new(),
             spi: spi::Spi::new(),
@@ -426,6 +432,14 @@ pub fn set_input(keys: u32, pen: Option<(i32, i32)>) {
 /// large (1-8). Takes effect with the next frame drawn.
 pub fn set_scale(n: usize) {
     nds(|d| d.scale = n.clamp(1, 8));
+}
+
+/// The strength of the 3D's extra outline, 0-1 (0 is off), and its width in DS pixels (0.25-2). Takes effect with the next frame drawn.
+pub fn set_outline(v: f32, width: f32) {
+    nds(|d| {
+        d.outline = if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 };
+        d.outline_width = if width.is_finite() { width.clamp(0.25, 2.0) } else { 0.5 };
+    });
 }
 
 /// Both screens as RGBA at the current scale, the upper first: 2 x (256 x n) x (192 x n) x 4 bytes.
