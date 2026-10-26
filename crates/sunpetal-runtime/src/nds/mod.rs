@@ -57,6 +57,8 @@ pub struct Config {
     pub dump_textures: Option<PathBuf>,
     /// A folder of PNG replacements for textures, named by their keys (`texpack`).
     pub texture_pack: Option<PathBuf>,
+    /// A folder of files that replace the ROM's by their NitroFS paths (the translation).
+    pub overlay: Option<PathBuf>,
     /// Ticks a safe point stands for on the ARM9 and on the ARM7.
     pub ticks9: u64,
     pub ticks7: u64,
@@ -75,6 +77,7 @@ impl Config {
             trace: false,
             dump_textures: None,
             texture_pack: None,
+            overlay: None,
             ticks9: 16,
             ticks7: 24,
             input: String::new(),

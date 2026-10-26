@@ -14,7 +14,6 @@ pub mod dialogue;
 pub mod script;
 #[cfg(feature = "debug-tools")]
 pub mod evn;
-#[cfg(feature = "debug-tools")]
 pub mod nitrofs;
 #[cfg(feature = "debug-tools")]
 pub mod session;

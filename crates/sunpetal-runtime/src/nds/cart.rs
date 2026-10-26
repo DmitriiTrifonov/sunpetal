@@ -72,13 +72,18 @@ fn chip_mask(rom_len: usize) -> u32 {
 impl Nds {
     pub(super) fn cart_open(&mut self) -> Result<(), String> {
         let path = self.cfg.rom.clone();
-        let rom = fs::read(&path).map_err(|e| format!("cannot open {}: {}", path.display(), e))?;
+        let mut rom = fs::read(&path).map_err(|e| format!("cannot open {}: {}", path.display(), e))?;
         if rom.len() < 0x200 {
             return Err(format!("{} is too small to be a cartridge", path.display()));
         }
         let mb = ((rom.len() + 0xF_FFFF) >> 20) as u32;
-        // as melonDS makes it
+        // as melonDS makes it; of the ROM itself, not of the image the overlay grows
         let chip_id = 0xC2 | ((if mb != 0 { mb - 1 } else { 0 }) & 0xFF) << 8;
+        if let Some(dir) = &self.cfg.overlay {
+            let files = crate::nitrofs::read_overlay_dir(dir)?;
+            let n = crate::nitrofs::apply_overlay(&mut rom, &files)?;
+            note(&format!("overlay: {} files of {} replace the ROM's", n, dir.display()));
+        }
         let save_path = match &self.cfg.save {
             Some(p) => p.clone(),
             None => {
