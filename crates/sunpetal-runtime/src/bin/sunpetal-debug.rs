@@ -31,9 +31,13 @@ struct Args {
     /// Write one JSON line per dialogue window opened to this file.
     #[arg(long, value_name = "FILE")]
     dialogue_log: Option<PathBuf>,
-    /// Play to this scene (Cnn_yy) through the menu of requests first.
-    #[arg(long, value_name = "Cnn_yy")]
+    /// Play to this scene (Cnn_yy) through the menu of requests first; several, as C04_01,C04_03, one after the
+    /// other in this process (each is a line of JSON with its status).
+    #[arg(long, value_name = "Cnn_yy[,Cnn_yy...]")]
     goto: Option<String>,
+    /// The scenes to play one after the other, one a line of FILE (`#` starts a note), as a list for --goto.
+    #[arg(long, value_name = "FILE", conflicts_with_all = ["goto", "chapter"])]
+    scenes: Option<PathBuf>,
     /// Play request N from its start (the same as --goto CNN_01).
     #[arg(long, value_name = "N", conflicts_with = "goto")]
     chapter: Option<u32>,
@@ -65,6 +69,10 @@ struct Args {
     /// With --text-dir: put a file's text in again when it changes (checked twice a second of game time).
     #[arg(long)]
     watch: bool,
+    /// Add to the dialogue log instead of making it anew (the run of the rest of a list that the program
+    /// starts itself, when the game has to be booted again).
+    #[arg(long, hide = true)]
+    append_log: bool,
 }
 
 fn number<T: std::str::FromStr>(w: Option<&&str>, name: &str, default: Option<T>) -> Result<T, String> {
@@ -158,7 +166,7 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             done(json!({"at": at}))
         }
         "log" => {
-            s.log_to(w.first().filter(|p| **p != "off").map(std::path::Path::new))?;
+            s.log_to(w.first().filter(|p| **p != "off").map(std::path::Path::new), false)?;
             done(json!({}))
         }
         "advance" => {
@@ -234,15 +242,23 @@ fn run(a: Args) -> Result<(), String> {
         let index: i32 = name.strip_prefix("value").and_then(|i| i.parse().ok()).ok_or_else(|| format!("--set {}: the only names are value0, value1, ... (the story values SETVALUE sets)", f))?;
         values.push((index, v.parse::<i32>().map_err(|_| format!("--set {}: not a number", f))?));
     }
-    let mut s = Session::open(a.rom, a.save)?;
+    let mut s = Session::open(a.rom.clone(), a.save.clone())?;
     let tracker = Tracker::install();
     if let Some(d) = &a.text_dir {
         s.use_texts(d, a.watch)?;
     }
     if let Some(p) = &a.dialogue_log {
-        s.log_to(Some(p))?;
+        s.log_to(Some(p), a.append_log)?;
     }
-    let scene = a.goto.clone().or(a.chapter.map(|c| format!("C{:02}_01", c)));
+    let mut scenes: Vec<String> = match (&a.scenes, &a.goto) {
+        (Some(f), _) => std::fs::read_to_string(f).map_err(|e| format!("{}: {}", f.display(), e))?.lines().map(|l| l.split('#').next().unwrap_or("").trim().to_string()).filter(|l| !l.is_empty()).collect(),
+        (None, Some(g)) => g.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect(),
+        _ => Vec::new(),
+    };
+    if scenes.len() > 1 || (a.scenes.is_some() && !scenes.is_empty()) {
+        return batch(&mut s, &a, &values, &scenes);
+    }
+    let scene = scenes.pop().or(a.chapter.map(|c| format!("C{:02}_01", c)));
     if let Some(scene) = &scene {
         s.goto(scene, values.iter().find(|v| v.0 == 0).map(|v| v.1))?;
         for (i, v) in values.iter().filter(|v| v.0 != 0) {
@@ -276,6 +292,77 @@ fn run(a: Args) -> Result<(), String> {
         println!("{}", answer);
     }
     Ok(())
+}
+
+/// The scenes one after the other in one game run: the first from its request, a later one of the same chapter
+/// from where the last left the game (a different chapter, or a game that does not come to a free walk, is a new
+/// start of the chapter, by the request menu). A line of JSON on stdout for each: `status` is `ok` (the scene
+/// ended or its lines were shown to the count asked), `stalled` (it waits for a walk, an event or a timer),
+/// `no_event` (no event of the chapter starts it) or `not_started` (the hero stood at its place and the game did
+/// not start it); the dialogue log, `--out` and the rest are common to all.
+fn batch(s: &mut Session, a: &Args, values: &[(i32, i32)], scenes: &[String]) -> Result<(), String> {
+    let value0 = values.iter().find(|v| v.0 == 0).map(|v| v.1);
+    let mut last: Option<&str> = None;
+    for (i, scene) in scenes.iter().enumerate() {
+        let before = s.events().len();
+        let chapter = scene.get(..3);
+        let carry = last.is_some_and(|l| l.get(..3) == chapter && !scene.ends_with("_01"));
+        let started = match carry {
+            true => match s.goto_next(scene, value0) {
+                Ok(true) => Ok(()),
+                // the game did not settle: the rest of the list in a new run of the program
+                Ok(false) => return rerun(a, &scenes[i..]),
+                // the game is not as a run of the one scene would have it (a menu or a camera of the scene before)
+                Err(e) if e.contains("did not start it") => return rerun(a, &scenes[i..]),
+                Err(e) => Err(e),
+            },
+            false if last.is_some() => return rerun(a, &scenes[i..]),
+            false => s.goto(scene, value0),
+        };
+        let started = started.and_then(|_| {
+            for (i, v) in values.iter().filter(|v| v.0 != 0) {
+                s.set_value(*i, *v)?;
+            }
+            s.run(a.frame_delay)
+        });
+        let (status, stop, error) = match started {
+            Err(e) => (if e.contains("no event starts it") { "no_event" } else { "not_started" }, None, Some(e)),
+            Ok(()) if a.autoplay => {
+                let stop = s.autoplay(&Autoplay { max_lines: a.max_lines, delay: a.frame_delay, out: a.out.clone() })?;
+                (if stop == sunpetal_runtime::session::Stop::Stalled { "stalled" } else { "ok" }, Some(stop), None)
+            }
+            Ok(()) => ("ok", None, None),
+        };
+        let shown = s.events()[before..].iter().filter(|e| e.scene.as_deref() == Some(scene)).count();
+        println!("{}", json!({"scene": scene, "status": status, "stop": stop, "lines": shown, "state": s.state(), "frame": s.vblank(), "map": s.map(), "value0": s.value(0), "error": error}));
+        last = Some(scene);
+    }
+    Ok(())
+}
+
+/// The scenes `rest` in a new run of this program (the game boots from its save again, as a run of one scene
+/// does): the same arguments, the list in a file, the log added to. Its lines of JSON follow ours.
+fn rerun(a: &Args, rest: &[String]) -> Result<(), String> {
+    let list = std::env::temp_dir().join(format!("sunpetal-scenes-{}.txt", std::process::id()));
+    std::fs::write(&list, rest.join("\n")).map_err(|e| format!("{}: {}", list.display(), e))?;
+    let mut args: Vec<String> = Vec::new();
+    let mut skip = false;
+    for arg in std::env::args().skip(1) {
+        if skip {
+            skip = false;
+        } else if arg == "--goto" || arg == "--scenes" {
+            skip = true;
+        } else if !arg.starts_with("--goto=") && !arg.starts_with("--scenes=") {
+            args.push(arg);
+        }
+    }
+    args.extend(["--scenes".into(), list.display().to_string()]);
+    if a.dialogue_log.is_some() && !a.append_log {
+        args.push("--append-log".into());
+    }
+    let status = std::process::Command::new(std::env::current_exe().map_err(|e| e.to_string())?).args(&args).status().map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_file(&list);
+    if status.success() { Ok(()) } else { Err(format!("the run of the rest of the list ended with {}", status)) }
 }
 
 fn main() -> ExitCode {

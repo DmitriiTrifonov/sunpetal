@@ -26,6 +26,15 @@ const SLOTS: u32 = 0x0207_4BEC;
 /// The pointer to the text of the line the window shows (0 when none).
 const SHOWN: u32 = 0x0207_5A28;
 
+/// The word the game sets when `SETFACE2` has put a face in the window (`0204917C` handler: `[020759EC + 0x34]`).
+const PORTRAIT_SHOWN: u32 = 0x0207_5A20;
+/// Where the dialogue window's text is drawn: from `TEXT_X0`, up to (not with) `TEXT_X1`, on the screen's 256
+/// columns. The game has one layout, the portrait at the left (its frame's rule at x = 48); nothing the
+/// scripts give (`SETFACE2` parameters) moves either. Measured, the text of a line of `W` of known widths
+/// (docs/debug-tools.md): ink starts at 58 and the last column that is drawn is 242, whatever the portrait.
+pub const TEXT_X0: u32 = 58;
+pub const TEXT_X1: u32 = 243;
+
 fn word(addr: u32) -> Option<u32> {
     debug::peek(addr, 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
 }
@@ -124,6 +133,8 @@ pub struct Shown {
     pub text: String,
     /// The speaker: the first number of the `SETFACE2` before the line in the scene's commands.
     pub face: Option<u32>,
+    /// The window shows a portrait now (`SETFACE2` with a face, not -1).
+    pub portrait: bool,
 }
 
 /// Watches the loader: the slots and the ids loaded into them.
@@ -182,7 +193,8 @@ impl Tracker {
                 (word(cmd)? == OP_SETFACE2).then(|| word(cmd + 8)).flatten()
             })
         });
-        Some(Shown { ptr, id, text, face })
+        let portrait = word(PORTRAIT_SHOWN).is_some_and(|f| f != 0);
+        Some(Shown { ptr, id, text, face, portrait })
     }
 }
 

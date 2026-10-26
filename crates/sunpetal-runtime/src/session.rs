@@ -20,6 +20,11 @@ pub struct Event {
     pub id: Option<String>,
     /// The speaker's face number (`SETFACE2`).
     pub face: Option<u32>,
+    /// Which side the portrait is on in the window (null: none), and the columns the text takes: from
+    /// `text_x0`, up to `text_x1` (the game clips there).
+    pub portrait: Option<&'static str>,
+    pub text_x0: u32,
+    pub text_x1: u32,
     pub text: String,
     pub lines: usize,
     /// Each line's width in pixels as the game's font measures it.
@@ -43,6 +48,12 @@ pub struct Session {
     events: Vec<Event>,
     texts: Option<Texts>,
     frames: u64,
+    /// The events `silence_rivals` put out: the address of the record and the first byte of its name.
+    silenced: Vec<(u32, u8)>,
+    /// The lines shown while the chapter's opening plays to a scene are not written to the log (it was added to:
+    /// the run before wrote them).
+    quiet_opening: bool,
+    quiet: bool,
 }
 
 /// Lines in a row, all shown before in a scene, after which autoplay counts the scene as stalled.
@@ -87,7 +98,7 @@ impl Session {
         debug::log_card_reads();
         nds::track_script();
         let tracker = Tracker::install();
-        Ok(Session { keys: 0, pen: None, tracker, fs, rom: rom_path, scene: None, shown: None, log: None, events: Vec::new(), texts: None, frames: 0 })
+        Ok(Session { keys: 0, pen: None, tracker, fs, rom: rom_path, scene: None, shown: None, log: None, events: Vec::new(), texts: None, frames: 0, silenced: Vec::new(), quiet_opening: false, quiet: false })
     }
 
     pub fn vblank(&self) -> u64 {
@@ -128,7 +139,7 @@ impl Session {
             // a text the scripts do not own (no id) is a stale pointer, not a window
             if let Some(line) = now.filter(|l| l.id.is_some()) {
                 let event = self.event(line);
-                if let Some(log) = &mut self.log {
+                if let Some(log) = self.log.as_mut().filter(|_| !self.quiet) {
                     let json = serde_json::to_string(&event).map_err(|e| e.to_string())?;
                     writeln!(log, "{}", json).and_then(|_| log.flush()).map_err(|e| format!("dialogue log: {}", e))?;
                 }
@@ -142,17 +153,19 @@ impl Session {
         let widths = dialogue::line_widths(&line.text).unwrap_or_default();
         let lines = line.text.split('\n').count();
         let overflow = lines > dialogue::MAX_LINES || widths.iter().any(|w| *w > dialogue::MAX_WIDTH);
-        Event { frame: nds::vblanks(), scene: self.scene.clone(), id: line.id.map(|i| format!("{:05}", i)), face: line.face, text: line.text, lines, widths, overflow }
+        Event { frame: nds::vblanks(), scene: self.scene.clone(), id: line.id.map(|i| format!("{:05}", i)), face: line.face, portrait: line.portrait.then_some("left"), text_x0: dialogue::TEXT_X0, text_x1: dialogue::TEXT_X1, text: line.text, lines, widths, overflow }
     }
 
     /// Starts writing the dialogue log to `path` (one JSON line per line shown), or stops it.
-    pub fn log_to(&mut self, path: Option<&Path>) -> Result<(), String> {
+    pub fn log_to(&mut self, path: Option<&Path>, append: bool) -> Result<(), String> {
+        self.quiet_opening = append;
         self.log = match path {
             Some(p) => {
                 if let Some(d) = p.parent().filter(|d| !d.as_os_str().is_empty()) {
                     std::fs::create_dir_all(d).map_err(|e| format!("{}: {}", d.display(), e))?;
                 }
-                Some(std::io::BufWriter::new(std::fs::File::create(p).map_err(|e| format!("{}: {}", p.display(), e))?))
+                let file = if append { std::fs::OpenOptions::new().create(true).append(true).open(p) } else { std::fs::File::create(p) };
+                Some(std::io::BufWriter::new(file.map_err(|e| format!("{}: {}", p.display(), e))?))
             }
             None => None,
         };
@@ -337,8 +350,9 @@ impl Session {
     pub fn goto(&mut self, scene: &str, value: Option<i32>) -> Result<(), String> {
         let bad = || format!("{}: a scene is Cnn_yy, as C04_16", scene);
         let (c, y) = scene.strip_prefix('C').and_then(|r| r.split_once('_')).ok_or_else(bad)?;
-        let (chapter, index): (u32, u32) = (c.parse().map_err(|_| bad())?, y.parse().map_err(|_| bad())?);
-        if index == 1 {
+        let chapter: u32 = c.parse().map_err(|_| bad())?;
+        // a name that is no number (`C04_LIST`, `C04_NEW01`) is an event of the chapter, as the later scenes are
+        if y.parse::<u32>() == Ok(1) {
             self.goto_request(chapter)
         } else {
             self.goto_event(scene, value)
@@ -673,9 +687,48 @@ impl Session {
     /// story value its event wants (from the chapter's `.EVN`), the doors from map to map as the game has them
     /// (each by its own event), and the place of the event, where the game starts the scene itself.
     pub fn goto_event(&mut self, scene: &str, value: Option<i32>) -> Result<(), String> {
+        self.goto_event_from(scene, value, false)
+    }
+
+    /// As `goto_event` for the next scene of a run: from where the last one left the game, not from the start of
+    /// the chapter. The scene before is played out as far as it goes first (`settle`); false if the game does not
+    /// come to a free walk, and then only a fresh start will do.
+    pub fn goto_next(&mut self, scene: &str, value: Option<i32>) -> Result<bool, String> {
+        // a scene no event starts does not wait for the game to settle
+        self.event_of(scene)?;
+        if !self.settle()? {
+            return Ok(false);
+        }
+        self.goto_event_from(scene, value, true).map(|_| true)
+    }
+
+    /// Plays on, A now and then, until no script runs and the hero is on a map (a free walk), for at most 40 s.
+    pub fn settle(&mut self) -> Result<bool, String> {
+        let mut idle = 0;
+        for i in 0..2400 {
+            idle = if nds::script_idle() == Some(true) && self.map().is_some() { idle + 1 } else { 0 };
+            if idle >= 60 {
+                return Ok(true);
+            }
+            if i % 60 == 30 {
+                self.press("A", 5)?;
+            } else {
+                self.run(1)?;
+            }
+        }
+        Ok(false)
+    }
+
+    /// The chapter's number, its events (`.EVN`), and the one that starts `scene`.
+    fn event_of(&self, scene: &str) -> Result<(u32, Vec<crate::evn::Event>, crate::evn::Event), String> {
         let chapter: u32 = scene.get(1..3).and_then(|c| c.parse().ok()).ok_or_else(|| format!("{}: a scene is Cnn_yy", scene))?;
         let events = crate::evn::parse(&self.file(&format!("Chapter/Pack/C{:02}/C{:02}.EVN", chapter, chapter))?);
         let event = events.iter().find(|e| e.scene == scene).cloned().ok_or_else(|| format!("{}: no event starts it in chapter {}", scene, chapter))?;
+        Ok((chapter, events, event))
+    }
+
+    fn goto_event_from(&mut self, scene: &str, value: Option<i32>, carry_on: bool) -> Result<(), String> {
+        let (chapter, events, event) = self.event_of(scene)?;
         let mut doors = Vec::new();
         for e in events.iter().filter(|e| e.scene.starts_with('A')) {
             // a name the file holds that is no scene of this chapter is not a door
@@ -683,15 +736,19 @@ impl Session {
             let target = crate::script::lz10(&z).and_then(|t| crate::script::map_target(&crate::script::utf16le(&t)));
             doors.extend(target.map(|target| Door { event: e.clone(), target }));
         }
-        self.goto_request(chapter)?;
-        // the opening plays by A; the first stall is the first free walk
-        let stop = self.autoplay(&Autoplay { max_lines: 1000, delay: 0, out: None })?;
-        if stop == Stop::MaxLines {
-            return Err(format!("the opening of chapter {} did not end in 1000 lines", chapter));
-        }
-        // the opening runs on into the scene (C04_01 into C04_02): it is there already
-        if self.scene.as_deref() == Some(scene) {
-            return Ok(());
+        if !carry_on {
+            self.quiet = self.quiet_opening;
+            let played = self.goto_request(chapter).and_then(|_| self.autoplay(&Autoplay { max_lines: 1000, delay: 0, out: None }));
+            self.quiet = false;
+            // the opening plays by A; the first stall is the first free walk
+            let stop = played?;
+            if stop == Stop::MaxLines {
+                return Err(format!("the opening of chapter {} did not end in 1000 lines", chapter));
+            }
+            // the opening runs on into the scene (C04_01 into C04_02): it is there already
+            if self.scene.as_deref() == Some(scene) {
+                return Ok(());
+            }
         }
         self.set_value(0, value.unwrap_or(event.value_min))?;
         let here = self.map().ok_or("the hero is not on a map: the opening has not ended")?;
@@ -724,11 +781,18 @@ impl Session {
         let word = |a: u32| debug::peek(a, 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
         let Some(world) = word(WORLD) else { return 0 };
         let count = word(world + EVENT_COUNT).unwrap_or(0).min(512);
+        let table: Vec<u32> = (0..count).filter_map(|i| word(world + EVENT_TABLE + 4 * i)).collect();
+        // the names put out before come back, those whose record is still in the table
+        for (at, byte) in std::mem::take(&mut self.silenced) {
+            if table.contains(&at) && debug::peek(at, 1) == Some(vec![0]) {
+                debug::poke(at, &[byte]);
+            }
+        }
         let mut out = 0;
-        for i in 0..count {
-            let Some(event) = word(world + EVENT_TABLE + 4 * i).filter(|e| *e != 0) else { continue };
+        for event in table.into_iter().filter(|e| *e != 0) {
             let Some(name) = debug::peek(event, 8) else { continue };
             if name[0] != 0 && !name.starts_with(scene.as_bytes()) && !name.starts_with(b"A") && debug::poke(event, &[0]) {
+                self.silenced.push((event, name[0]));
                 out += 1;
             }
         }
