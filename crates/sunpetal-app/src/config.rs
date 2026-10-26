@@ -123,6 +123,15 @@ impl Default for Interface {
     }
 }
 
+/// The game itself.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
+#[serde(default)]
+pub struct Game {
+    /// The language of the translation in the data file to play with (`ru`); empty: the ROM's own
+    /// text. Read when the game starts.
+    pub language: String,
+}
+
 /// The languages the interface has.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Lang {
@@ -156,6 +165,7 @@ impl Lang {
 #[serde(default)]
 pub struct Settings {
     pub interface: Interface,
+    pub game: Game,
     pub video: Video,
     pub audio: Audio,
     pub input: Input,

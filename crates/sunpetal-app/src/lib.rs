@@ -570,6 +570,11 @@ pub fn run(o: Options, el: EventLoop<()>) {
             None
         }
     });
+    // the data file (`sunpetal.data`) is the texture setting's file; its translation is put in
+    if cfg.texture_pack.as_ref().is_some_and(|p| p.is_file()) && !settings.game.language.is_empty() {
+        cfg.data = cfg.texture_pack.clone();
+        cfg.language = Some(settings.game.language.clone());
+    }
     let shared = Shared::new();
     shared.scale.store(settings.video.res, Ordering::Relaxed);
     *shared.extras.lock().unwrap() = settings.effects.extras();

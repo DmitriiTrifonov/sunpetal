@@ -28,6 +28,12 @@ struct Args {
     /// A folder of files that replace the ROM's by their NitroFS paths (the translation).
     #[arg(long)]
     overlay: Option<PathBuf>,
+    /// A data file (`sunpetal.data`); with `--lang` its translation goes in.
+    #[arg(long)]
+    data: Option<PathBuf>,
+    /// The language of the translation in the data file (`ru`).
+    #[arg(long)]
+    lang: Option<String>,
     /// Commands from stdin, one per line.
     #[arg(long)]
     repl: bool,
@@ -245,7 +251,7 @@ fn run(a: Args) -> Result<(), String> {
         let index: i32 = name.strip_prefix("value").and_then(|i| i.parse().ok()).ok_or_else(|| format!("--set {}: the only names are value0, value1, ... (the story values SETVALUE sets)", f))?;
         values.push((index, v.parse::<i32>().map_err(|_| format!("--set {}: not a number", f))?));
     }
-    let mut s = Session::open_with(a.rom.clone(), a.save.clone(), a.overlay.clone())?;
+    let mut s = Session::open_with(a.rom.clone(), a.save.clone(), a.overlay.clone(), a.data.clone().zip(a.lang.clone()))?;
     let tracker = Tracker::install();
     if let Some(d) = &a.text_dir {
         s.use_texts(d, a.watch)?;

@@ -98,3 +98,53 @@ fn the_rest_of_the_translated_rom_goes_by_deltas() {
     eprintln!("total {} bytes", total);
     assert!(!groups.is_empty());
 }
+
+/// A translation through the data file and back: the overlay it makes holds the files of the
+/// translated ROM (all of them, not only the text).
+#[test]
+fn a_translation_in_a_data_file_makes_the_translated_rom() {
+    use sunpetal_data::container::Container;
+    let (Some(rom), Some(done), Some(table)) = (var("SUNPETAL_ROM"), var("SUNPETAL_TRANSLATED_ROM"), var("SUNPETAL_TABLE")) else {
+        eprintln!("skipped: no SUNPETAL_ROM, SUNPETAL_TRANSLATED_ROM, SUNPETAL_TABLE");
+        return;
+    };
+    let rom = std::fs::read(rom).unwrap();
+    let done = std::fs::read(done).unwrap();
+    let table = translate::Table::from_csv(&std::fs::read_to_string(table).unwrap(), "Русский").unwrap();
+    let (tr, problems) = translate::Translation::make(&rom, &done, table, "ru", "ue").unwrap();
+    assert!(problems.is_empty(), "{:?}", problems);
+    let mut c = Container::new();
+    c.add(b"TRAN", tr.to_bytes().unwrap());
+    let path = std::env::temp_dir().join(format!("sunpetal-tran-{}.spdata", std::process::id()));
+    c.write(&path).unwrap();
+    eprintln!("data file {} bytes", std::fs::metadata(&path).unwrap().len());
+    let back = translate::Translation::from_bytes(&Container::read(&path).unwrap().get(b"TRAN").unwrap().data).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!((back.lang.as_str(), back.base.as_str()), ("ru", "ue"));
+    let overlay = back.overlay(&rom).unwrap();
+    let fs_done = NitroFs::parse(&done).unwrap();
+    assert_eq!(overlay.len(), 795);
+    for (p, bytes) in &overlay {
+        let want = fs_done.file(&done, p).unwrap();
+        let trim = |x: &[u8]| x[..x.iter().rposition(|v| *v != 0).map_or(0, |i| i + 1)].to_vec();
+        if p.ends_with(".z") {
+            assert_eq!(lz10::decompress(bytes).unwrap(), lz10::decompress(want).unwrap(), "{}", p);
+        } else {
+            assert_eq!(trim(bytes), trim(want), "{}", p);
+        }
+    }
+    // the overlay put into the ROM gives the files of the translated one
+    let mut image = rom.clone();
+    sunpetal_data::nitrofs::apply_overlay(&mut image, &overlay).unwrap();
+    let fs_image = NitroFs::parse(&image).unwrap();
+    for (p, _) in &overlay {
+        let (a, b) = (fs_image.file(&image, p).unwrap(), fs_done.file(&done, p).unwrap());
+        if !p.ends_with(".z") {
+            assert!(a.len() <= b.len() && b[..a.len()] == *a, "{}", p);
+        }
+    }
+    // another ROM is refused
+    let mut other = rom.clone();
+    other[0x1000] ^= 1;
+    assert!(back.overlay(&other).is_err());
+}

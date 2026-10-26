@@ -33,7 +33,7 @@ pub fn crc32(data: &[u8]) -> u32 {
     !data.iter().fold(!0u32, |c, b| table[((c ^ *b as u32) & 0xFF) as usize] ^ (c >> 8))
 }
 
-fn put_varint(out: &mut Vec<u8>, mut v: u64) {
+pub(crate) fn put_varint(out: &mut Vec<u8>, mut v: u64) {
     while v >= 0x80 {
         out.push((v & 0x7F) as u8 | 0x80);
         v >>= 7;
@@ -41,7 +41,7 @@ fn put_varint(out: &mut Vec<u8>, mut v: u64) {
     out.push(v as u8);
 }
 
-fn get_varint(data: &[u8], at: &mut usize) -> Result<u64, String> {
+pub(crate) fn get_varint(data: &[u8], at: &mut usize) -> Result<u64, String> {
     let (mut v, mut shift) = (0u64, 0);
     loop {
         let b = *data.get(*at).ok_or("the delta ends early")?;

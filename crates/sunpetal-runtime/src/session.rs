@@ -87,21 +87,22 @@ pub fn buttons(names: &str) -> Result<u32, String> {
 impl Session {
     /// Boots `rom` with its save in `save` (a 64 KiB EEPROM, made if not there).
     pub fn open(rom: impl Into<PathBuf>, save: Option<PathBuf>) -> Result<Session, String> {
-        Session::open_with(rom, save, None)
+        Session::open_with(rom, save, None, None)
     }
 
-    /// The same with `overlay`, a folder of files that replace the ROM's (`nitrofs::apply_overlay`):
-    /// the files are named by the image the game reads, the overlaid one.
-    pub fn open_with(rom: impl Into<PathBuf>, save: Option<PathBuf>, overlay: Option<PathBuf>) -> Result<Session, String> {
+    /// The same with `overlay`, a folder of files that replace the ROM's (`nitrofs::apply_overlay`),
+    /// and `data`, a data file with the language of its translation: the files are named by the
+    /// image the game reads, the overlaid one.
+    pub fn open_with(rom: impl Into<PathBuf>, save: Option<PathBuf>, overlay: Option<PathBuf>, data: Option<(PathBuf, String)>) -> Result<Session, String> {
         let rom = rom.into();
         let mut image = std::fs::read(&rom).map_err(|e| format!("{}: {}", rom.display(), e))?;
-        if let Some(dir) = &overlay {
-            crate::nitrofs::apply_overlay(&mut image, &crate::nitrofs::read_overlay_dir(dir)?)?;
-        }
-        let fs = NitroFs::parse(&image)?;
         let rom_path = rom.clone();
         let mut cfg = Config::new(rom);
         cfg.overlay = overlay;
+        (cfg.data, cfg.language) = data.map_or((None, None), |(d, l)| (Some(d), Some(l)));
+        let files = nds::overlay_files(&cfg, &image)?;
+        crate::nitrofs::apply_overlay(&mut image, &files)?;
+        let fs = NitroFs::parse(&image)?;
         cfg.save = save;
         cfg.save_size = 65536;
         nds::boot(cfg)?;

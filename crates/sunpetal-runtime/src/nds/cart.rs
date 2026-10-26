@@ -79,10 +79,10 @@ impl Nds {
         let mb = ((rom.len() + 0xF_FFFF) >> 20) as u32;
         // as melonDS makes it; of the ROM itself, not of the image the overlay grows
         let chip_id = 0xC2 | ((if mb != 0 { mb - 1 } else { 0 }) & 0xFF) << 8;
-        if let Some(dir) = &self.cfg.overlay {
-            let files = crate::nitrofs::read_overlay_dir(dir)?;
+        let files = super::overlay_files(&self.cfg, &rom)?;
+        if !files.is_empty() {
             let n = crate::nitrofs::apply_overlay(&mut rom, &files)?;
-            note(&format!("overlay: {} files of {} replace the ROM's", n, dir.display()));
+            note(&format!("overlay: {} files replace the ROM's", n));
         }
         let save_path = match &self.cfg.save {
             Some(p) => p.clone(),

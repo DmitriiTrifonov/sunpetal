@@ -79,6 +79,13 @@ impl Menu {
                 if !s.video.texture_pack.is_empty() && !std::path::Path::new(&s.video.texture_pack).exists() {
                     ui.colored_label(egui::Color32::LIGHT_RED, tx("not found", "не найдено"));
                 }
+                egui::ComboBox::from_label(tx("Game language (needs the data file)", "Язык игры (нужен файл данных)")).selected_text(match s.game.language.as_str() {
+                    "ru" => "Русский",
+                    _ => tx("the ROM's own", "как в ROM"),
+                }).show_ui(ui, |ui| {
+                    ui.selectable_value(&mut s.game.language, String::new(), tx("the ROM's own", "как в ROM"));
+                    ui.selectable_value(&mut s.game.language, "ru".to_string(), "Русский");
+                });
                 ui.label(tx("Takes effect the next time the game starts.", "Применится при следующем запуске игры."));
             });
             egui::CollapsingHeader::new(tx("Effects", "Эффекты")).show(ui, |ui| {

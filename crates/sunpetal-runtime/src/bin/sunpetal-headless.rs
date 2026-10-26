@@ -17,7 +17,7 @@ fn main() -> ExitCode {
     let mut rest = Vec::new();
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--vblanks" | "--out" | "--save" | "--save-size" | "--dump-textures" | "--dump-bg" | "--texture-pack" | "--overlay" | "--shots" | "--shot-every" | "--input" | "--wav" | "--scale" | "--outline" | "--outline-width" | "--shadow" | "--shadow-radius" => rest.push((a, args.next().unwrap_or_default())),
+            "--vblanks" | "--out" | "--save" | "--save-size" | "--dump-textures" | "--dump-bg" | "--texture-pack" | "--overlay" | "--data" | "--lang" | "--shots" | "--shot-every" | "--input" | "--wav" | "--scale" | "--outline" | "--outline-width" | "--shadow" | "--shadow-radius" => rest.push((a, args.next().unwrap_or_default())),
             "--trace" | "--draw-all" => rest.push((a, String::new())),
             _ if cfg.is_none() => cfg = Some(Config::new(a)),
             _ => {
@@ -44,6 +44,8 @@ fn main() -> ExitCode {
             "--dump-bg" => dump_bg = Some(std::path::PathBuf::from(v)),
             "--texture-pack" => cfg.texture_pack = Some(v.into()),
             "--overlay" => cfg.overlay = Some(v.into()),
+            "--data" => cfg.data = Some(v.into()),
+            "--lang" => cfg.language = Some(v),
             "--save-size" => cfg.save_size = v.parse().unwrap_or(8192),
             "--input" => cfg.input = v,
             "--scale" => scale = v.parse().unwrap_or(1),

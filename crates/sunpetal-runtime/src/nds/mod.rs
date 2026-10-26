@@ -59,6 +59,9 @@ pub struct Config {
     pub texture_pack: Option<PathBuf>,
     /// A folder of files that replace the ROM's by their NitroFS paths (the translation).
     pub overlay: Option<PathBuf>,
+    /// The data file (`sunpetal.data`) and the language of its translation to put in (`ru`).
+    pub data: Option<PathBuf>,
+    pub language: Option<String>,
     /// Ticks a safe point stands for on the ARM9 and on the ARM7.
     pub ticks9: u64,
     pub ticks7: u64,
@@ -78,11 +81,29 @@ impl Config {
             dump_textures: None,
             texture_pack: None,
             overlay: None,
+            data: None,
+            language: None,
             ticks9: 16,
             ticks7: 24,
             input: String::new(),
         }
     }
+}
+
+/// The files that replace the ROM's: the translation of `cfg.language` from the data file, then the
+/// files of the overlay folder (they win). `rom` is the ROM as it is on disk.
+pub fn overlay_files(cfg: &Config, rom: &[u8]) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let mut files = Vec::new();
+    if let (Some(data), Some(lang)) = (&cfg.data, &cfg.language) {
+        let c = sunpetal_data::container::Container::read_only(data, |t| t == b"TRAN")?;
+        let found = c.all(b"TRAN").filter_map(|s| sunpetal_data::translate::Translation::from_bytes(&s.data).ok()).find(|t| &t.lang == lang);
+        let t = found.ok_or_else(|| format!("{} has no translation `{}`", data.display(), lang))?;
+        files.extend(t.overlay(rom)?);
+    }
+    if let Some(dir) = &cfg.overlay {
+        files.extend(crate::nitrofs::read_overlay_dir(dir)?);
+    }
+    Ok(files)
 }
 
 fn ci(cpu: i32) -> usize {
