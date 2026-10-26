@@ -3,7 +3,7 @@
 //! the same ROM must be linked in (docs/ABI.md).
 //!
 //!     sunpetal-headless ROM.nds [--vblanks N] [--trace] [--out DIR] [--save FILE]
-//!                              [--save-size BYTES] [--dump-textures DIR] [--dump-bg DIR] [--texture-pack DIR] [--shots V,V,...] [--shot-every N] [--input SCRIPT] [--wav FILE] [--scale N] [--outline 0-1] [--outline-width 0.25-2]
+//!                              [--save-size BYTES] [--dump-textures DIR] [--dump-bg DIR] [--texture-pack DIR] [--shots V,V,...] [--shot-every N] [--input SCRIPT] [--wav FILE] [--scale N] [--outline 0-1] [--outline-width 0.25-2] [--shadow 0-1] [--shadow-radius 0.5-6]
 //!
 //! Both screens are written as PNGs (DIR/v<N>.png) at the VBlanks asked for; --wav writes the sound
 //! (16-bit stereo, 32 728 Hz); --draw-all draws every frame (for timing).
@@ -17,7 +17,7 @@ fn main() -> ExitCode {
     let mut rest = Vec::new();
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--vblanks" | "--out" | "--save" | "--save-size" | "--dump-textures" | "--dump-bg" | "--texture-pack" | "--shots" | "--shot-every" | "--input" | "--wav" | "--scale" | "--outline" | "--outline-width" => rest.push((a, args.next().unwrap_or_default())),
+            "--vblanks" | "--out" | "--save" | "--save-size" | "--dump-textures" | "--dump-bg" | "--texture-pack" | "--shots" | "--shot-every" | "--input" | "--wav" | "--scale" | "--outline" | "--outline-width" | "--shadow" | "--shadow-radius" => rest.push((a, args.next().unwrap_or_default())),
             "--trace" | "--draw-all" => rest.push((a, String::new())),
             _ if cfg.is_none() => cfg = Some(Config::new(a)),
             _ => {
@@ -35,8 +35,7 @@ fn main() -> ExitCode {
     let mut wav: Option<String> = None;
     let mut draw_all = false;
     let mut scale = 1usize;
-    let mut outline = 0.0f32;
-    let mut outline_width = 0.5f32;
+    let mut extras = nds::Extras::default();
     for (k, v) in rest {
         match k.as_str() {
             "--vblanks" => cfg.stop_vblanks = v.parse().unwrap_or(0),
@@ -47,8 +46,10 @@ fn main() -> ExitCode {
             "--save-size" => cfg.save_size = v.parse().unwrap_or(8192),
             "--input" => cfg.input = v,
             "--scale" => scale = v.parse().unwrap_or(1),
-            "--outline" => outline = v.parse().unwrap_or(0.0),
-            "--outline-width" => outline_width = v.parse().unwrap_or(0.5),
+            "--outline" => extras.outline = v.parse().unwrap_or(0.0),
+            "--outline-width" => extras.outline_width = v.parse().unwrap_or(0.5),
+            "--shadow" => extras.shadow = v.parse().unwrap_or(0.0),
+            "--shadow-radius" => extras.shadow_radius = v.parse().unwrap_or(2.0),
             "--wav" => wav = Some(v),
             "--shots" => shots.extend(v.split(',').filter_map(|x| x.parse::<u64>().ok())),
             "--shot-every" => shot_every = v.parse().unwrap_or(0),
@@ -64,7 +65,7 @@ fn main() -> ExitCode {
     }
     let out = cfg_out;
     nds::set_scale(scale);
-    nds::set_outline(outline, outline_width);
+    nds::set_extras(extras);
     nds::set_sound_keep(wav.is_some());
     let mut samples: Vec<i16> = Vec::new();
     let shot_at = |v: u64| (shot_every != 0 && v % shot_every == 0) || shots.contains(&v);

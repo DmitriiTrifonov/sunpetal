@@ -100,11 +100,13 @@ pub struct Emulation {
     pub fast_button: bool,
     /// A skip button beside them: fast-forward until the picture stops changing.
     pub skip_button: bool,
+    /// A click (a tap) while the logos at the start run races through them.
+    pub click_skips_logos: bool,
 }
 
 impl Default for Emulation {
     fn default() -> Emulation {
-        Emulation { pause_in_menu: true, fast_key: true, fast_button: true, skip_button: true }
+        Emulation { pause_in_menu: true, fast_key: true, fast_button: true, skip_button: true, click_skips_logos: true }
     }
 }
 

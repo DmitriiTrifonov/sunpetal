@@ -803,10 +803,12 @@ pub(super) fn compose(w: &[u32], px3d: u32) -> u32 {
     let mut c = w0 & 0x3FFFF;
     let mode = (w0 >> 24) & 3;
     let mut c3 = px3d & 0x3FFFF;
-    // the outline (`render3d::outline_pass`): the 3D's colour darkened, where the 3D is on show
-    let line = (px3d >> 24) & 15;
-    if line != 0 {
-        let f = |v: u32| v * (1500 - 85 * line) / 1500;
+    // the outline and the shading (`render3d::outline_pass`, `shade_pass`): the 3D's colour darkened,
+    // where the 3D is on show
+    let (line, shade) = ((px3d >> 24) & 15, (px3d >> 28) & 15);
+    if line | shade != 0 {
+        let dark = (85 * line).max(65 * shade);
+        let f = |v: u32| v * (1500 - dark) / 1500;
         c3 = f(c3 & 63) | f(c3 >> 6 & 63) << 6 | f(c3 >> 12 & 63) << 12;
     }
     let a3 = (px3d >> 18) & 31;

@@ -1,7 +1,7 @@
 //! The machine on its own thread: the runtime keeps its state per thread, and the window's thread
 //! belongs to the window. Frames and sound go out, input comes in, through `Shared`.
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -58,16 +58,20 @@ pub struct Input {
     pub pen: Option<(i32, i32)>,
 }
 
+/// The vblank at which the logos at the start end (the screens go black, then the title): the game
+/// takes no input before it (A, START and the stylus change nothing), so a click races through them.
+const LOGOS_END_VBLANKS: u64 = 580;
+
 pub struct Shared {
     pub input: Mutex<Input>,
     /// The latest picture: its scale, then both screens, RGBA, the upper first.
     pub frame: Mutex<Option<(usize, Vec<u8>)>>,
     /// The internal resolution, times 256x192 (1-8): the 3D is drawn that large.
     pub scale: AtomicUsize,
-    /// The 3D's extra outline, 0-1, as the bits of an f32.
-    pub outline: AtomicU32,
-    /// Its width in DS pixels, as the bits of an f32.
-    pub outline_width: AtomicU32,
+    /// The 3D's outline and shading.
+    pub extras: Mutex<nds::Extras>,
+    /// A click (a tap) came while the logos were on: run on, without waiting or sound, until they end.
+    pub logo_click: AtomicBool,
     pub quit: AtomicBool,
     /// Run without waiting for the clock.
     pub fast: AtomicBool,
@@ -104,8 +108,8 @@ impl Shared {
             input: Mutex::new(Input::default()),
             frame: Mutex::new(None),
             scale: AtomicUsize::new(2),
-            outline: AtomicU32::new(0),
-            outline_width: AtomicU32::new(0.5f32.to_bits()),
+            extras: Mutex::new(nds::Extras::default()),
+            logo_click: AtomicBool::new(false),
             quit: AtomicBool::new(false),
             fast: AtomicBool::new(false),
             skip: AtomicBool::new(false),
@@ -147,11 +151,17 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     nds::track_script();
     let (mut still, mut skipped, mut last_print, mut idle_for, mut wait_for) = (0u32, 0u32, 0u64, 0u32, 0u32);
     let (mut step, mut no_step) = ((0u32, 0u32), 0u32);
+    let mut racing;
     while !shared.quit.load(Ordering::Relaxed) {
         if shared.paused.load(Ordering::Relaxed) {
             std::thread::sleep(Duration::from_millis(10));
             next = Instant::now();
             continue;
+        }
+        racing = shared.logo_click.load(Ordering::Relaxed);
+        if racing && nds::vblanks() >= LOGOS_END_VBLANKS {
+            shared.logo_click.store(false, Ordering::Relaxed);
+            racing = false;
         }
         {
             let i = shared.input.lock().unwrap();
@@ -159,10 +169,10 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         }
         // with the game's marks a skip draws nothing (the screen is dark for it: the frames cost only the game's
         // own time); without them it needs the picture, at the native size, the cheapest
-        let skipping_now = shared.skip.load(Ordering::Relaxed);
+        let skipping_now = shared.skip.load(Ordering::Relaxed) || racing;
         let draw = !(skipping_now && shared.marks.load(Ordering::Relaxed));
         nds::set_scale(if skipping_now { 1 } else { shared.scale.load(Ordering::Relaxed) });
-        nds::set_outline(f32::from_bits(shared.outline.load(Ordering::Relaxed)), f32::from_bits(shared.outline_width.load(Ordering::Relaxed)));
+        nds::set_extras(*shared.extras.lock().unwrap());
         nds::set_draw(draw);
         let t0 = Instant::now();
         if !nds::run_frame() {
@@ -250,11 +260,11 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         }
         let samples = nds::take_samples();
         if let Some(a) = &audio {
-            if !skipping {
+            if !skipping && !racing {
                 a.push(&samples);
             }
         }
-        if shared.fast.load(Ordering::Relaxed) || skipping {
+        if shared.fast.load(Ordering::Relaxed) || skipping || racing {
             next = Instant::now();
             continue;
         }

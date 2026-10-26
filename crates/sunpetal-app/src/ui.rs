@@ -120,6 +120,8 @@ impl Menu {
                 ui.add(egui::Slider::new(&mut e.bloom, 0.0..=1.0).text(tx("Bloom", "Свечение")));
                 ui.add(egui::Slider::new(&mut e.outline, 0.0..=1.0).text(tx("3D outline", "Контур 3D")));
                 ui.add_enabled(e.outline > 0.0, egui::Slider::new(&mut e.outline_width, 0.25..=2.0).text(tx("Outline width", "Толщина контура")));
+                ui.add(egui::Slider::new(&mut e.shadow, 0.0..=1.0).text(tx("Soft shadows", "Мягкие тени")));
+                ui.add_enabled(e.shadow > 0.0, egui::Slider::new(&mut e.shadow_radius, 0.5..=6.0).text(tx("Shadow reach", "Размер теней")));
                 ui.checkbox(&mut e.fxaa, tx("Smooth edges (FXAA)", "Сглаживание краёв (FXAA)"));
                 if *e != before {
                     e.preset = "custom".into();
@@ -163,8 +165,9 @@ impl Menu {
                 ui.add(egui::Slider::new(&mut s.input.stick_threshold, 0.1..=0.9).text(tx("Stick threshold", "Порог стика")));
                 ui.label(tx("Pad: the D-pad and the left stick, the face buttons as the DS's (east A, south B, north X, west Y), shoulders L and R, Start, Select. The mouse on the lower screen is the stylus.", "Геймпад: крестовина и левый стик, кнопки как на DS (восток A, юг B, север X, запад Y), плечевые L и R, Start, Select. Мышь на нижнем экране: стилус."));
             });
-            egui::CollapsingHeader::new(tx("Emulation", "Эмуляция")).show(ui, |ui| {
+            egui::CollapsingHeader::new(tx("Emulation", "Эмуляция")).default_open(true).show(ui, |ui| {
                 ui.checkbox(&mut s.emulation.pause_in_menu, tx("Pause while the menu is open", "Пауза, пока открыто меню"));
+                ui.checkbox(&mut s.emulation.click_skips_logos, tx("Click skips the studio logos at the start", "Клик пропускает логотипы студий в начале"));
                 ui.label(tx("F2 layout, F3 filter, F4/F5 3D resolution, F6 effects, F7 skip, F11 full screen, Tab fast forward, F1 or Esc menu.", "F2 раскладка, F3 фильтр, F4/F5 разрешение 3D, F6 эффекты, F7 пропуск, F11 полный экран, Tab ускорение, F1 или Esc меню."));
             });
             egui::CollapsingHeader::new(tx("Debug", "Отладка")).show(ui, |ui| {

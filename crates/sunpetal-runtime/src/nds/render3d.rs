@@ -71,10 +71,8 @@ pub(super) struct Job {
     /// CLRIMAGE_OFFSET: where the rear-plane bitmap starts (x, then y << 8).
     pub clrimage_offset: u16,
     pub alpha_ref: u8,
-    /// 0-1: the extra outline (`outline_pass`); 0 is off.
-    pub outline: f32,
-    /// The outline's width in DS pixels.
-    pub outline_width: f32,
+    /// Our own outline and shading (`outline_pass`, `shade_pass`).
+    pub extras: super::Extras,
     pub edge: [u16; 8],
     pub fog_color: u32,
     pub fog_offset: u16,
@@ -645,6 +643,73 @@ fn outline_pass(strength: f32, width: f32, t: &Target, w: usize, h: usize, s: us
     lines
 }
 
+/// Soft shadows from the depth: each pixel's shade level, 0-15 (0 none; the compositor darkens the
+/// 3D's colour by it, in bits 28-31 of the picture's word). The light is up and a little left, so
+/// a shadow falls down and a little right: from a pixel three rays go back towards the light, up to
+/// `radius` DS pixels, and one that meets something nearer than the pixel (by `JUMP` of depth)
+/// shades it, the more the nearer to that something (a penumbra, the three rays apart). Only what
+/// lies behind an object is shaded, never the object itself. Interface, translucent-depth and
+/// empty pixels are not occluders. A translucent polygon over the pixel takes the shade as it
+/// takes the outline.
+fn shade_pass(strength: f32, radius: f32, t: &Target, w: usize, h: usize, s: usize) -> Vec<u8> {
+    // how much nearer than the pixel something must be to cast on it: a slope's own change over the
+    // ray is less
+    const JUMP: f32 = 0.006;
+    let steps = ((radius * s as f32).round() as usize).max(2);
+    // towards the light: up and a little left, the rays a little apart
+    let rays: Vec<(f32, f32)> = [-0.3f32, 0.0, 0.3]
+        .iter()
+        .map(|a| {
+            let (c, sn) = (a.cos(), a.sin());
+            let (dx, dy) = (-0.4f32, -0.92f32);
+            (dx * c - dy * sn, dx * sn + dy * c)
+        })
+        .collect();
+    let (wi, hi) = (w as isize, h as isize);
+    let mut out = vec![0u8; w * h];
+    let bands = threads().min(h / 64).max(1);
+    let per = (h + bands - 1) / bands;
+    let rays = &rays;
+    std::thread::scope(|sc| {
+        for (k, chunk) in out.chunks_mut(per * w).enumerate() {
+            sc.spawn(move || {
+                for (ry, row) in chunk.chunks_mut(w).enumerate() {
+                    let y = (k * per + ry) as isize;
+                    for x in 0..wi {
+                        let i = (y * wi + x) as usize;
+                        if t.alpha[i] < 31 || t.trans[i] || t.depth[i] < INTERFACE_DEPTH || t.cover[i] >= HIDING_ALPHA {
+                            continue;
+                        }
+                        let d = t.depth[i];
+                        let mut total = 0.0;
+                        for &(dx, dy) in rays {
+                            // the nearest occluder along the ray: its distance fades the shade
+                            for n in 1..=steps {
+                                let (qx, qy) = (x + (dx * n as f32).round() as isize, y + (dy * n as f32).round() as isize);
+                                if qx < 0 || qy < 0 || qx >= wi || qy >= hi {
+                                    break;
+                                }
+                                let j = (qy * wi + qx) as usize;
+                                if t.alpha[j] < 31 || t.trans[j] || t.depth[j] < INTERFACE_DEPTH {
+                                    continue;
+                                }
+                                if t.depth[j] < d - JUMP {
+                                    total += 1.0 - (n - 1) as f32 / steps as f32;
+                                    break;
+                                }
+                            }
+                        }
+                        let shade = total / rays.len() as f32;
+                        let dim = (31 - t.cover[i]) as f32 / 31.0;
+                        row[x as usize] = (shade * strength.min(1.0) * dim * 15.0).round() as u8;
+                    }
+                }
+            });
+        }
+    });
+    out
+}
+
 /// Draws a frame. Returns the picture and the mask of what it left out (`NOTE`).
 pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
     let mut notes = 0u32;
@@ -703,12 +768,14 @@ pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
             }
         }
     }
-    let lines = if job.outline > 0.0 { outline_pass(job.outline, job.outline_width, &t, w, h, s) } else { Vec::new() };
+    let ex = job.extras;
+    let lines = if ex.outline > 0.0 { outline_pass(ex.outline, ex.outline_width, &t, w, h, s) } else { Vec::new() };
+    let shades = if ex.shadow > 0.0 { shade_pass(ex.shadow, ex.shadow_radius, &t, w, h, s) } else { Vec::new() };
     if job.disp3dcnt & 0x80 != 0 {
         apply_fog(job, &mut t);
     }
-    let line = |i: usize| lines.get(i).map_or(0, |&l| l as u32) << 24;
-    let out = (0..n).map(|i| if t.alpha[i] == 0 { 0 } else { t.color[i] | (t.alpha[i] as u32) << 18 | line(i) }).collect();
+    let extra = |i: usize| (lines.get(i).map_or(0, |&l| l as u32) << 24) | (shades.get(i).map_or(0, |&l| l as u32) << 28);
+    let out = (0..n).map(|i| if t.alpha[i] == 0 { 0 } else { t.color[i] | (t.alpha[i] as u32) << 18 | extra(i) }).collect();
     (out, notes)
 }
 
@@ -726,8 +793,7 @@ mod tests {
             clear_depth: 0x7FFF,
             clrimage_offset: 0,
             alpha_ref: 0,
-            outline: 0.0,
-            outline_width: 0.5,
+            extras: crate::nds::Extras::default(),
             edge: [0; 8],
             fog_color: 31 << 16,
             fog_offset: 0,
@@ -797,6 +863,41 @@ mod tests {
         assert!(bare == 15 && under > 0 && under < 15, "{bare} {under}");
         t.cover = vec![14; w * h];
         assert!(outline_pass(1.0, 0.5, &t, w, h, 1).iter().all(|&l| l == 0), "a plate that hides the scene hides its line");
+    }
+
+    #[test]
+    fn a_shadow_falls_behind_an_object_away_from_the_light_and_never_on_it() {
+        let (w, h) = (64, 64);
+        let fresh = || Target { color: vec![0x3FFFF; w * h], alpha: vec![31; w * h], depth: vec![0.0; w * h], id: vec![0; w * h], stencil: vec![], fog: vec![false; w * h], trans: vec![false; w * h], oid: vec![0; w * h], cover: vec![0; w * h] };
+        // a wall nearer by 0.05 over the top half, the floor under it: the shadow falls below the wall
+        let mut t = fresh();
+        for y in 0..h {
+            for x in 0..w {
+                t.depth[y * w + x] = if y < 24 { 0.85 } else { 0.9 };
+            }
+        }
+        let shade = shade_pass(1.0, 6.0, &t, w, h, 1);
+        let at = |x: usize, y: usize| shade[y * w + x];
+        assert!(at(32, 25) > 0, "just under the wall's foot");
+        assert!(at(32, 25) > at(32, 29), "fading away from it");
+        assert_eq!(at(32, 40), 0, "far from it");
+        assert_eq!(at(32, 10), 0, "the wall itself");
+        // the same wall below the floor: the light comes from above, nothing falls on the floor over it
+        let mut t = fresh();
+        for y in 0..h {
+            for x in 0..w {
+                t.depth[y * w + x] = if y >= 40 { 0.85 } else { 0.9 };
+            }
+        }
+        assert!(shade_pass(1.0, 6.0, &t, w, h, 1).iter().all(|&l| l == 0), "a shadow does not go towards the light");
+        // a slope is not a shadow
+        let mut t = fresh();
+        for y in 0..h {
+            for x in 0..w {
+                t.depth[y * w + x] = 0.9 - 0.0005 * y as f32;
+            }
+        }
+        assert!(shade_pass(1.0, 6.0, &t, w, h, 1).iter().all(|&l| l == 0));
     }
 
     #[test]

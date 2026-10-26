@@ -142,10 +142,7 @@ pub struct Nds {
     /// The picture's scale: the 3D is drawn, and the screens put together, this many times as large
     /// each way (1-8).
     scale: usize,
-    /// 0-1: the 3D's extra outline (`render3d`), 0 is off.
-    outline: f32,
-    /// The outline's width in DS pixels.
-    outline_width: f32,
+    extras: Extras,
     script: Vec<input::Press>,
     cart: cart::Cart,
     spi: spi::Spi,
@@ -221,8 +218,7 @@ impl Nds {
             frame3d: vec![0; 256 * 192],
             frame3d_scale: 1,
             scale: 1,
-            outline: 0.0,
-            outline_width: 0.5,
+            extras: Extras::default(),
             script: Vec::new(),
             cart: cart::Cart::new(),
             spi: spi::Spi::new(),
@@ -434,11 +430,36 @@ pub fn set_scale(n: usize) {
     nds(|d| d.scale = n.clamp(1, 8));
 }
 
-/// The strength of the 3D's extra outline, 0-1 (0 is off), and its width in DS pixels (0.25-2). Takes effect with the next frame drawn.
-pub fn set_outline(v: f32, width: f32) {
+/// Our own additions to the 3D picture (`render3d`), each off at 0.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Extras {
+    /// 0-1: an outline round the objects.
+    pub outline: f32,
+    /// The outline's width in DS pixels (0.25-2).
+    pub outline_width: f32,
+    /// 0-1: soft shading where the scene is closed in (ambient occlusion from the depth).
+    pub shadow: f32,
+    /// How far it reaches, in DS pixels (0.5-6).
+    pub shadow_radius: f32,
+}
+
+impl Default for Extras {
+    fn default() -> Extras {
+        Extras { outline: 0.0, outline_width: 0.5, shadow: 0.0, shadow_radius: 2.0 }
+    }
+}
+
+/// Sets the 3D's extras (out-of-range and non-numbers are brought in). Takes effect with the next
+/// frame drawn.
+pub fn set_extras(e: Extras) {
+    let c = |v: f32, lo: f32, hi: f32, or: f32| if v.is_finite() { v.clamp(lo, hi) } else { or };
     nds(|d| {
-        d.outline = if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 };
-        d.outline_width = if width.is_finite() { width.clamp(0.25, 2.0) } else { 0.5 };
+        d.extras = Extras {
+            outline: c(e.outline, 0.0, 1.0, 0.0),
+            outline_width: c(e.outline_width, 0.25, 2.0, 0.5),
+            shadow: c(e.shadow, 0.0, 1.0, 0.0),
+            shadow_radius: c(e.shadow_radius, 0.5, 6.0, 2.0),
+        }
     });
 }
 

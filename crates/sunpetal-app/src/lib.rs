@@ -121,11 +121,8 @@ impl App {
         if s.video.res != a.video.res {
             self.shared.scale.store(s.video.res, Ordering::Relaxed);
         }
-        if s.effects.outline != a.effects.outline {
-            self.shared.outline.store(s.effects.outline.to_bits(), Ordering::Relaxed);
-        }
-        if s.effects.outline_width != a.effects.outline_width {
-            self.shared.outline_width.store(s.effects.outline_width.to_bits(), Ordering::Relaxed);
+        if s.effects.extras() != a.effects.extras() {
+            *self.shared.extras.lock().unwrap() = s.effects.extras();
         }
         if let Some(g) = &mut self.gfx {
             g.linear = s.video.linear;
@@ -350,6 +347,9 @@ impl ApplicationHandler for App {
             }
             WindowEvent::MouseInput { state, button: MouseButton::Left, .. } if !consumed => {
                 self.pen_down = state == ElementState::Pressed;
+                if self.pen_down && !self.menu.open && self.settings.emulation.click_skips_logos {
+                    self.shared.logo_click.store(true, Ordering::Relaxed);
+                }
                 // a press must land on the screen; a drag may leave it
                 if self.pen_down && !self.menu.open {
                     if let Some(g) = &self.gfx {
@@ -363,6 +363,9 @@ impl ApplicationHandler for App {
             WindowEvent::Touch(t) => {
                 use winit::event::TouchPhase::*;
                 let p = (t.location.x as f32, t.location.y as f32);
+                if t.phase == Started && !consumed && !self.menu.open && self.settings.emulation.click_skips_logos {
+                    self.shared.logo_click.store(true, Ordering::Relaxed);
+                }
                 let band = self.gfx.as_ref().filter(|_| self.settings.touch_controls_on()).map(|g| {
                     let (w, h) = g.window_size();
                     touchpad::band(w, h)
@@ -569,8 +572,7 @@ pub fn run(o: Options, el: EventLoop<()>) {
     });
     let shared = Shared::new();
     shared.scale.store(settings.video.res, Ordering::Relaxed);
-    shared.outline.store(settings.effects.outline.to_bits(), Ordering::Relaxed);
-    shared.outline_width.store(settings.effects.outline_width.to_bits(), Ordering::Relaxed);
+    *shared.extras.lock().unwrap() = settings.effects.extras();
     // the stream must outlive the machine's use of the ring
     let (ring, _stream) = if o.mute {
         (None, None)
