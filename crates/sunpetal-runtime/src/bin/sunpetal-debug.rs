@@ -283,6 +283,8 @@ fn main() -> ExitCode {
         // the threads' coroutines are parked: do not unwind them
         Ok(()) => std::process::exit(0),
         Err(e) => {
+            // stdout is the machine's side: it gets the error too, as the repl does
+            println!("{}", json!({"error": e}));
             eprintln!("{}", e);
             ExitCode::from(1)
         }

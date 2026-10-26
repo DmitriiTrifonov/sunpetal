@@ -552,6 +552,7 @@ thread_local! {
 /// Starts noting the script's steps (`script_stepping`); costs a call per function entry of the guest.
 pub fn track_script() {
     unsafe { crate::services::g_arm_trace = 1 };
+    #[cfg(feature = "debug-tools")]
     debug::log_card_reads();
 }
 
@@ -569,12 +570,14 @@ pub fn script_stepping() -> bool {
     LAST_STEP.with(|l| l.get()).is_some_and(|v| vblanks().saturating_sub(v) <= 2)
 }
 
+#[cfg(feature = "debug-tools")]
 thread_local! {
     static SCENE: std::cell::RefCell<(Option<crate::nitrofs::NitroFs>, Option<String>)> = const { std::cell::RefCell::new((None, None)) };
 }
 
 /// The scene whose script (`Chapter/Pack/<scene>.txt.z`) the game read last, by the cartridge's reads (needs
 /// `debug::log_card_reads`); call it every frame or so. `C19_01` is the title's demo behind "Press START Button".
+#[cfg(feature = "debug-tools")]
 pub fn script_scene() -> Option<String> {
     let reads = debug::take_card_reads();
     SCENE.with(|s| {
@@ -593,6 +596,12 @@ pub fn script_scene() -> Option<String> {
         }
         s.1.clone()
     })
+}
+
+/// Without `debug-tools` the cartridge's reads are not logged: the scene is not known.
+#[cfg(not(feature = "debug-tools"))]
+pub fn script_scene() -> Option<String> {
+    None
 }
 
 pub fn script_idle() -> Option<bool> {

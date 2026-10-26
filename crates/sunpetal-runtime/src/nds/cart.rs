@@ -356,7 +356,39 @@ impl Nds {
 
 #[cfg(test)]
 mod tests {
-    use super::chip_mask;
+    use super::{chip_mask, Nds};
+    use crate::nds::Config;
+
+    /// One chip-select: the bytes go out, the last replies come back.
+    fn xfer(n: &mut Nds, bytes: &[u8]) -> Vec<u8> {
+        n.cart_write(9, 0x0400_01A0, 0xA000 | 0x40, 2);
+        let mut out = Vec::new();
+        for (i, b) in bytes.iter().enumerate() {
+            if i + 1 == bytes.len() {
+                n.cart_write(9, 0x0400_01A0, 0xA000, 2); // the last byte releases the chip
+            }
+            n.cart_write(9, 0x0400_01A2, *b as u32, 2);
+            out.push(n.cart.bk_out);
+        }
+        out
+    }
+
+    #[test]
+    fn a_64k_eeprom_keeps_what_is_written_to_it() {
+        let mut n = Nds::new(Config::new("none"));
+        n.cart.save = vec![0xFF; 65536];
+        xfer(&mut n, &[0x06]);
+        let mut w = vec![0x02, 0xAB, 0xC0];
+        w.extend((0..32u8).map(|i| i ^ 0x5A));
+        xfer(&mut n, &w);
+        assert_eq!(n.cart.save[0xABC0 + 5], 5 ^ 0x5A);
+        assert!(n.cart.dirty);
+        // the write latch clears at the end of the write: a second write without WREN is refused
+        xfer(&mut n, &[0x02, 0x00, 0x10, 0x11]);
+        assert_eq!(n.cart.save[0x10], 0xFF);
+        let r = xfer(&mut n, &[0x03, 0xAB, 0xC0, 0, 0, 0]);
+        assert_eq!(&r[3..], &[0x5A, 0x5B, 0x58]);
+    }
 
     #[test]
     fn the_mask_follows_the_chip_not_the_image() {

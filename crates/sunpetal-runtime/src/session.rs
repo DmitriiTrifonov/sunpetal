@@ -117,7 +117,13 @@ impl Session {
         }
         let now = self.tracker.shown();
         let key = now.as_ref().map(|l| (l.ptr, l.text.clone()));
-        if key != self.shown {
+        // the same slot of the same line with other bytes in it: the game has taken the buffer for something
+        // else while the window is still open, and what it holds is no text of the line
+        let reused = match (&now, &self.shown, self.events.last()) {
+            (Some(l), Some((ptr, _)), Some(last)) => l.ptr == *ptr && l.id.is_some() && l.id.map(|i| format!("{:05}", i)) == last.id,
+            _ => false,
+        };
+        if key != self.shown && !reused {
             self.shown = key;
             // a text the scripts do not own (no id) is a stale pointer, not a window
             if let Some(line) = now.filter(|l| l.id.is_some()) {
