@@ -1,6 +1,6 @@
 //! The picture effects: a few parameters the screens' shader applies in one pass (sharp pixels,
 //! scanlines, an LCD grid, a vignette and colour correction), and the presets that set them.
-//! Costs next to nothing, so it suits a phone too; passes that need more than one (bloom) come later.
+//! Those cost next to nothing; bloom and FXAA are passes of their own (`post.rs`) and run only when on.
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
@@ -25,16 +25,20 @@ pub struct Effects {
     pub brightness: f32,
     /// 0.5-2, 1 is as drawn.
     pub gamma: f32,
+    /// 0-1: light spilling from the bright parts (a half-size blur added back).
+    pub bloom: f32,
+    /// Smooths jagged edges (FXAA) over the whole picture.
+    pub fxaa: bool,
 }
 
 impl Default for Effects {
     fn default() -> Effects {
-        Effects { preset: "none".into(), sharp: false, scanlines: 0.0, grid: 0.0, vignette: 0.0, saturation: 1.0, contrast: 1.0, brightness: 0.0, gamma: 1.0 }
+        Effects { preset: "none".into(), sharp: false, scanlines: 0.0, grid: 0.0, vignette: 0.0, saturation: 1.0, contrast: 1.0, brightness: 0.0, gamma: 1.0, bloom: 0.0, fxaa: false }
     }
 }
 
 /// The presets' ids, in the order the menu and the hotkey go through them.
-pub const PRESETS: [&str; 5] = ["none", "sharp", "lcd", "crt", "vivid"];
+pub const PRESETS: [&str; 6] = ["none", "sharp", "lcd", "crt", "vivid", "glow"];
 
 impl Effects {
     pub fn preset(id: &str) -> Effects {
@@ -42,8 +46,9 @@ impl Effects {
         match id {
             "sharp" => Effects { sharp: true, ..base },
             "lcd" => Effects { grid: 0.4, saturation: 1.1, ..base },
-            "crt" => Effects { sharp: true, scanlines: 0.5, vignette: 0.4, saturation: 1.15, contrast: 1.1, ..base },
+            "crt" => Effects { sharp: true, scanlines: 0.5, vignette: 0.4, saturation: 1.15, contrast: 1.1, bloom: 0.25, ..base },
             "vivid" => Effects { saturation: 1.35, contrast: 1.1, ..base },
+            "glow" => Effects { sharp: true, bloom: 0.4, saturation: 1.1, ..base },
             _ => Effects::default(),
         }
     }
@@ -63,6 +68,7 @@ impl Effects {
         self.contrast = c(self.contrast, 0.5, 1.5);
         self.brightness = if self.brightness.is_finite() { self.brightness.clamp(-0.3, 0.3) } else { 0.0 };
         self.gamma = c(self.gamma, 0.5, 2.0);
+        self.bloom = if self.bloom.is_finite() { self.bloom.clamp(0.0, 1.0) } else { 0.0 };
         if !PRESETS.contains(&self.preset.as_str()) {
             self.preset = "custom".into();
         }

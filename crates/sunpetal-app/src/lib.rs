@@ -19,6 +19,7 @@ mod effects;
 mod emu;
 mod gfx;
 mod layout;
+mod post;
 mod touchpad;
 mod ui;
 

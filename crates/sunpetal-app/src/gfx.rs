@@ -7,6 +7,7 @@ use winit::window::Window;
 
 use crate::effects::Effects;
 use crate::layout::Layout;
+use crate::post;
 
 /// The glow's size: 16 across, 12 rows for each screen.
 const GLOW_W: usize = 16;
@@ -95,6 +96,9 @@ pub struct Gfx {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     pipeline: wgpu::RenderPipeline,
+    post_kit: post::Kit,
+    /// Made when bloom or FXAA is first on, again when the window's size changes.
+    post: Option<post::Targets>,
     screens: [Screen; 2],
     /// A small picture of the screens' colours, stretched over the window behind them.
     glow: Screen,
@@ -266,7 +270,8 @@ impl Gfx {
             Some(device.limits().max_texture_dimension_2d as usize),
         );
         let egui_renderer = egui_wgpu::Renderer::new(&device, format, egui_wgpu::RendererOptions::default());
-        Ok(Gfx { window: w, egui_ctx, egui_state, egui_renderer, bgl, nearest, linear_sampler: linear, scale: 1, surface, device, queue, config, pipeline, screens, glow, glow_grid: vec![0.0; GLOW_W * GLOW_H * 3], background: true, linear: true, reserve: 0.0 })
+        let post_kit = post::Kit::new(&device, format);
+        Ok(Gfx { window: w, egui_ctx, egui_state, egui_renderer, bgl, nearest, linear_sampler: linear, scale: 1, surface, device, queue, config, pipeline, post_kit, post: None, screens, glow, glow_grid: vec![0.0; GLOW_W * GLOW_H * 3], background: true, linear: true, reserve: 0.0 })
     }
 
     pub fn resize(&mut self, w: u32, h: u32) {
@@ -389,12 +394,22 @@ impl Gfx {
             self.queue.write_buffer(&self.glow.uniform, 0, bytemuck::bytes_of(&q));
         }
         let view = frame.texture.create_view(&Default::default());
+        let use_post = fx.bloom > 0.0 || fx.fxaa;
+        if !use_post {
+            self.post = None;
+        } else if self.post.as_ref().map_or(true, |p| p.size != (self.config.width, self.config.height)) {
+            self.post = Some(post::Targets::new(&self.device, &self.post_kit, self.config.format, self.config.width, self.config.height));
+        }
+        let target = match &self.post {
+            Some(p) => &p.scene,
+            None => &view,
+        };
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view: target,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
@@ -415,6 +430,9 @@ impl Gfx {
                     pass.draw(0..4, 0..1);
                 }
             }
+        }
+        if let Some(p) = &self.post {
+            p.run(&self.post_kit, &self.queue, &mut enc, &view, fx.bloom, fx.fxaa);
         }
         let mut buffers = Vec::new();
         let mut freed = Vec::new();

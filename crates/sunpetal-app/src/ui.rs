@@ -94,6 +94,8 @@ impl Menu {
                         ("crt", true) => "ЭЛТ",
                         ("vivid", false) => "vivid colours",
                         ("vivid", true) => "яркие цвета",
+                        ("glow", false) => "soft glow",
+                        ("glow", true) => "мягкое свечение",
                         (_, false) => "custom",
                         (_, true) => "свои настройки",
                     }
@@ -115,6 +117,8 @@ impl Menu {
                 ui.add(egui::Slider::new(&mut e.contrast, 0.5..=1.5).text(tx("Contrast", "Контраст")));
                 ui.add(egui::Slider::new(&mut e.brightness, -0.3..=0.3).text(tx("Brightness", "Яркость")));
                 ui.add(egui::Slider::new(&mut e.gamma, 0.5..=2.0).text(tx("Gamma", "Гамма")));
+                ui.add(egui::Slider::new(&mut e.bloom, 0.0..=1.0).text(tx("Bloom", "Свечение")));
+                ui.checkbox(&mut e.fxaa, tx("Smooth edges (FXAA)", "Сглаживание краёв (FXAA)"));
                 if *e != before {
                     e.preset = "custom".into();
                 }
