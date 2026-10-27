@@ -131,6 +131,9 @@ struct App {
     edo_seen: bool,
     /// The title's "Press START" box (`layout::prompt_box`).
     prompt: Option<layout::Rect>,
+    /// A page of paper over both screens is shown (`layout::paper_in`, settled), and how far it is scrolled.
+    paper: bool,
+    scroll: f32,
     /// How many pixels the upper screen of the last picture is wider by each side (0: not wide).
     wide_now: usize,
     /// The colour for the bars (`layout::edge_color`), from the last picture.
@@ -149,7 +152,7 @@ impl App {
     }
 
     fn live(&self) -> layout::Live {
-        layout::Live { vblank: self.shared.vblank.load(Ordering::Relaxed), counter_seen: self.counter_seen, lower: self.auto_lower || self.hold.is_some(), edo: self.edo_seen, prompt: self.prompt, wide: self.wide_now as f32 }
+        layout::Live { vblank: self.shared.vblank.load(Ordering::Relaxed), counter_seen: self.counter_seen, lower: self.auto_lower || self.hold.is_some(), edo: self.edo_seen, prompt: self.prompt, wide: self.wide_now as f32, scroll: (self.paper && self.auto_lower).then_some(self.scroll) }
     }
 
     /// Swaps the screen shown in the single layout; from another layout, goes into it.
@@ -427,9 +430,18 @@ impl ApplicationHandler for App {
                     KeyCode::F6 => self.settings.effects = self.settings.effects.next_preset(),
                     KeyCode::F4 => self.settings.video.res = self.settings.video.res.saturating_sub(1).max(1),
                     KeyCode::F5 => self.settings.video.res = (self.settings.video.res + 1).min(8),
+                    KeyCode::PageUp => self.scroll = (self.scroll - 96.0).max(0.0),
+                    KeyCode::PageDown => self.scroll = (self.scroll + 96.0).min(192.0),
                     KeyCode::F11 => self.settings.video.fullscreen = !self.settings.video.fullscreen,
                     _ => {}
                 }
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let d = match delta {
+                    winit::event::MouseScrollDelta::LineDelta(_, y) => y * 24.0,
+                    winit::event::MouseScrollDelta::PixelDelta(p) => p.y as f32 / 3.0,
+                };
+                self.scroll = (self.scroll - d).clamp(0.0, 192.0);
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.mouse = (position.x as f32, position.y as f32);
@@ -552,6 +564,11 @@ impl ApplicationHandler for App {
                     self.counter_seen = layout::counter_in(*scale, rgba);
                     self.edo_seen = layout::edo_in(*scale, rgba);
                     self.prompt = layout::prompt_box(*scale, rgba);
+                    let paper = layout::paper_in(*scale, rgba);
+                    if paper && !self.paper {
+                        self.scroll = 0.0;
+                    }
+                    self.paper = paper;
                     // the bars of the window: the picture's edge colour if that is one
                     let layout = self.layout();
                     self.bar_color = if self.settings.video.bars_match && self.settings.video.background == "glow" { layout::edge_color(&layout, *scale, rgba) } else { None };
@@ -582,8 +599,8 @@ impl ApplicationHandler for App {
                 let fade = self.skip_fade;
                 let mut action = None;
                 {
-                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, edo_seen, prompt, bar_color, auto_lower, hold, wide_now, .. } = self;
-                    let live = layout::Live { vblank: shared.vblank.load(Ordering::Relaxed), counter_seen: *counter_seen, lower: *auto_lower || hold.is_some(), edo: *edo_seen, prompt: *prompt, wide: *wide_now as f32 };
+                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, edo_seen, prompt, bar_color, auto_lower, hold, wide_now, paper, scroll, .. } = self;
+                    let live = layout::Live { vblank: shared.vblank.load(Ordering::Relaxed), counter_seen: *counter_seen, lower: *auto_lower || hold.is_some(), edo: *edo_seen, prompt: *prompt, wide: *wide_now as f32, scroll: (*paper && *auto_lower).then_some(*scroll) };
                     if let Some(g) = gfx {
                         let layout = layout::find(layouts, &settings.video, &live);
                         g.bar_color = *bar_color;
@@ -773,6 +790,8 @@ pub fn run(o: Options, el: EventLoop<()>) {
         win_size: (512, 768),
         counter_seen: false,
         edo_seen: false,
+        paper: false,
+        scroll: 0.0,
         prompt: None,
         wide_now: 0,
         bar_color: None,

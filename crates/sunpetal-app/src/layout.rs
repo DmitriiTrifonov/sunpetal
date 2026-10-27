@@ -265,6 +265,42 @@ pub struct Live {
     pub prompt: Option<Rect>,
     /// The upper screen is this many DS pixels wider on each side (a widened 3D view).
     pub wide: f32,
+    /// A page of paper spread over both screens (`paper_in`), scrolled this far down (DS pixels, 0 to 192).
+    pub scroll: Option<f32>,
+}
+
+/// Whether the lower screen is a sheet of paper (the lost-and-found report, a card of the list: a tan
+/// page, its text in dark), whose first lines are on the upper screen. With one screen shown, the page is
+/// scrolled over the two.
+pub fn paper_in(scale: usize, rgba: &[u8]) -> bool {
+    let (w, top) = (256 * scale, 192 * scale);
+    if rgba.len() < w * top * 2 * 4 {
+        return false;
+    }
+    let (mut n, mut paper) = (0usize, 0usize);
+    for y in (0..192).step_by(4) {
+        for x in (0..256).step_by(4) {
+            let o = (((top + y * scale) * w) + x * scale) * 4;
+            let p = &rgba[o..o + 3];
+            n += 1;
+            paper += ((p[0] as i32 - 250).abs() <= 14 && (p[1] as i32 - 200).abs() <= 14 && (p[2] as i32 - 127).abs() <= 18) as usize;
+        }
+    }
+    paper * 100 >= n * 35
+}
+
+/// The two screens as one page 384 high, `scroll` pixels down, seen through a 256x192 window: the upper
+/// screen's part, then the lower's. Touches fall on the lower screen's part (`Layout::touch`).
+pub fn scrolled(scroll: f32) -> Layout {
+    let s = scroll.clamp(0.0, 192.0);
+    let mut patches = Vec::new();
+    if s < 192.0 {
+        patches.push(Patch { screen: 0, src: Rect { x: 0.0, y: s, w: 256.0, h: 192.0 - s }, dst: Rect { x: 0.0, y: 0.0, w: 256.0, h: 192.0 - s }, pinned: false });
+    }
+    if s > 0.0 {
+        patches.push(Patch { screen: 1, src: Rect { x: 0.0, y: 0.0, w: 256.0, h: s }, dst: Rect { x: 0.0, y: 192.0 - s, w: 256.0, h: s }, pinned: false });
+    }
+    Layout { name: "single", size: (256.0, 192.0), screens: [None, None], patches, fit: Fit::default() }
 }
 
 /// Which screen the game wants the player at, from the lower screen's picture: the lower, when it
@@ -305,6 +341,9 @@ fn pick(layouts: &[Layout], v: &crate::config::Video, live: &Live) -> Layout {
         if let Some(lower) = logo_screen(vblank) {
             return single(lower);
         }
+    }
+    if let (Some(sc), "single", true) = (live.scroll, v.layout.as_str(), v.auto) {
+        return scrolled(sc);
     }
     let mut l = match v.layout.as_str() {
         "single" => single(if v.auto { live.lower } else { v.lower }),
@@ -381,7 +420,12 @@ impl Layout {
 
     /// A window position as a point of the lower screen (x 0-255, y 0-191), if it is on it.
     pub fn touch(&self, win: (f32, f32), p: (f32, f32), clamp: bool) -> Option<(i32, i32)> {
-        let b = self.fit(win)[1]?;
+        // a scrolled page: the lower screen is a patch
+        let page = self.screens[1].is_none().then(|| self.patches.iter().find(|q| q.screen == 1)).flatten();
+        let b = match page {
+            Some(q) => self.fit_rect(win, q.dst),
+            None => self.fit(win)[1]?,
+        };
         let (mut u, mut v) = ((p.0 - b.x) / b.w, (p.1 - b.y) / b.h);
         if !(0.0..1.0).contains(&u) || !(0.0..1.0).contains(&v) {
             if !clamp {
@@ -390,7 +434,10 @@ impl Layout {
             u = u.clamp(0.0, 0.999);
             v = v.clamp(0.0, 0.999);
         }
-        Some(((u * 256.0) as i32, (v * 192.0) as i32))
+        match page {
+            Some(q) => Some(((q.src.x + u * q.src.w) as i32, (q.src.y + v * q.src.h) as i32)),
+            None => Some(((u * 256.0) as i32, (v * 192.0) as i32)),
+        }
     }
 }
 
@@ -413,7 +460,7 @@ mod tests {
     }
 
     fn live(vblank: u64, counter_seen: bool) -> Live {
-        Live { vblank, counter_seen, lower: false, edo: false, prompt: None, wide: 0.0 }
+        Live { vblank, counter_seen, lower: false, edo: false, prompt: None, wide: 0.0, scroll: None }
     }
 
     #[test]
@@ -767,5 +814,23 @@ mod tests {
     #[test]
     fn a_layout_without_the_lower_screen_has_no_touch() {
         assert_eq!(top_only().touch((256.0, 192.0), (10.0, 10.0), true), None);
+    }
+
+    #[test]
+    fn a_page_of_paper_is_scrolled_over_both_screens() {
+        let mut rgba = vec![0u8; 256 * 192 * 2 * 4];
+        assert!(!paper_in(1, &rgba));
+        for px in rgba[256 * 192 * 4..].chunks_exact_mut(4) {
+            px.copy_from_slice(&[250, 200, 127, 255]);
+        }
+        assert!(paper_in(1, &rgba));
+        // 48 down: 144 rows of the upper screen, then 48 of the lower; a touch at the window's bottom is the lower's row 47
+        let l = scrolled(48.0);
+        assert_eq!(l.patches.len(), 2);
+        let win = (256.0, 192.0);
+        assert_eq!(l.touch(win, (10.0, 191.0), false), Some((10, 47)));
+        assert_eq!(l.touch(win, (10.0, 100.0), false).map(|p| p.1).filter(|y| *y < 0), None);
+        assert_eq!(scrolled(0.0).patches.len(), 1);
+        assert_eq!(scrolled(192.0).patches.len(), 1);
     }
 }
