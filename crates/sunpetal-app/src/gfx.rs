@@ -402,7 +402,8 @@ impl Gfx {
                 for c in 0..3 {
                     let v = acc[c] as f32 / cnt.max(1) as f32;
                     let slot = &mut self.glow_grid[(cy * GLOW_W + cx) * 3 + c];
-                    *slot += (v - *slot) * 0.12;
+                    // a cut (a logo after a logo, a scene after a fade) takes the new colour at once; a flash eases in
+                    *slot = if (v - *slot).abs() > 48.0 { v } else { *slot + (v - *slot) * 0.12 };
                 }
             }
         }

@@ -90,7 +90,7 @@ const TAP_FRAMES: u32 = 8;
 const HOLD_FRAMES: u32 = 1800;
 
 /// Frames the picture must ask for other bars before they change.
-const BAR_FRAMES: u32 = 20;
+const BAR_FRAMES: u32 = 3;
 
 /// Frames the picture must want the other screen before the single layout moves to it.
 const AUTO_FRAMES: u32 = 20;
