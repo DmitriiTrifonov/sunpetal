@@ -1111,6 +1111,8 @@ impl Nds {
             return g.vec_result[i] as u16 as u32 | if i < 2 { (g.vec_result[i + 1] as u16 as u32) << 16 } else { 0 };
         }
         if (0x0400_0640..0x0400_0680).contains(&off) {
+            #[cfg(feature = "debug-tools")]
+            super::debug::note_clip_read();
             g.update_clip();
             return g.mtx_clip[((off - 0x0400_0640) >> 2) as usize] as u32;
         }

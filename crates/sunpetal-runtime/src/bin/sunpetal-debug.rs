@@ -155,6 +155,15 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             s.shot(std::path::Path::new(w.first().ok_or("shot FILE")?))?;
             done(json!({}))
         }
+        "traceall" => {
+            debug::trace_everything(true);
+            done(json!({}))
+        }
+        "cliprep" => {
+            let top: Vec<Value> = debug::clip_report().into_iter().take(20).map(|((k, lr), n)| json!({"fn": format!("{:08X}", k), "lr": format!("{:08X}", lr), "reads": n})).collect();
+            let callers: Vec<Value> = debug::clip_callers().into_iter().take(20).map(|(lr, n)| json!({"lr": format!("{:08X}", lr), "calls": n})).collect();
+            done(json!({"top": top, "callers": callers}))
+        }
         "shotwide" => {
             let wide = sunpetal_runtime::nds::screenshot_wide(std::path::Path::new(w.first().ok_or("shotwide FILE")?))?;
             done(json!({"wide": wide}))

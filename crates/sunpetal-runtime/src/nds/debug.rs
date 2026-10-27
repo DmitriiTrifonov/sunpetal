@@ -34,6 +34,10 @@ struct Observers {
 }
 
 thread_local! {
+    /// The ARM9 function entered last (while `trace_everything` is on), and how often each read the clip matrix.
+    static LAST_ENTER: std::cell::Cell<(u32, u32)> = const { std::cell::Cell::new((0, 0)) };
+    static CLIP_CALLERS: RefCell<HashMap<u32, u64>> = RefCell::new(HashMap::new());
+    static CLIP_READS: RefCell<HashMap<(u32, u32), u64>> = RefCell::new(HashMap::new());
     static OBSERVERS: RefCell<Observers> = RefCell::new(Observers::default());
 }
 
@@ -109,8 +113,39 @@ pub(crate) fn on_card_read(addr: u32, len: u32) {
     });
 }
 
+/// Every function entry is reported from now on (slow), for `clip_report`.
+pub fn trace_everything(on: bool) {
+    trace_on(on);
+}
+
+/// A read of the GX clip matrix: counted against the function entered last.
+pub(crate) fn note_clip_read() {
+    let f = LAST_ENTER.with(|l| l.get());
+    CLIP_READS.with(|h| *h.borrow_mut().entry(f).or_default() += 1);
+}
+
+/// The functions entered last at the clip matrix's reads, most reads first.
+pub fn clip_report() -> Vec<((u32, u32), u64)> {
+    let mut v: Vec<((u32, u32), u64)> = CLIP_READS.with(|h| h.borrow().iter().map(|(k, n)| (*k, *n)).collect());
+    v.sort_by(|a, b| b.1.cmp(&a.1));
+    v
+}
+
+/// The return addresses of the calls of the SDK's clip matrix getter (`02004EAC`), most calls first.
+pub fn clip_callers() -> Vec<(u32, u64)> {
+    let mut v: Vec<(u32, u64)> = CLIP_CALLERS.with(|h| h.borrow().iter().map(|(k, n)| (*k, *n)).collect());
+    v.sort_by(|a, b| b.1.cmp(&a.1));
+    v
+}
+
 /// `ARM_ENTER`'s service (`services::arm_trace_enter`).
 pub(crate) fn on_enter(c: &mut Cpu, key: u32) {
+    if c.cpu == 9 {
+        if key == 0x0200_4EAC {
+            CLIP_CALLERS.with(|h| *h.borrow_mut().entry(c.r[14]).or_default() += 1);
+        }
+        LAST_ENTER.with(|l| l.set((key, c.r[14])));
+    }
     let watchers = OBSERVERS.with(|o| {
         let mut o = o.borrow_mut();
         if o.log.as_ref().map_or(false, |l| l.len() < o.log_cap) {
