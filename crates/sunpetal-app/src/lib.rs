@@ -127,6 +127,8 @@ struct App {
     win_size: (u32, u32),
     /// The lower screen has the map's counter (`layout::counter_in`, from the last picture).
     counter_seen: bool,
+    /// The upper screen is Edo's (`layout::edo_in`).
+    edo_seen: bool,
     /// The screen the picture wants (`layout::lower_wanted`) and for how many frames it has wanted it.
     want: (bool, u32),
     auto_lower: bool,
@@ -141,7 +143,7 @@ impl App {
     }
 
     fn live(&self) -> layout::Live {
-        layout::Live { vblank: self.shared.vblank.load(Ordering::Relaxed), counter_seen: self.counter_seen, lower: self.auto_lower || self.hold.is_some() }
+        layout::Live { vblank: self.shared.vblank.load(Ordering::Relaxed), counter_seen: self.counter_seen, lower: self.auto_lower || self.hold.is_some(), edo: self.edo_seen }
     }
 
     /// Swaps the screen shown in the single layout; from another layout, goes into it.
@@ -542,6 +544,7 @@ impl ApplicationHandler for App {
                 if let Some((scale, rgba)) = &frame {
                     self.dial_scene = dial::recognise(*scale, rgba);
                     self.counter_seen = layout::counter_in(*scale, rgba);
+                    self.edo_seen = layout::edo_in(*scale, rgba);
                     // a change of screen waits until the picture has held for a moment (a fade, a
                     // flash between scenes would flicker it)
                     if let Some(w) = layout::lower_wanted(*scale, rgba) {
@@ -561,8 +564,8 @@ impl ApplicationHandler for App {
                 let fade = self.skip_fade;
                 let mut action = None;
                 {
-                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, auto_lower, hold, .. } = self;
-                    let live = layout::Live { vblank: shared.vblank.load(Ordering::Relaxed), counter_seen: *counter_seen, lower: *auto_lower || hold.is_some() };
+                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, edo_seen, auto_lower, hold, .. } = self;
+                    let live = layout::Live { vblank: shared.vblank.load(Ordering::Relaxed), counter_seen: *counter_seen, lower: *auto_lower || hold.is_some(), edo: *edo_seen };
                     if let Some(g) = gfx {
                         let layout = layout::find(layouts, &settings.video, &live);
                         let names: Vec<&str> = layouts.iter().map(|l| l.name).collect();
@@ -741,6 +744,7 @@ pub fn run(o: Options, el: EventLoop<()>) {
         pads: gilrs::Gilrs::new().map_err(|e| eprintln!("no pads: {}", e)).ok(),
         win_size: (512, 768),
         counter_seen: false,
+        edo_seen: false,
         want: (false, 0),
         auto_lower: false,
         hold: None,

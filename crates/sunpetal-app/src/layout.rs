@@ -113,6 +113,26 @@ pub fn all() -> Vec<Layout> {
 
 /// The layout a setting names; `single` shows the lower screen if `lower`, `overlay` the panel if
 /// `panel`.
+/// The hint text of Edo's screens (what the chosen key does), cut from the upper screen and put
+/// into the free corner of the lower one, whose keys are the screen's use.
+pub fn edo_patch() -> Patch {
+    Patch { screen: 0, src: Rect { x: 106.0, y: 80.0, w: 148.0, h: 60.0 }, dst: Rect { x: 106.0, y: 130.0, w: 148.0, h: 60.0 } }
+}
+
+/// Whether the upper screen is one of Edo's (the pink title "Hello!! SAVE DATA" in its top band).
+pub fn edo_in(scale: usize, rgba: &[u8]) -> bool {
+    let w = 256 * scale;
+    let (mut n, mut pink) = (0usize, 0usize);
+    for y in (10 * scale..80 * scale).step_by(scale.max(1)) {
+        for x in (0..w).step_by(scale.max(1)) {
+            let Some(p) = rgba.get((y * w + x) * 4..(y * w + x) * 4 + 3) else { return false };
+            n += 1;
+            pink += (p[0] > 200 && p[1] < 90 && p[2] > 70 && p[2] < 200) as usize;
+        }
+    }
+    n > 0 && pink * 100 >= n * 5
+}
+
 /// What the picture says now, for the layouts that depend on it.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Live {
@@ -122,6 +142,8 @@ pub struct Live {
     pub counter_seen: bool,
     /// The lower screen is the one to show (`lower_wanted`, settled).
     pub lower: bool,
+    /// The upper screen is Edo's (`edo_in`).
+    pub edo: bool,
 }
 
 /// Which screen the game wants the player at, from the lower screen's picture: the lower, when it
@@ -158,6 +180,10 @@ pub fn find(layouts: &[Layout], v: &crate::config::Video, live: &Live) -> Layout
         "overlay" => overlay(v.panel),
         name => layouts.iter().find(|l| l.name == name).unwrap_or(&layouts[0]).clone(),
     };
+    // Edo's screen on one: the keys of the lower screen, with the upper's hint text beside them
+    if live.edo && l.screens[0].is_none() && l.screens[1].is_some() && l.patches.is_empty() {
+        l.patches.push(edo_patch());
+    }
     // the number of the lower screen goes on the upper one when that is all there is
     if v.counter && counter_seen && l.screens[0].is_some() && l.screens[1].is_none() {
         l.patches.push(counter_patch());
@@ -215,7 +241,7 @@ mod tests {
     }
 
     fn live(vblank: u64, counter_seen: bool) -> Live {
-        Live { vblank, counter_seen, lower: false }
+        Live { vblank, counter_seen, lower: false, edo: false }
     }
 
     #[test]
@@ -303,6 +329,40 @@ mod tests {
         assert_eq!(find(&all, &v, &want_lower).screens.map(|s| s.is_some()), [false, true]);
         v.auto = false;
         assert_eq!(find(&all, &v, &want_lower).screens.map(|s| s.is_some()), [true, false]);
+    }
+
+    #[test]
+    fn edos_screen_is_known_by_its_pink_title() {
+        for scale in [1, 2] {
+            let title = |p: [u8; 3]| {
+                let (w, h) = (256 * scale, 384 * scale);
+                let mut v = vec![0u8; w * h * 4];
+                for y in 0..192 * scale {
+                    for x in 0..w {
+                        let on = (x / scale) % 3 != 0 && (20..70).contains(&(y / scale));
+                        let o = (y * w + x) * 4;
+                        v[o..o + 3].copy_from_slice(&if on { p } else { [0, 0, 0] });
+                    }
+                }
+                v
+            };
+            assert!(edo_in(scale, &title([240, 20, 130])));
+            assert!(!edo_in(scale, &title([20, 90, 240])));
+            assert!(!edo_in(scale, &vec![0u8; 256 * 384 * 4 * scale * scale]));
+        }
+    }
+
+    #[test]
+    fn edos_hint_comes_to_the_lower_screen_when_that_alone_is_shown() {
+        let all = all();
+        let mut v = video("single", true, false, false);
+        let edo = Live { edo: true, ..Default::default() };
+        assert_eq!(find(&all, &v, &edo).patches, vec![edo_patch()]);
+        assert!(find(&all, &v, &Live::default()).patches.is_empty());
+        // with the upper screen shown, the hint is where it is
+        v.lower = false;
+        assert!(find(&all, &v, &edo).patches.is_empty());
+        assert_eq!(find(&all, &video("stacked", false, false, false), &edo).patches.len(), 0);
     }
 
     #[test]
