@@ -19,6 +19,48 @@ pub struct Layout {
     pub screens: [Option<Rect>; 2],
     /// Parts of a screen drawn elsewhere on the layout, over the screens.
     pub patches: Vec<Patch>,
+    /// How the layout fills the window.
+    pub fit: Fit,
+}
+
+/// How the layout is put into a window that is not its own shape.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub enum Mode {
+    /// All of it, in proportion, with bars where the window is longer.
+    #[default]
+    Fit,
+    /// As `Fit`, at a whole number of times the DS's pixels when there is room (sharp pixels).
+    Integer,
+    /// In proportion, the window filled and what does not fit cut off.
+    Fill,
+    /// The window filled, out of proportion.
+    Stretch,
+}
+
+impl Mode {
+    /// The mode a setting names; `Fit` for anything else.
+    pub fn from_name(name: &str) -> Mode {
+        match name {
+            "integer" => Mode::Integer,
+            "fill" => Mode::Fill,
+            "stretch" => Mode::Stretch,
+            _ => Mode::Fit,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Fit {
+    pub mode: Mode,
+    /// The width of a pixel over its height: 1 for square ones; the DS's own screen is a little
+    /// narrower, and a wide window may want more.
+    pub par: f32,
+}
+
+impl Default for Fit {
+    fn default() -> Fit {
+        Fit { mode: Mode::Fit, par: 1.0 }
+    }
 }
 
 /// A part of a screen's picture shown at another place: `src` in that screen's pixels (256x192),
@@ -71,27 +113,27 @@ fn r(x: f32, y: f32) -> Rect {
 
 /// The DS as it is: the upper screen over the lower.
 pub fn stacked() -> Layout {
-    Layout { name: "stacked", size: (256.0, 384.0), screens: [Some(r(0.0, 0.0)), Some(r(0.0, 192.0))], patches: Vec::new() }
+    Layout { name: "stacked", size: (256.0, 384.0), screens: [Some(r(0.0, 0.0)), Some(r(0.0, 192.0))], patches: Vec::new(), fit: Fit::default() }
 }
 
 /// The screens side by side.
 pub fn side_by_side() -> Layout {
-    Layout { name: "side by side", size: (512.0, 192.0), screens: [Some(r(0.0, 0.0)), Some(r(256.0, 0.0))], patches: Vec::new() }
+    Layout { name: "side by side", size: (512.0, 192.0), screens: [Some(r(0.0, 0.0)), Some(r(256.0, 0.0))], patches: Vec::new(), fit: Fit::default() }
 }
 
 /// Only the upper screen.
 pub fn top_only() -> Layout {
-    Layout { name: "upper only", size: (256.0, 192.0), screens: [Some(r(0.0, 0.0)), None], patches: Vec::new() }
+    Layout { name: "upper only", size: (256.0, 192.0), screens: [Some(r(0.0, 0.0)), None], patches: Vec::new(), fit: Fit::default() }
 }
 
 /// Only the lower screen.
 pub fn bottom_only() -> Layout {
-    Layout { name: "lower only", size: (256.0, 192.0), screens: [None, Some(r(0.0, 0.0))], patches: Vec::new() }
+    Layout { name: "lower only", size: (256.0, 192.0), screens: [None, Some(r(0.0, 0.0))], patches: Vec::new(), fit: Fit::default() }
 }
 
 /// One screen, the one the player picks (`lower`); the hotkey, the button and the menu swap it.
 pub fn single(lower: bool) -> Layout {
-    Layout { name: "single", size: (256.0, 192.0), screens: if lower { [None, Some(r(0.0, 0.0))] } else { [Some(r(0.0, 0.0)), None] }, patches: Vec::new() }
+    Layout { name: "single", size: (256.0, 192.0), screens: if lower { [None, Some(r(0.0, 0.0))] } else { [Some(r(0.0, 0.0)), None] }, patches: Vec::new(), fit: Fit::default() }
 }
 
 /// The upper screen, and the lower one as a panel in the corner over it while `panel` is open (as
@@ -100,7 +142,7 @@ pub fn single(lower: bool) -> Layout {
 pub fn overlay(panel: bool) -> Layout {
     let (w, h) = (256.0 * PANEL, 192.0 * PANEL);
     let lower = Rect { x: 256.0 - w - PANEL_GAP, y: 192.0 - h - PANEL_GAP, w, h };
-    Layout { name: "overlay", size: (256.0, 192.0), screens: [Some(r(0.0, 0.0)), panel.then_some(lower)], patches: Vec::new() }
+    Layout { name: "overlay", size: (256.0, 192.0), screens: [Some(r(0.0, 0.0)), panel.then_some(lower)], patches: Vec::new(), fit: Fit::default() }
 }
 
 /// The panel's size as a part of a screen, and its gap to the corner, in screen pixels.
@@ -168,6 +210,12 @@ pub fn lower_wanted(scale: usize, rgba: &[u8]) -> Option<bool> {
 }
 
 pub fn find(layouts: &[Layout], v: &crate::config::Video, live: &Live) -> Layout {
+    let mut l = pick(layouts, v, live);
+    l.fit = Fit { mode: Mode::from_name(&v.fit), par: v.pixel_aspect };
+    l
+}
+
+fn pick(layouts: &[Layout], v: &crate::config::Video, live: &Live) -> Layout {
     let (vblank, counter_seen) = (live.vblank, live.counter_seen);
     // one screen shown: the logos come in turn
     if v.logos_in_turn && matches!(v.layout.as_str(), "single" | "overlay") {
@@ -195,16 +243,32 @@ impl Layout {
     /// The layout fitted into a window of `win` pixels, centred: each screen's rectangle in
     /// pixels.
     pub fn fit(&self, win: (f32, f32)) -> [Option<Rect>; 2] {
-        let k = (win.0 / self.size.0).min(win.1 / self.size.1);
-        let (ox, oy) = ((win.0 - self.size.0 * k) / 2.0, (win.1 - self.size.1 * k) / 2.0);
-        self.screens.map(|s| s.map(|s| Rect { x: ox + s.x * k, y: oy + s.y * k, w: s.w * k, h: s.h * k }))
+        self.screens.map(|s| s.map(|s| self.fit_rect(win, s)))
+    }
+
+    /// The horizontal and vertical scale of the layout's space in the window, and where its corner
+    /// is (the layout is centred; cut off where it is larger than the window).
+    fn placing(&self, win: (f32, f32)) -> (f32, f32, f32, f32) {
+        let par = self.fit.par.clamp(0.25, 4.0);
+        let (ew, eh) = (self.size.0 * par, self.size.1);
+        let (kx, ky) = match self.fit.mode {
+            Mode::Stretch => (win.0 / self.size.0, win.1 / self.size.1),
+            mode => {
+                let k = match mode {
+                    Mode::Fill => (win.0 / ew).max(win.1 / eh),
+                    _ => (win.0 / ew).min(win.1 / eh),
+                };
+                let k = if mode == Mode::Integer && k >= 1.0 { k.floor() } else { k };
+                (k * par, k)
+            }
+        };
+        (kx, ky, (win.0 - self.size.0 * kx) / 2.0, (win.1 - self.size.1 * ky) / 2.0)
     }
 
     /// A rectangle of the layout's space fitted into the window like the screens.
     pub fn fit_rect(&self, win: (f32, f32), r: Rect) -> Rect {
-        let k = (win.0 / self.size.0).min(win.1 / self.size.1);
-        let (ox, oy) = ((win.0 - self.size.0 * k) / 2.0, (win.1 - self.size.1 * k) / 2.0);
-        Rect { x: ox + r.x * k, y: oy + r.y * k, w: r.w * k, h: r.h * k }
+        let (kx, ky, ox, oy) = self.placing(win);
+        Rect { x: ox + r.x * kx, y: oy + r.y * ky, w: r.w * kx, h: r.h * ky }
     }
 
     /// A window position as a point of the lower screen (x 0-255, y 0-191), if it is on it.
@@ -404,6 +468,60 @@ mod tests {
         assert!((127..=128).contains(&x) && (95..=96).contains(&y));
         assert_eq!(l.touch(win, (10.0, 10.0), false), None);
         assert_eq!(overlay(false).touch(win, mid, false), None);
+    }
+
+    fn with_fit(mut l: Layout, mode: Mode, par: f32) -> Layout {
+        l.fit = Fit { mode, par };
+        l
+    }
+
+    #[test]
+    fn the_modes_put_the_picture_in_a_wide_window_each_its_way() {
+        let win = (1000.0, 500.0);
+        let one = |mode, par| with_fit(top_only(), mode, par).fit(win)[0].unwrap();
+        // fit: the height rules (500 / 192), centred
+        let r = one(Mode::Fit, 1.0);
+        assert!((r.h - 500.0).abs() < 0.01 && (r.w - 500.0 * 256.0 / 192.0).abs() < 0.01 && (r.x - (1000.0 - r.w) / 2.0).abs() < 0.01);
+        // integer: 2 times (500 / 192 = 2.6), 512 x 384, centred
+        let r = one(Mode::Integer, 1.0);
+        assert_eq!((r.w, r.h, r.x, r.y), (512.0, 384.0, 244.0, 58.0));
+        // integer in a window smaller than the DS: no whole times, it fits
+        let small = with_fit(top_only(), Mode::Integer, 1.0).fit((128.0, 96.0))[0].unwrap();
+        assert_eq!((small.w, small.h), (128.0, 96.0));
+        // fill: the width rules (1000 / 256), the height runs past the window
+        let r = one(Mode::Fill, 1.0);
+        assert!((r.w - 1000.0).abs() < 0.01 && r.h > 500.0 && r.y < 0.0);
+        // stretch: the window, whatever its shape
+        let r = one(Mode::Stretch, 1.0);
+        assert_eq!((r.x, r.y, r.w, r.h), (0.0, 0.0, 1000.0, 500.0));
+        // a wider pixel: 4:3 becomes 16:9-ish (1.5 times wider), still in proportion to the window
+        let r = one(Mode::Fit, 1.5);
+        assert!((r.w / r.h - 256.0 * 1.5 / 192.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn touch_follows_the_mode() {
+        // stretched out of proportion: the middle of the window is the middle of the screen
+        let l = with_fit(bottom_only(), Mode::Stretch, 1.0);
+        assert_eq!(l.touch((1000.0, 500.0), (500.0, 250.0), false), Some((128, 96)));
+        assert_eq!(l.touch((1000.0, 500.0), (999.0, 499.0), false), Some((255, 191)));
+        // a layout cut off by fill: the window's corner is not the screen's corner
+        let f = with_fit(bottom_only(), Mode::Fill, 1.0);
+        let (x, y) = f.touch((1000.0, 500.0), (0.0, 0.0), false).unwrap();
+        assert_eq!(x, 0);
+        assert!(y > 0, "{}", y);
+    }
+
+    #[test]
+    fn the_setting_reaches_the_layout() {
+        let all = all();
+        let mut v = video("single", false, false, false);
+        v.fit = "integer".into();
+        v.pixel_aspect = 1.25;
+        let l = find(&all, &v, &Live::default());
+        assert_eq!(l.fit, Fit { mode: Mode::Integer, par: 1.25 });
+        v.fit = "nonsense".into();
+        assert_eq!(find(&all, &v, &Live::default()).fit.mode, Mode::Fit);
     }
 
     #[test]

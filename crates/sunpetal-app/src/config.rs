@@ -26,6 +26,10 @@ pub struct Video {
     /// In the `single` layout: the screen follows the game (the lower for a menu, the upper for a
     /// scene) instead of the choice in `lower`.
     pub auto: bool,
+    /// How the picture fills the window: `fit`, `integer`, `fill` or `stretch` (`layout::Mode`).
+    pub fit: String,
+    /// The width of a pixel over its height (1: square), 0.5 to 2.
+    pub pixel_aspect: f32,
     /// With one screen shown: the logos at the start, which are on both screens, one after another.
     pub logos_in_turn: bool,
     pub fullscreen: bool,
@@ -41,7 +45,7 @@ pub struct Video {
 
 impl Default for Video {
     fn default() -> Video {
-        Video { res: 2, linear: true, layout: "stacked".into(), lower: false, panel: false, counter: true, auto: true, logos_in_turn: true, fullscreen: false, background: "glow".into(), show_stats: false, texture_pack: String::new(), window: [512, 768] }
+        Video { res: 2, linear: true, layout: "stacked".into(), lower: false, panel: false, counter: true, auto: true, fit: "fit".into(), pixel_aspect: 1.0, logos_in_turn: true, fullscreen: false, background: "glow".into(), show_stats: false, texture_pack: String::new(), window: [512, 768] }
     }
 }
 
@@ -217,6 +221,10 @@ impl Settings {
 
     /// Fixes what a hand-edited file may have got wrong.
     pub fn sanitize(&mut self) {
+        self.video.pixel_aspect = if self.video.pixel_aspect.is_finite() { self.video.pixel_aspect.clamp(0.5, 2.0) } else { 1.0 };
+        if !matches!(self.video.fit.as_str(), "fit" | "integer" | "fill" | "stretch") {
+            self.video.fit = "fit".into();
+        }
         if !matches!(self.interface.language.as_str(), "auto" | "en" | "ru") {
             self.interface.language = "auto".into();
         }

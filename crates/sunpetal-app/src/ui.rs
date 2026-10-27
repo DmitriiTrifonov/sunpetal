@@ -64,6 +64,15 @@ impl Menu {
                         ui.selectable_value(&mut s.video.layout, l.to_string(), layout_label(l, lang));
                     }
                 });
+                egui::ComboBox::from_label(tx("Picture in the window", "Картинка в окне")).selected_text(fit_label(&s.video.fit, lang)).show_ui(ui, |ui| {
+                    for m in ["fit", "integer", "fill", "stretch"] {
+                        ui.selectable_value(&mut s.video.fit, m.to_string(), fit_label(m, lang));
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label(tx("Pixel width:", "Ширина пикселя:"));
+                    ui.add(egui::Slider::new(&mut s.video.pixel_aspect, 0.5..=2.0));
+                });
                 if s.video.layout == "single" {
                     ui.checkbox(&mut s.video.auto, tx("The screen follows the game (a scene: upper, a menu: lower)", "Экран следует за игрой (сцена: верхний, меню: нижний)"));
                     ui.add_enabled_ui(!s.video.auto, |ui| ui.horizontal(|ui| {
@@ -262,6 +271,20 @@ impl Menu {
 }
 
 /// A layout's name as the menu shows it (the id stays what the settings file holds).
+pub fn fit_label(id: &str, lang: Lang) -> &str {
+    match (id, lang) {
+        ("fit", Lang::En) => "fit, with bars",
+        ("integer", Lang::En) => "whole pixels (sharp)",
+        ("fill", Lang::En) => "fill, cut the edges",
+        ("stretch", Lang::En) => "stretch",
+        ("fit", Lang::Ru) => "вписать, с полосами",
+        ("integer", Lang::Ru) => "целые пиксели (чётко)",
+        ("fill", Lang::Ru) => "заполнить, обрезать края",
+        ("stretch", Lang::Ru) => "растянуть",
+        (other, _) => other,
+    }
+}
+
 pub fn layout_label(id: &str, lang: Lang) -> &str {
     match (id, lang) {
         ("stacked", Lang::Ru) => "друг под другом",
