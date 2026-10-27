@@ -17,6 +17,23 @@ pub struct Layout {
     pub size: (f32, f32),
     /// The upper screen, then the lower, in that space; `None`: not shown.
     pub screens: [Option<Rect>; 2],
+    /// Parts of a screen drawn elsewhere on the layout, over the screens.
+    pub patches: Vec<Patch>,
+}
+
+/// A part of a screen's picture shown at another place: `src` in that screen's pixels (256x192),
+/// `dst` in the layout's space.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Patch {
+    pub screen: usize,
+    pub src: Rect,
+    pub dst: Rect,
+}
+
+/// The counter in the lower screen's top left corner (the map's number) and where it goes on the
+/// upper screen when only that is shown.
+pub fn counter_patch() -> Patch {
+    Patch { screen: 1, src: Rect { x: 4.0, y: 7.0, w: 60.0, h: 13.0 }, dst: Rect { x: 4.0, y: 4.0, w: 60.0, h: 13.0 } }
 }
 
 fn r(x: f32, y: f32) -> Rect {
@@ -25,27 +42,27 @@ fn r(x: f32, y: f32) -> Rect {
 
 /// The DS as it is: the upper screen over the lower.
 pub fn stacked() -> Layout {
-    Layout { name: "stacked", size: (256.0, 384.0), screens: [Some(r(0.0, 0.0)), Some(r(0.0, 192.0))] }
+    Layout { name: "stacked", size: (256.0, 384.0), screens: [Some(r(0.0, 0.0)), Some(r(0.0, 192.0))], patches: Vec::new() }
 }
 
 /// The screens side by side.
 pub fn side_by_side() -> Layout {
-    Layout { name: "side by side", size: (512.0, 192.0), screens: [Some(r(0.0, 0.0)), Some(r(256.0, 0.0))] }
+    Layout { name: "side by side", size: (512.0, 192.0), screens: [Some(r(0.0, 0.0)), Some(r(256.0, 0.0))], patches: Vec::new() }
 }
 
 /// Only the upper screen.
 pub fn top_only() -> Layout {
-    Layout { name: "upper only", size: (256.0, 192.0), screens: [Some(r(0.0, 0.0)), None] }
+    Layout { name: "upper only", size: (256.0, 192.0), screens: [Some(r(0.0, 0.0)), None], patches: Vec::new() }
 }
 
 /// Only the lower screen.
 pub fn bottom_only() -> Layout {
-    Layout { name: "lower only", size: (256.0, 192.0), screens: [None, Some(r(0.0, 0.0))] }
+    Layout { name: "lower only", size: (256.0, 192.0), screens: [None, Some(r(0.0, 0.0))], patches: Vec::new() }
 }
 
 /// One screen, the one the player picks (`lower`); the hotkey, the button and the menu swap it.
 pub fn single(lower: bool) -> Layout {
-    Layout { name: "single", size: (256.0, 192.0), screens: if lower { [None, Some(r(0.0, 0.0))] } else { [Some(r(0.0, 0.0)), None] } }
+    Layout { name: "single", size: (256.0, 192.0), screens: if lower { [None, Some(r(0.0, 0.0))] } else { [Some(r(0.0, 0.0)), None] }, patches: Vec::new() }
 }
 
 /// The upper screen, and the lower one as a panel in the corner over it while `panel` is open (as
@@ -54,7 +71,7 @@ pub fn single(lower: bool) -> Layout {
 pub fn overlay(panel: bool) -> Layout {
     let (w, h) = (256.0 * PANEL, 192.0 * PANEL);
     let lower = Rect { x: 256.0 - w - PANEL_GAP, y: 192.0 - h - PANEL_GAP, w, h };
-    Layout { name: "overlay", size: (256.0, 192.0), screens: [Some(r(0.0, 0.0)), panel.then_some(lower)] }
+    Layout { name: "overlay", size: (256.0, 192.0), screens: [Some(r(0.0, 0.0)), panel.then_some(lower)], patches: Vec::new() }
 }
 
 /// The panel's size as a part of a screen, and its gap to the corner, in screen pixels.
@@ -67,14 +84,17 @@ pub fn all() -> Vec<Layout> {
 
 /// The layout a setting names; `single` shows the lower screen if `lower`, `overlay` the panel if
 /// `panel`.
-pub fn find(layouts: &[Layout], name: &str, lower: bool, panel: bool) -> Layout {
-    if name == "single" {
-        return single(lower);
+pub fn find(layouts: &[Layout], v: &crate::config::Video) -> Layout {
+    let mut l = match v.layout.as_str() {
+        "single" => single(v.lower),
+        "overlay" => overlay(v.panel),
+        name => layouts.iter().find(|l| l.name == name).unwrap_or(&layouts[0]).clone(),
+    };
+    // the number of the lower screen goes on the upper one when that is all there is
+    if v.counter && l.screens[0].is_some() && l.screens[1].is_none() {
+        l.patches.push(counter_patch());
     }
-    if name == "overlay" {
-        return overlay(panel);
-    }
-    layouts.iter().find(|l| l.name == name).unwrap_or(&layouts[0]).clone()
+    l
 }
 
 impl Layout {
@@ -84,6 +104,13 @@ impl Layout {
         let k = (win.0 / self.size.0).min(win.1 / self.size.1);
         let (ox, oy) = ((win.0 - self.size.0 * k) / 2.0, (win.1 - self.size.1 * k) / 2.0);
         self.screens.map(|s| s.map(|s| Rect { x: ox + s.x * k, y: oy + s.y * k, w: s.w * k, h: s.h * k }))
+    }
+
+    /// A rectangle of the layout's space fitted into the window like the screens.
+    pub fn fit_rect(&self, win: (f32, f32), r: Rect) -> Rect {
+        let k = (win.0 / self.size.0).min(win.1 / self.size.1);
+        let (ox, oy) = ((win.0 - self.size.0 * k) / 2.0, (win.1 - self.size.1 * k) / 2.0);
+        Rect { x: ox + r.x * k, y: oy + r.y * k, w: r.w * k, h: r.h * k }
     }
 
     /// A window position as a point of the lower screen (x 0-255, y 0-191), if it is on it.
@@ -115,15 +142,35 @@ mod tests {
         assert_eq!(down.y, 384.0);
     }
 
+    fn video(layout: &str, lower: bool, panel: bool, counter: bool) -> crate::config::Video {
+        crate::config::Video { layout: layout.into(), lower, panel, counter, ..Default::default() }
+    }
+
     #[test]
     fn the_single_layout_shows_the_screen_picked() {
         let all = all();
-        assert_eq!(find(&all, "single", false, false).screens.map(|s| s.is_some()), [true, false]);
-        assert_eq!(find(&all, "single", true, false).screens.map(|s| s.is_some()), [false, true]);
-        assert_eq!(find(&all, "nonsense", true, true).name, "stacked");
+        assert_eq!(find(&all, &video("single", false, false, false)).screens.map(|s| s.is_some()), [true, false]);
+        assert_eq!(find(&all, &video("single", true, false, false)).screens.map(|s| s.is_some()), [false, true]);
+        assert_eq!(find(&all, &video("nonsense", true, true, false)).name, "stacked");
         // the picked lower screen takes touch
         assert!(single(true).touch((256.0, 192.0), (10.0, 10.0), false).is_some());
         assert!(single(false).touch((256.0, 192.0), (10.0, 10.0), false).is_none());
+    }
+
+    #[test]
+    fn the_counter_goes_on_the_upper_screen_only_when_it_is_alone() {
+        let all = all();
+        assert_eq!(find(&all, &video("single", false, false, true)).patches, vec![counter_patch()]);
+        assert_eq!(find(&all, &video("overlay", false, false, true)).patches.len(), 1);
+        // not with the panel open, the lower screen showing, both screens, or the setting off
+        assert!(find(&all, &video("overlay", false, true, true)).patches.is_empty());
+        assert!(find(&all, &video("single", true, false, true)).patches.is_empty());
+        assert!(find(&all, &video("stacked", false, false, true)).patches.is_empty());
+        assert!(find(&all, &video("single", false, false, false)).patches.is_empty());
+        // fitted like the screens: the corner of a window twice the size is at twice the offset
+        let l = find(&all, &video("single", false, false, true));
+        let d = l.fit_rect((512.0, 384.0), l.patches[0].dst);
+        assert_eq!((d.x, d.y, d.w), (8.0, 8.0, 120.0));
     }
 
     #[test]

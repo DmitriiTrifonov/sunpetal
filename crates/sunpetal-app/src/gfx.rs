@@ -19,12 +19,13 @@ struct Quad {
     fx: vec4<f32>,     // scanlines, grid, vignette, sharp
     color: vec4<f32>,  // saturation, contrast, brightness, gamma
     dims: vec4<f32>,   // the texture's width and height, the window's pixels per DS pixel
+    uvr: vec4<f32>,    // the part of the texture shown: u0, v0, u1, v1
 };
 @group(0) @binding(0) var<uniform> q: Quad;
 @group(0) @binding(1) var tex: texture_2d<f32>;
 @group(0) @binding(2) var samp: sampler;
 
-struct Out { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> };
+struct Out { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32>, @location(1) loc: vec2<f32> };
 
 @vertex
 fn vs(@builtin(vertex_index) i: u32) -> Out {
@@ -32,7 +33,8 @@ fn vs(@builtin(vertex_index) i: u32) -> Out {
     let c = vec2<f32>(f32(i & 1u), f32((i >> 1u) & 1u));
     var o: Out;
     o.pos = vec4<f32>(mix(q.rect.x, q.rect.z, c.x), mix(q.rect.y, q.rect.w, c.y), 0.0, 1.0);
-    o.uv = c;
+    o.uv = mix(q.uvr.xy, q.uvr.zw, c);
+    o.loc = c;
     return o;
 }
 
@@ -55,7 +57,7 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
     c = c * (1.0 - q.fx.x * room * (1.0 - line));
     let e = min(min(fr.x, 1.0 - fr.x), min(fr.y, 1.0 - fr.y));
     c = c * (1.0 - q.fx.y * room * (1.0 - smoothstep(0.0, 0.3, e)));
-    let d = in.uv - vec2<f32>(0.5);
+    let d = in.loc - vec2<f32>(0.5);
     c = c * (1.0 - q.fx.z * dot(d, d) * 2.0);
     let luma = dot(c, vec3<f32>(0.299, 0.587, 0.114));
     c = mix(vec3<f32>(luma), c, q.color.x);
@@ -72,6 +74,20 @@ struct Quad {
     fx: [f32; 4],
     color: [f32; 4],
     dims: [f32; 4],
+    uvr: [f32; 4],
+}
+
+/// The whole texture.
+const WHOLE: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
+
+/// What a layout's patches may be at most (one set of uniforms each).
+const MAX_PATCHES: usize = 4;
+
+/// Another quad of a screen's texture (a patch: a part of it drawn elsewhere).
+struct Extra {
+    uniform: wgpu::Buffer,
+    bind_nearest: wgpu::BindGroup,
+    bind_linear: wgpu::BindGroup,
 }
 
 struct Screen {
@@ -79,6 +95,7 @@ struct Screen {
     uniform: wgpu::Buffer,
     bind_nearest: wgpu::BindGroup,
     bind_linear: wgpu::BindGroup,
+    extras: Vec<Extra>,
 }
 
 pub struct Gfx {
@@ -109,6 +126,9 @@ pub struct Gfx {
     /// Pixels kept free at the bottom of the window (the touch controls' band).
     pub reserve: f32,
 }
+
+/// The index of a patch's uniform, for the drawing pass.
+struct Extra2(usize);
 
 fn make_screen(
     device: &wgpu::Device,
@@ -141,13 +161,15 @@ fn make_texture(
         view_formats: &[],
     });
     let view = texture.create_view(&Default::default());
-    let uniform = device.create_buffer(&wgpu::BufferDescriptor {
-        label: None,
-        size: std::mem::size_of::<Quad>() as u64,
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    let bind = |s: &wgpu::Sampler| {
+    let buffer = || {
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: std::mem::size_of::<Quad>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        })
+    };
+    let bind = |uniform: &wgpu::Buffer, s: &wgpu::Sampler| {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: bgl,
@@ -158,7 +180,14 @@ fn make_texture(
             ],
         })
     };
-    Screen { bind_nearest: bind(nearest), bind_linear: bind(linear), texture, uniform }
+    let uniform = buffer();
+    let extras = (0..MAX_PATCHES)
+        .map(|_| {
+            let u = buffer();
+            Extra { bind_nearest: bind(&u, nearest), bind_linear: bind(&u, linear), uniform: u }
+        })
+        .collect();
+    Screen { bind_nearest: bind(&uniform, nearest), bind_linear: bind(&uniform, linear), texture, uniform, extras }
 }
 
 impl Gfx {
@@ -384,13 +413,33 @@ impl Gfx {
                     fx: [fx.scanlines, fx.grid, fx.vignette, if fx.sharp { 1.0 } else { 0.0 }],
                     color: [fx.saturation, fx.contrast, fx.brightness, fx.gamma],
                     dims: [256.0 * self.scale as f32, 192.0 * self.scale as f32, r.w / 256.0, 0.0],
+                    uvr: WHOLE,
                 };
                 self.queue.write_buffer(&s.uniform, 0, bytemuck::bytes_of(&q));
             }
         }
+        // the patches: a part of a screen drawn over the layout, one uniform each
+        let patches: Vec<(usize, Extra2)> = layout
+            .patches
+            .iter()
+            .take(MAX_PATCHES)
+            .enumerate()
+            .map(|(i, p)| {
+                let d = layout.fit_rect(self.size(), p.dst);
+                let q = Quad {
+                    rect: [d.x / w * 2.0 - 1.0, 1.0 - d.y / h * 2.0, (d.x + d.w) / w * 2.0 - 1.0, 1.0 - (d.y + d.h) / h * 2.0],
+                    fx: [0.0, 0.0, 0.0, if fx.sharp { 1.0 } else { 0.0 }],
+                    color: [fx.saturation, fx.contrast, fx.brightness, fx.gamma],
+                    dims: [256.0 * self.scale as f32, 192.0 * self.scale as f32, 0.0, 0.0],
+                    uvr: [p.src.x / 256.0, p.src.y / 192.0, (p.src.x + p.src.w) / 256.0, (p.src.y + p.src.h) / 192.0],
+                };
+                self.queue.write_buffer(&self.screens[p.screen].extras[i].uniform, 0, bytemuck::bytes_of(&q));
+                (p.screen, Extra2(i))
+            })
+            .collect();
         if self.background {
             // the whole window, dimmed, no screen effects
-            let q = Quad { rect: [-1.0, 1.0, 1.0, -1.0], fx: [0.0, 0.0, 0.55, 0.0], color: [1.1, 0.9, -0.2, 1.0], dims: [GLOW_W as f32, GLOW_H as f32, 0.0, 0.0] };
+            let q = Quad { rect: [-1.0, 1.0, 1.0, -1.0], fx: [0.0, 0.0, 0.55, 0.0], color: [1.1, 0.9, -0.2, 1.0], dims: [GLOW_W as f32, GLOW_H as f32, 0.0, 0.0], uvr: WHOLE };
             self.queue.write_buffer(&self.glow.uniform, 0, bytemuck::bytes_of(&q));
         }
         let view = frame.texture.create_view(&Default::default());
@@ -429,6 +478,11 @@ impl Gfx {
                     pass.set_bind_group(0, if self.linear { &s.bind_linear } else { &s.bind_nearest }, &[]);
                     pass.draw(0..4, 0..1);
                 }
+            }
+            for (s, Extra2(i)) in &patches {
+                let e = &self.screens[*s].extras[*i];
+                pass.set_bind_group(0, if self.linear { &e.bind_linear } else { &e.bind_nearest }, &[]);
+                pass.draw(0..4, 0..1);
             }
         }
         if let Some(p) = &self.post {

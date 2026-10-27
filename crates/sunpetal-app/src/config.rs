@@ -21,6 +21,8 @@ pub struct Video {
     pub lower: bool,
     /// In the `overlay` layout: whether the panel with the lower screen is open.
     pub panel: bool,
+    /// With one screen shown (upper only): the lower screen's counter on it, in the corner.
+    pub counter: bool,
     pub fullscreen: bool,
     /// Behind the screens: "glow" (their colours, blurred) or "black".
     pub background: String,
@@ -34,7 +36,7 @@ pub struct Video {
 
 impl Default for Video {
     fn default() -> Video {
-        Video { res: 2, linear: true, layout: "stacked".into(), lower: false, panel: false, fullscreen: false, background: "glow".into(), show_stats: false, texture_pack: String::new(), window: [512, 768] }
+        Video { res: 2, linear: true, layout: "stacked".into(), lower: false, panel: false, counter: true, fullscreen: false, background: "glow".into(), show_stats: false, texture_pack: String::new(), window: [512, 768] }
     }
 }
 

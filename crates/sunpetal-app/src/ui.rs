@@ -71,6 +71,7 @@ impl Menu {
                         ui.selectable_value(&mut s.video.lower, true, tx("lower (touch)", "нижний (касание)"));
                     });
                 }
+                ui.checkbox(&mut s.video.counter, tx("Counter on the upper screen when it is alone", "Счётчик на верхнем экране, когда он один"));
                 if s.video.layout == "overlay" {
                     ui.checkbox(&mut s.video.panel, tx("Lower screen as a panel (F8)", "Нижний экран панелью (F8)"));
                 }

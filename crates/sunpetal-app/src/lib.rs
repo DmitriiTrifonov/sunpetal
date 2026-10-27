@@ -101,7 +101,7 @@ struct App {
 
 impl App {
     fn layout(&self) -> layout::Layout {
-        layout::find(&self.layouts, &self.settings.video.layout, self.settings.video.lower, self.settings.video.panel)
+        layout::find(&self.layouts, &self.settings.video)
     }
 
     /// Swaps the screen shown in the single layout; from another layout, goes into it.
@@ -479,7 +479,7 @@ impl ApplicationHandler for App {
                 {
                     let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, .. } = self;
                     if let Some(g) = gfx {
-                        let layout = layout::find(layouts, &settings.video.layout, settings.video.lower, settings.video.panel);
+                        let layout = layout::find(layouts, &settings.video);
                         let names: Vec<&str> = layouts.iter().map(|l| l.name).collect();
                         let fx = settings.effects.clone();
                         let internal = (256 * settings.video.res as u32, 192 * settings.video.res as u32);
