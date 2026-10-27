@@ -155,6 +155,31 @@ pub fn all() -> Vec<Layout> {
 
 /// The layout a setting names; `single` shows the lower screen if `lower`, `overlay` the panel if
 /// `panel`.
+/// The colour all the edges of the picture have, when the layout shows one screen and its edge is
+/// the same colour all round (a studio logo on white): the bars of a window of another shape are
+/// painted so, and the picture seems to run on. `None` for a picture whose edges differ (a scene:
+/// the glow behind it is used) or a layout with two screens.
+pub fn edge_color(layout: &Layout, scale: usize, rgba: &[u8]) -> Option<[f32; 3]> {
+    let s = match layout.screens {
+        [Some(_), None] => 0,
+        [None, Some(_)] => 1,
+        _ => return None,
+    };
+    let (w, h) = (256 * scale, 192 * scale);
+    let base = s * w * h;
+    let at = |x: usize, y: usize| rgba.get((base + y * w + x) * 4..(base + y * w + x) * 4 + 3).map(|p| [p[0], p[1], p[2]]);
+    let mut points = Vec::new();
+    for i in (0..w).step_by(scale.max(1) * 4) {
+        points.extend([at(i, 0)?, at(i, h - 1)?]);
+    }
+    for j in (0..h).step_by(scale.max(1) * 4) {
+        points.extend([at(0, j)?, at(w - 1, j)?]);
+    }
+    let mean: [f32; 3] = std::array::from_fn(|c| points.iter().map(|p| p[c] as f32).sum::<f32>() / points.len() as f32);
+    let flat = points.iter().all(|p| (0..3).all(|c| (p[c] as f32 - mean[c]).abs() <= 10.0));
+    flat.then(|| mean.map(|m| m / 255.0))
+}
+
 /// The hint text of Edo's screens (what the chosen key does), cut from the upper screen and put
 /// into the free corner of the lower one, whose keys are the screen's use.
 pub fn edo_patch() -> Patch {
@@ -510,6 +535,32 @@ mod tests {
         let (x, y) = f.touch((1000.0, 500.0), (0.0, 0.0), false).unwrap();
         assert_eq!(x, 0);
         assert!(y > 0, "{}", y);
+    }
+
+    #[test]
+    fn a_picture_edged_all_round_in_one_colour_gives_its_colour_to_the_bars() {
+        for scale in [1, 2] {
+            let (w, h) = (256 * scale, 192 * scale);
+            let mut v = vec![0u8; w * h * 2 * 4];
+            // the upper screen: white, with a dark mark in the middle
+            for y in 0..h {
+                for x in 0..w {
+                    let o = (y * w + x) * 4;
+                    let mark = (w / 3..w / 2).contains(&x) && (h / 3..h / 2).contains(&y);
+                    v[o..o + 3].copy_from_slice(&if mark { [10, 10, 10] } else { [250, 250, 252] });
+                }
+            }
+            let c = edge_color(&top_only(), scale, &v).unwrap();
+            assert!((c[0] - 250.0 / 255.0).abs() < 0.01 && (c[2] - 252.0 / 255.0).abs() < 0.01);
+            // the lower screen is black here: its layout gives black
+            assert_eq!(edge_color(&bottom_only(), scale, &v), Some([0.0, 0.0, 0.0]));
+            // two screens: none; an edge that is not one colour: none
+            assert_eq!(edge_color(&stacked(), scale, &v), None);
+            v[(h / 2 * w) * 4] = 0;
+            v[(h / 2 * w) * 4 + 1] = 0;
+            v[(h / 2 * w) * 4 + 2] = 0;
+            assert_eq!(edge_color(&top_only(), scale, &v), None);
+        }
     }
 
     #[test]

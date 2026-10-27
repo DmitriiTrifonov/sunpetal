@@ -122,6 +122,8 @@ pub struct Gfx {
     glow_grid: Vec<f32>,
     /// Draw the glow behind the screens (else black).
     pub background: bool,
+    /// The colour the picture's edges all have (a logo on white): the bars take it, no glow.
+    pub bar_color: Option<[f32; 3]>,
     pub linear: bool,
     /// Pixels kept free at the bottom of the window (the touch controls' band).
     pub reserve: f32,
@@ -300,7 +302,7 @@ impl Gfx {
         );
         let egui_renderer = egui_wgpu::Renderer::new(&device, format, egui_wgpu::RendererOptions::default());
         let post_kit = post::Kit::new(&device, format);
-        Ok(Gfx { window: w, egui_ctx, egui_state, egui_renderer, bgl, nearest, linear_sampler: linear, scale: 1, surface, device, queue, config, pipeline, post_kit, post: None, screens, glow, glow_grid: vec![0.0; GLOW_W * GLOW_H * 3], background: true, linear: true, reserve: 0.0 })
+        Ok(Gfx { window: w, egui_ctx, egui_state, egui_renderer, bgl, nearest, linear_sampler: linear, scale: 1, surface, device, queue, config, pipeline, post_kit, post: None, screens, glow, glow_grid: vec![0.0; GLOW_W * GLOW_H * 3], background: true, bar_color: None, linear: true, reserve: 0.0 })
     }
 
     pub fn resize(&mut self, w: u32, h: u32) {
@@ -437,7 +439,7 @@ impl Gfx {
                 (p.screen, Extra2(i))
             })
             .collect();
-        if self.background {
+        if self.background && self.bar_color.is_none() {
             // the whole window, dimmed, no screen effects
             let q = Quad { rect: [-1.0, 1.0, 1.0, -1.0], fx: [0.0, 0.0, 0.55, 0.0], color: [1.1, 0.9, -0.2, 1.0], dims: [GLOW_W as f32, GLOW_H as f32, 0.0, 0.0], uvr: WHOLE };
             self.queue.write_buffer(&self.glow.uniform, 0, bytemuck::bytes_of(&q));
@@ -461,7 +463,7 @@ impl Gfx {
                     view: target,
                     depth_slice: None,
                     resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(self.bar_color.map_or(wgpu::Color::BLACK, |c| wgpu::Color { r: c[0] as f64, g: c[1] as f64, b: c[2] as f64, a: 1.0 })), store: wgpu::StoreOp::Store },
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
@@ -469,7 +471,7 @@ impl Gfx {
                 multiview_mask: None,
             });
             pass.set_pipeline(&self.pipeline);
-            if self.background {
+            if self.background && self.bar_color.is_none() {
                 pass.set_bind_group(0, &self.glow.bind_linear, &[]);
                 pass.draw(0..4, 0..1);
             }

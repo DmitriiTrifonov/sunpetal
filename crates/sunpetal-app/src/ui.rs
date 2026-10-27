@@ -93,6 +93,7 @@ impl Menu {
                     ui.selectable_value(&mut s.video.background, "glow".to_string(), tx("glow of the picture", "свечение картинки"));
                     ui.selectable_value(&mut s.video.background, "black".to_string(), tx("black", "чёрная"));
                 });
+                ui.checkbox(&mut s.video.bars_match, tx("Bars take the picture's edge colour (logos)", "Полосы цвета края картинки (логотипы)"));
                 ui.checkbox(&mut s.video.fullscreen, tx("Full screen (F11)", "Полный экран (F11)"));
                 ui.horizontal(|ui| {
                     ui.label(tx("Data file or texture folder:", "Файл данных или папка текстур:"));
