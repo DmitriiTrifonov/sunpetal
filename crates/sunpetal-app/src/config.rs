@@ -26,6 +26,9 @@ pub struct Video {
     /// In the `single` layout: the screen follows the game (the lower for a menu, the upper for a
     /// scene) instead of the choice in `lower`.
     pub auto: bool,
+    /// The 3D view is widened to the window's shape when the upper screen is shown alone (more of the
+    /// scene at the sides, not a stretched picture).
+    pub wide: bool,
     /// The bars of a window that is not the picture's shape take the colour of the picture's edge
     /// when it is all one (a logo on white), instead of the glow.
     pub bars_match: bool,
@@ -48,7 +51,7 @@ pub struct Video {
 
 impl Default for Video {
     fn default() -> Video {
-        Video { res: 2, linear: true, layout: "stacked".into(), lower: false, panel: false, counter: true, auto: true, bars_match: true, fit: "fit".into(), pixel_aspect: 1.0, logos_in_turn: true, fullscreen: false, background: "glow".into(), show_stats: false, texture_pack: String::new(), window: [512, 768] }
+        Video { res: 2, linear: true, layout: "stacked".into(), lower: false, panel: false, counter: true, auto: true, wide: true, bars_match: true, fit: "fit".into(), pixel_aspect: 1.0, logos_in_turn: true, fullscreen: false, background: "glow".into(), show_stats: false, texture_pack: String::new(), window: [512, 768] }
     }
 }
 

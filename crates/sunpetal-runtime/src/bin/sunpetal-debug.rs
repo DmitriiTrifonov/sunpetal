@@ -68,6 +68,10 @@ struct Args {
     /// Both screens as a PNG at the end.
     #[arg(long, value_name = "FILE")]
     shot: Option<PathBuf>,
+    /// Widen the 3D view by this many DS pixels each side; `--shot` then also writes FILE with `_wide` before the
+    /// extension (the upper screen alone, 256 + 2N wide).
+    #[arg(long, value_name = "PIXELS")]
+    wide: Option<usize>,
     /// Print the state (last line, frame, map, story value 0, why autoplay stopped) as a JSON line at the end.
     #[arg(long)]
     state: bool,
@@ -252,6 +256,7 @@ fn run(a: Args) -> Result<(), String> {
         values.push((index, v.parse::<i32>().map_err(|_| format!("--set {}: not a number", f))?));
     }
     let mut s = Session::open_with(a.rom.clone(), a.save.clone(), a.overlay.clone(), a.data.clone().zip(a.lang.clone()))?;
+    sunpetal_runtime::nds::set_wide(a.wide.unwrap_or(0));
     let tracker = Tracker::install();
     if let Some(d) = &a.text_dir {
         s.use_texts(d, a.watch)?;
@@ -281,6 +286,10 @@ fn run(a: Args) -> Result<(), String> {
     }
     if let Some(p) = &a.shot {
         s.shot(p)?;
+        if a.wide.is_some() {
+            let wide = p.with_file_name(format!("{}_wide.png", p.file_stem().map_or(String::new(), |x| x.to_string_lossy().into_owned())));
+            sunpetal_runtime::nds::screenshot_wide(&wide)?;
+        }
     }
     if a.state || stop.is_some() {
         println!("{}", json!({"state": s.state(), "frame": s.vblank(), "map": s.map(), "value0": s.value(0), "stop": stop}));

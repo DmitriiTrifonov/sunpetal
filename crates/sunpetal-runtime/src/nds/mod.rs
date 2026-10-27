@@ -174,6 +174,10 @@ pub struct Nds {
     texpack: texpack::TexPack,
     /// The 3D picture the rendering engine drew last, 256x192 (`render3d`).
     frame3d: Vec<u32>,
+    /// Pixels the 3D picture has on each side beyond the 256 (a widened view, `set_wide`).
+    frame3d_wide: usize,
+    /// The widening asked for, in DS pixels each side.
+    wide: usize,
     /// The scale it was drawn at.
     frame3d_scale: usize,
     /// The picture's scale: the 3D is drawn, and the screens put together, this many times as large
@@ -253,6 +257,8 @@ impl Nds {
             snd: sound::Sound::new(),
             texpack: texpack::TexPack::new(),
             frame3d: vec![0; 256 * 192],
+            frame3d_wide: 0,
+            wide: 0,
             frame3d_scale: 1,
             scale: 1,
             extras: Extras::default(),
@@ -463,6 +469,20 @@ pub fn set_input(keys: u32, pen: Option<(i32, i32)>) {
 
 /// The picture's scale: the 3D is drawn at 256 x `n` by 192 x `n`, and the screens come out that
 /// large (1-8). Takes effect with the next frame drawn.
+/// Widens the 3D view by this many DS pixels on each side (0: as the DS draws it): the frustum is
+/// opened sideways, so what lies beyond the DS's own picture shows, and `screens_wide` gives the
+/// upper screen that much wider while the 3D is on it. The game decides what it draws: what it cuts
+/// away before the 3D engine does not come back.
+pub fn set_wide(each_side: usize) {
+    nds(|d| {
+        d.wide = each_side.min(WIDE_MAX);
+        d.gx.set_wide(d.wide);
+    });
+}
+
+/// The most the view is widened by, each side (a 2.4:1 window from 4:3).
+pub const WIDE_MAX: usize = 170;
+
 pub fn set_scale(n: usize) {
     nds(|d| d.scale = n.clamp(1, 8));
 }
@@ -511,6 +531,17 @@ pub fn screens_rgba() -> (usize, Vec<u8>) {
     (scale, out)
 }
 
+/// The upper screen widened (`set_wide`) as RGBA: `(scale, each side, picture)`, (256 + 2 * each
+/// side) x scale wide, 192 x scale high; `None` unless the 3D is on the upper screen.
+pub fn upper_wide_rgba() -> Option<(usize, usize, Vec<u8>)> {
+    let (scale, e, rgb) = nds(|n| n.upper_wide_rgb(n.scale).map(|(e, rgb)| (n.scale, e, rgb)))?;
+    let mut out = Vec::with_capacity(rgb.len() / 3 * 4);
+    for p in rgb.chunks_exact(3) {
+        out.extend_from_slice(&[p[0], p[1], p[2], 255]);
+    }
+    Some((scale, e, out))
+}
+
 /// Keep the sound the unit mixes (someone listens): `take_samples` gives it.
 pub fn set_sound_keep(on: bool) {
     nds(|n| n.snd.keep = on);
@@ -533,6 +564,18 @@ pub fn screenshot(path: &std::path::Path) -> Result<(), String> {
     enc.set_depth(png::BitDepth::Eight);
     let mut w = enc.write_header().map_err(|e| e.to_string())?;
     w.write_image_data(&rgb).map_err(|e| e.to_string())
+}
+
+/// The widened upper screen (`upper_wide_rgba`) as a PNG; false if there is none to write.
+pub fn screenshot_wide(path: &std::path::Path) -> Result<bool, String> {
+    let Some((scale, e, rgb)) = nds(|n| n.upper_wide_rgb(n.scale).map(|(e, rgb)| (n.scale, e, rgb))) else { return Ok(false) };
+    let f = std::fs::File::create(path).map_err(|e| format!("{}: {}", path.display(), e))?;
+    let mut enc = png::Encoder::new(std::io::BufWriter::new(f), (256 + 2 * e as u32) * scale as u32, 192 * scale as u32);
+    enc.set_color(png::ColorType::Rgb);
+    enc.set_depth(png::BitDepth::Eight);
+    let mut w = enc.write_header().map_err(|e| e.to_string())?;
+    w.write_image_data(&rgb).map_err(|e| e.to_string())?;
+    Ok(true)
 }
 
 /// Writes both engines' background layers as PNGs into `dir` (see `gpu2d::dump_backgrounds`);

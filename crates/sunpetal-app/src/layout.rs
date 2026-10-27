@@ -200,6 +200,15 @@ pub fn edo_in(scale: usize, rgba: &[u8]) -> bool {
     n > 0 && pink * 100 >= n * 5
 }
 
+/// How many DS pixels the upper screen's 3D view must be wider by on each side for a window of
+/// `win` pixels with pixels `par` wide: the window's shape over the DS's 4:3, in the DS's pixels,
+/// at most `max`; 0 for a window as tall as it is wide or narrower.
+pub fn wide_each_side(win: (f32, f32), par: f32, max: usize) -> usize {
+    let aspect = win.0 / win.1.max(1.0) / par.clamp(0.25, 4.0);
+    let e = ((aspect * 192.0 - 256.0) / 2.0).ceil();
+    if e.is_finite() && e >= 2.0 { (e as usize).min(max) } else { 0 }
+}
+
 /// The title's "Press START" box on the lower screen (a blue box with a white rim on black, the
 /// words in the language of the game): where it is, in the lower screen's pixels, with its rim. The
 /// upper screen has the film at that time; the box is put over it where it is.
@@ -251,6 +260,8 @@ pub struct Live {
     pub edo: bool,
     /// The title's "Press START" box on the lower screen (`prompt_box`).
     pub prompt: Option<Rect>,
+    /// The upper screen is this many DS pixels wider on each side (a widened 3D view).
+    pub wide: f32,
 }
 
 /// Which screen the game wants the player at, from the lower screen's picture: the lower, when it
@@ -277,6 +288,9 @@ pub fn lower_wanted(scale: usize, rgba: &[u8]) -> Option<bool> {
 
 pub fn find(layouts: &[Layout], v: &crate::config::Video, live: &Live) -> Layout {
     let mut l = pick(layouts, v, live);
+    if live.wide > 0.0 {
+        l.widen(live.wide);
+    }
     l.fit = Fit { mode: Mode::from_name(&v.fit), par: v.pixel_aspect };
     l
 }
@@ -335,6 +349,27 @@ impl Layout {
         (kx, ky, (win.0 - self.size.0 * kx) / 2.0, (win.1 - self.size.1 * ky) / 2.0)
     }
 
+    /// The upper screen `e` pixels wider on each side: the layout's space grows with it, what is
+    /// beside the upper screen moves out, what is below it stays in the middle, what lies over it
+    /// keeps its corner, and the patches that lie on it keep their place on the 256 in the middle.
+    pub fn widen(&mut self, e: f32) {
+        let Some(up) = self.screens[0] else { return };
+        let new_up = Rect { w: up.w + 2.0 * e, ..up };
+        if let Some(lo) = self.screens[1] {
+            let right_of = lo.x >= up.x + up.w;
+            let below = lo.x == up.x && lo.w == up.w;
+            self.screens[1] = Some(Rect { x: lo.x + if right_of { 2.0 * e } else if below { e } else { 2.0 * e }, ..lo });
+        }
+        self.screens[0] = Some(new_up);
+        self.size.0 += 2.0 * e;
+        // a patch on the upper screen lies on the middle 256
+        for p in &mut self.patches {
+            if p.dst.x >= up.x && p.dst.x < up.x + up.w && p.dst.y >= up.y && p.dst.y < up.y + up.h && self.screens[1].map_or(true, |lo| p.dst.y < lo.y || p.dst.x < lo.x) {
+                p.dst.x += e;
+            }
+        }
+    }
+
     /// A rectangle of the layout's space fitted into the window like the screens.
     pub fn fit_rect(&self, win: (f32, f32), r: Rect) -> Rect {
         let (kx, ky, ox, oy) = self.placing(win);
@@ -375,7 +410,7 @@ mod tests {
     }
 
     fn live(vblank: u64, counter_seen: bool) -> Live {
-        Live { vblank, counter_seen, lower: false, edo: false, prompt: None }
+        Live { vblank, counter_seen, lower: false, edo: false, prompt: None, wide: 0.0 }
     }
 
     #[test]
@@ -535,6 +570,48 @@ mod tests {
         // not when the lower screen is the one shown, or both
         assert!(find(&all, &video("single", true, false, false), &live).patches.is_empty());
         assert!(find(&all, &video("stacked", false, false, false), &live).patches.is_empty());
+    }
+
+    #[test]
+    fn widening_the_upper_screen_moves_the_rest_out_of_its_way() {
+        // stacked: the lower screen stays in the middle under the wider upper one
+        let mut l = stacked();
+        l.widen(64.0);
+        assert_eq!(l.size, (384.0, 384.0));
+        assert_eq!(l.screens[0].unwrap(), Rect { x: 0.0, y: 0.0, w: 384.0, h: 192.0 });
+        assert_eq!(l.screens[1].unwrap(), Rect { x: 64.0, y: 192.0, w: 256.0, h: 192.0 });
+        // side by side: the lower screen goes to the right of the wider one
+        let mut l = side_by_side();
+        l.widen(64.0);
+        assert_eq!((l.size.0, l.screens[1].unwrap().x), (640.0, 384.0));
+        // the upper alone: just wider; the lower alone: untouched
+        let mut l = top_only();
+        l.widen(64.0);
+        assert_eq!(l.size, (384.0, 192.0));
+        let mut l = bottom_only();
+        l.widen(64.0);
+        assert_eq!(l.size, (256.0, 192.0));
+        // the panel keeps the corner, and a patch on the upper screen the 256 in the middle
+        let mut l = overlay(true);
+        l.patches.push(counter_patch());
+        l.widen(64.0);
+        let (up, panel) = (l.screens[0].unwrap(), l.screens[1].unwrap());
+        assert!((up.x + up.w) - (panel.x + panel.w) < 7.0);
+        assert_eq!(l.patches[0].dst.x, counter_patch().dst.x + 64.0);
+    }
+
+    #[test]
+    fn the_window_shape_asks_for_the_width() {
+        // 4:3, taller, a hair wider: none
+        assert_eq!(wide_each_side((1024.0, 768.0), 1.0, 170), 0);
+        assert_eq!(wide_each_side((500.0, 700.0), 1.0, 170), 0);
+        assert_eq!(wide_each_side((1030.0, 768.0), 1.0, 170), 0);
+        // 16:9: 192 * 16 / 9 = 341.3 pixels, 43 more each side
+        assert_eq!(wide_each_side((1280.0, 720.0), 1.0, 170), 43);
+        // a wider pixel needs less
+        assert!(wide_each_side((1280.0, 720.0), 1.33, 170) < 5);
+        // very wide: held at the most
+        assert_eq!(wide_each_side((4000.0, 500.0), 1.0, 170), 170);
     }
 
     #[test]

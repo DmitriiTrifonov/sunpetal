@@ -131,6 +131,8 @@ struct App {
     edo_seen: bool,
     /// The title's "Press START" box (`layout::prompt_box`).
     prompt: Option<layout::Rect>,
+    /// How many pixels the upper screen of the last picture is wider by each side (0: not wide).
+    wide_now: usize,
     /// The colour for the bars (`layout::edge_color`), from the last picture.
     bar_color: Option<[f32; 3]>,
     /// The screen the picture wants (`layout::lower_wanted`) and for how many frames it has wanted it.
@@ -147,7 +149,7 @@ impl App {
     }
 
     fn live(&self) -> layout::Live {
-        layout::Live { vblank: self.shared.vblank.load(Ordering::Relaxed), counter_seen: self.counter_seen, lower: self.auto_lower || self.hold.is_some(), edo: self.edo_seen, prompt: self.prompt }
+        layout::Live { vblank: self.shared.vblank.load(Ordering::Relaxed), counter_seen: self.counter_seen, lower: self.auto_lower || self.hold.is_some(), edo: self.edo_seen, prompt: self.prompt, wide: self.wide_now as f32 }
     }
 
     /// Swaps the screen shown in the single layout; from another layout, goes into it.
@@ -565,6 +567,14 @@ impl ApplicationHandler for App {
                 }
                 if let (Some((scale, rgba)), Some(g)) = (frame, &mut self.gfx) {
                     g.upload(scale, &rgba);
+                    // the 3D scene widened, when the emulation made one for this picture
+                    match self.shared.wide_frame.lock().unwrap().take() {
+                        Some((sc, e, px)) => {
+                            g.upload_wide(sc, e, &px);
+                            self.wide_now = e;
+                        }
+                        None => self.wide_now = 0,
+                    }
                 }
                 // the picture goes dark for a skip and comes back after it
                 let target = if self.shared.skip.load(Ordering::Relaxed) { 1.0 } else { 0.0 };
@@ -572,11 +582,20 @@ impl ApplicationHandler for App {
                 let fade = self.skip_fade;
                 let mut action = None;
                 {
-                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, edo_seen, prompt, bar_color, auto_lower, hold, .. } = self;
-                    let live = layout::Live { vblank: shared.vblank.load(Ordering::Relaxed), counter_seen: *counter_seen, lower: *auto_lower || hold.is_some(), edo: *edo_seen, prompt: *prompt };
+                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, edo_seen, prompt, bar_color, auto_lower, hold, wide_now, .. } = self;
+                    let live = layout::Live { vblank: shared.vblank.load(Ordering::Relaxed), counter_seen: *counter_seen, lower: *auto_lower || hold.is_some(), edo: *edo_seen, prompt: *prompt, wide: *wide_now as f32 };
                     if let Some(g) = gfx {
                         let layout = layout::find(layouts, &settings.video, &live);
                         g.bar_color = *bar_color;
+                        // the 3D view is widened to the window's shape when the upper screen is alone
+                        let base = layout::find(layouts, &settings.video, &layout::Live { wide: 0.0, ..live });
+                        let upper_alone = base.screens[0].is_some() && (base.screens[1].is_none() || base.name == "overlay");
+                        let want = if settings.video.wide && upper_alone {
+                            layout::wide_each_side(g.size(), settings.video.pixel_aspect, sunpetal_runtime::nds::WIDE_MAX)
+                        } else {
+                            0
+                        };
+                        shared.wide_px.store(want, Ordering::Relaxed);
                         let names: Vec<&str> = layouts.iter().map(|l| l.name).collect();
                         let fx = settings.effects.clone();
                         let internal = (256 * settings.video.res as u32, 192 * settings.video.res as u32);
@@ -755,6 +774,7 @@ pub fn run(o: Options, el: EventLoop<()>) {
         counter_seen: false,
         edo_seen: false,
         prompt: None,
+        wide_now: 0,
         bar_color: None,
         want: (false, 0),
         auto_lower: false,

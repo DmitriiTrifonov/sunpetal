@@ -221,6 +221,8 @@ pub(super) struct Gx {
     prim: i32,
     /// x1, y1 (top), x2, y2 (bottom), as the screen counts.
     viewport: [u8; 4],
+    /// Pixels the view is widened by each side (`nds::set_wide`).
+    wide: usize,
     // lighting
     light_vec: [[i32; 3]; 4],
     light_col: [[u8; 3]; 4],
@@ -257,6 +259,10 @@ pub(super) struct Gx {
 }
 
 impl Gx {
+    pub(super) fn set_wide(&mut self, each_side: usize) {
+        self.wide = each_side;
+    }
+
     pub(super) fn new() -> Gx {
         Gx {
             regs: vec![0; 0x400],
@@ -286,6 +292,7 @@ impl Gx {
             pltt_base: 0,
             prim: -1,
             viewport: [0, 0, 255, 191],
+            wide: 0,
             light_vec: [[0; 3]; 4],
             light_col: [[0; 3]; 4],
             diffuse: [0; 3],
@@ -425,6 +432,13 @@ impl Gx {
         }
         let mut v = [V::default(); 10];
         v[..n].copy_from_slice(&inp[..n]);
+        // a widened view: x is taken in a frustum that much wider, so the clipping lets the sides in
+        let big_w = 256 + 2 * self.wide as i64;
+        if self.wide > 0 {
+            for x in &mut v[..n] {
+                x.p[0] = (x.p[0] as i64 * 256 / big_w) as i32;
+            }
+        }
         if attr & 0x1000 == 0 && v[..n].iter().any(|x| x.p[2] > x.p[3]) {
             return false; // past the far plane, and not to be drawn cut
         }
@@ -453,7 +467,11 @@ impl Gx {
             sortkey: 0,
         };
         let (vx, vy) = (self.viewport[0] as i64, self.viewport[1] as i64);
-        let vw = ((self.viewport[2] as i64 - self.viewport[0] as i64 + 1) & 0x1FF) as i64;
+        let vw0 = ((self.viewport[2] as i64 - self.viewport[0] as i64 + 1) & 0x1FF) as i64;
+        // widened: the viewport as wide again as the frustum; the picture keeps its place, with the
+        // new columns each side of it
+        let vw = vw0 * big_w / 256;
+        let vx = vx + self.wide as i64 - (vw - vw0) / 2;
         let vh = ((self.viewport[3] as i64 - self.viewport[1] as i64 + 1) & 0xFF) as i64;
         let (mut ytop, mut ybot) = (192i32, 0i32);
         for x in &v[..n] {
@@ -1140,6 +1158,7 @@ impl Nds {
             polys,
             wbuffer: g.render_wbuf,
             disp3dcnt: self.io_reg16(9, 0x0400_0060),
+            width: 256 + 2 * g.wide,
             clear_color: reg32(0x350 - 0x320),
             clear_depth: self.gx_r16(0x0400_0354) & 0x7FFF,
             clrimage_offset: self.gx_r16(0x0400_0356),
@@ -1165,6 +1184,7 @@ impl Nds {
             }
         }
         let (px, notes) = super::render3d::render(&job, self.scale);
+        self.frame3d_wide = (job.width - 256) / 2;
         self.frame3d_scale = self.scale;
         self.frame3d = px;
         for (s, text) in super::render3d::NOTE.iter().enumerate() {

@@ -77,6 +77,11 @@ pub struct Shared {
     /// A click (a tap) came while the logos were on: run on, without waiting or sound, until they end.
     pub logo_click: AtomicBool,
     pub quit: AtomicBool,
+    /// How many DS pixels the 3D view is widened by each side (the window's shape asks, 0: none),
+    /// and the upper screen so widened with its scale and that width (set by the emulation with the
+    /// picture, `None` when the 3D is not on it).
+    pub wide_px: AtomicUsize,
+    pub wide_frame: Mutex<Option<(usize, usize, Vec<u8>)>>,
     /// The DS frame the machine is at (set by the emulation each frame).
     pub vblank: AtomicU64,
     /// Run without waiting for the clock.
@@ -118,6 +123,8 @@ impl Shared {
             logo_click: AtomicBool::new(false),
             quit: AtomicBool::new(false),
             vblank: AtomicU64::new(0),
+            wide_px: AtomicUsize::new(0),
+            wide_frame: Mutex::new(None),
             fast: AtomicBool::new(false),
             skip: AtomicBool::new(false),
             dialogue: AtomicBool::new(false),
@@ -159,6 +166,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     let (mut still, mut skipped, mut last_print, mut idle_for, mut wait_for) = (0u32, 0u32, 0u64, 0u32, 0u32);
     let (mut step, mut no_step) = ((0u32, 0u32), 0u32);
     let mut racing;
+    let mut last_e = usize::MAX;
     while !shared.quit.load(Ordering::Relaxed) {
         if shared.paused.load(Ordering::Relaxed) {
             std::thread::sleep(Duration::from_millis(10));
@@ -179,6 +187,11 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         let notice = nds::vblanks() < NOTICE_END_VBLANKS;
         let skipping_now = shared.skip.load(Ordering::Relaxed) || racing || notice;
         let draw = !notice && !(skipping_now && shared.marks.load(Ordering::Relaxed));
+        let want_e = shared.wide_px.load(Ordering::Relaxed);
+        if want_e != last_e {
+            nds::set_wide(want_e);
+            last_e = want_e;
+        }
         nds::set_scale(if skipping_now { 1 } else { shared.scale.load(Ordering::Relaxed) });
         nds::set_extras(*shared.extras.lock().unwrap());
         nds::set_draw(draw);
@@ -202,6 +215,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
                 last_print = print;
             }
             *shared.frame.lock().unwrap() = Some(picture);
+            *shared.wide_frame.lock().unwrap() = if want_e > 0 { nds::upper_wide_rgba() } else { None };
         }
         if skipping {
             skipped += 1;

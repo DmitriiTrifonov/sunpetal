@@ -268,7 +268,9 @@ impl Nds {
         self.set_vram_stat7(stat7);
         self.gpu = super::gpu2d::Gpu2d::new();
         self.gx = super::gx::Gx::new();
+        self.gx.set_wide(self.wide);
         self.frame3d = vec![0; 256 * 192];
+        self.frame3d_wide = 0;
         self.frame3d_scale = 1;
         self.gpu2d_line(0);
     }

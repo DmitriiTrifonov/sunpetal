@@ -65,6 +65,8 @@ pub(super) struct Job {
     /// SWAP_BUFFERS bit 1: depth is w.
     pub wbuffer: bool,
     pub disp3dcnt: u16,
+    /// The picture's width in DS pixels: 256, or more when the view is widened (`Nds::wide`).
+    pub width: usize,
     /// CLEAR_COLOR: colour, fog bit, alpha, polygon ID.
     pub clear_color: u32,
     pub clear_depth: u16,
@@ -274,7 +276,7 @@ fn edge(a: (f32, f32), b: (f32, f32), p: (f32, f32)) -> f32 {
 /// from slot 3, 256 x 256 starting at CLRIMAGE_OFFSET and wrapping; it replaces the clear colour
 /// and depth where the picture has nothing nearer.
 fn rear_plane(job: &Job, t: &mut Target, s: usize, ya: usize, yb: usize) {
-    let (w, ox, oy) = (256 * s, (job.clrimage_offset & 0xFF) as usize, (job.clrimage_offset >> 8) as usize);
+    let (w, ox, oy) = (job.width * s, (job.clrimage_offset & 0xFF) as usize, (job.clrimage_offset >> 8) as usize);
     let cid = ((job.clear_color >> 24) & 63) as u8;
     let rd = |base: usize, x: usize, y: usize| -> u16 {
         let o = base + (y * 256 + x) * 2;
@@ -352,7 +354,7 @@ fn raster(job: &Job, verts: &[GxVertex], s: usize, ya: usize, yb: usize) -> Targ
     let (cr, cg, cb) = rgb555((cc & 0x7FFF) as u16);
     let calpha = ((cc >> 16) & 31) as u8;
     let cid = ((cc >> 24) & 63) as u8;
-    let (w, h) = (256 * s, 192 * s);
+    let (w, h) = (job.width * s, 192 * s);
     let n = w * (yb - ya);
     let mut t = Target {
         color: vec![cr | cg << 6 | cb << 12; n],
@@ -714,7 +716,7 @@ fn shade_pass(strength: f32, radius: f32, t: &Target, w: usize, h: usize, s: usi
 pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
     let mut notes = 0u32;
     let s = scale.max(1);
-    let (w, h) = (256 * s, 192 * s);
+    let (w, h) = (job.width * s, 192 * s);
     let n = w * h;
     let sc = s as f32;
     let verts: Vec<GxVertex> = job.verts.iter().map(|v| GxVertex { sx: v.sx * sc, sy: v.sy * sc, ..*v }).collect();
@@ -789,6 +791,7 @@ mod tests {
             polys: vec![],
             wbuffer: false,
             disp3dcnt: 0,
+            width: 256,
             clear_color: 31 << 16,
             clear_depth: 0x7FFF,
             clrimage_offset: 0,
@@ -808,7 +811,7 @@ mod tests {
 
     /// A job like `j` (the fields the fog reads).
     fn empty_job_with(j: &Job) -> Job {
-        Job { fog_table: j.fog_table, disp3dcnt: j.disp3dcnt, ..empty_job() }
+        Job { fog_table: j.fog_table, disp3dcnt: j.disp3dcnt, width: j.width, ..empty_job() }
     }
 
     fn pixel(c555: u16, alpha: u32) -> u32 {

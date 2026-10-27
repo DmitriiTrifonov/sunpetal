@@ -768,7 +768,10 @@ impl Nds {
         let mut rgb = vec![0u8; w * 2 * h3 * 3];
         let a_top = self.gpu2d_top_is_a();
         let f3 = self.frame3d_scale.max(1);
-        let w3 = 256 * f3;
+        // the 3D picture may be wider than the screen: the middle of it is the screen
+        let e3 = self.frame3d_wide;
+        let w3 = (256 + 2 * e3) * f3;
+        let c3 = e3 * f3;
         let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(8);
         // rows of the picture, split across threads
         let rows_per = (2 * h3).div_ceil(threads);
@@ -782,7 +785,7 @@ impl Nds {
                         let (y2, y3) = (y / s, y * f3 / s);
                         for x in 0..w {
                             let i = Gpu2d::at(e, y2) + 2 * (x / s);
-                            let p3 = if e == 0 { self.frame3d[y3 * w3 + x * f3 / s] } else { 0 };
+                            let p3 = if e == 0 { self.frame3d[y3 * w3 + c3 + x * f3 / s] } else { 0 };
                             let c = compose(&self.gpu.px[i..i + 2], p3);
                             row[3 * x] = (c >> 16) as u8;
                             row[3 * x + 1] = (c >> 8) as u8;
@@ -793,6 +796,46 @@ impl Nds {
             }
         });
         rgb
+    }
+}
+
+impl Nds {
+    /// The upper screen alone, wider than the DS's own while the 3D is on it: `(each side, RGB at
+    /// scale)`, (256 + 2 * each side) x scale by 192 x scale. The 2D layers are as they are in the
+    /// middle and their edge columns run on to the sides (a rule, a panel); the 3D is the widened
+    /// picture. `None` when the 3D is not on the upper screen or the view is not widened.
+    pub(crate) fn upper_wide_rgb(&self, scale: usize) -> Option<(usize, Vec<u8>)> {
+        let e3 = self.frame3d_wide;
+        let a_top = self.gpu2d_top_is_a();
+        if e3 == 0 || !a_top || self.io_reg16(9, 0x0400_0000) & 8 == 0 {
+            return None;
+        }
+        let s = scale.max(1);
+        let (f3, w3) = (self.frame3d_scale.max(1), (256 + 2 * e3) * self.frame3d_scale.max(1));
+        let (w, h) = ((256 + 2 * e3) * s, 192 * s);
+        let mut rgb = vec![0u8; w * h * 3];
+        let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(8);
+        let rows_per = h.div_ceil(threads);
+        std::thread::scope(|sc| {
+            for (k, chunk) in rgb.chunks_mut(rows_per * w * 3).enumerate() {
+                sc.spawn(move || {
+                    for (r, row) in chunk.chunks_mut(w * 3).enumerate() {
+                        let y = k * rows_per + r;
+                        let (y2, y3) = (y / s, y * f3 / s);
+                        for x in 0..w {
+                            // the 2D layers at the nearest column of the screen's own 256
+                            let x2 = (x / s).saturating_sub(e3).min(255);
+                            let i = Gpu2d::at(0, y2) + 2 * x2;
+                            let c = compose(&self.gpu.px[i..i + 2], self.frame3d[y3 * w3 + x * f3 / s]);
+                            row[3 * x] = (c >> 16) as u8;
+                            row[3 * x + 1] = (c >> 8) as u8;
+                            row[3 * x + 2] = c as u8;
+                        }
+                    }
+                });
+            }
+        });
+        Some((e3, rgb))
     }
 }
 

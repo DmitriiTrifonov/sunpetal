@@ -52,7 +52,7 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
     var c = textureSample(tex, samp, uv).rgb;
     // the DS's own pixels and lines, only where the window has room to show them
     let room = clamp(q.dims.z - 1.0, 0.0, 1.0);
-    let fr = fract(in.uv * vec2<f32>(256.0, 192.0));
+    let fr = fract(in.uv * ts / (ts.y / 192.0));
     let line = 0.5 + 0.5 * cos((fr.y - 0.5) * 6.2831853);
     c = c * (1.0 - q.fx.x * room * (1.0 - line));
     let e = min(min(fr.x, 1.0 - fr.x), min(fr.y, 1.0 - fr.y));
@@ -124,6 +124,11 @@ pub struct Gfx {
     pub background: bool,
     /// The colour the picture's edges all have (a logo on white): the bars take it, no glow.
     pub bar_color: Option<[f32; 3]>,
+    /// The widened upper screen (3D with the view opened sideways), its scale and how many pixels
+    /// it has beyond the 256 on each side.
+    wide_screen: Option<(Screen, usize, usize)>,
+    /// The upper screen is drawn from `wide_screen` (set by `upload_wide`, cleared by `upload`).
+    pub wide_e: usize,
     pub linear: bool,
     /// Pixels kept free at the bottom of the window (the touch controls' band).
     pub reserve: f32,
@@ -302,7 +307,7 @@ impl Gfx {
         );
         let egui_renderer = egui_wgpu::Renderer::new(&device, format, egui_wgpu::RendererOptions::default());
         let post_kit = post::Kit::new(&device, format);
-        Ok(Gfx { window: w, egui_ctx, egui_state, egui_renderer, bgl, nearest, linear_sampler: linear, scale: 1, surface, device, queue, config, pipeline, post_kit, post: None, screens, glow, glow_grid: vec![0.0; GLOW_W * GLOW_H * 3], background: true, bar_color: None, linear: true, reserve: 0.0 })
+        Ok(Gfx { window: w, egui_ctx, egui_state, egui_renderer, bgl, nearest, linear_sampler: linear, scale: 1, surface, device, queue, config, pipeline, post_kit, post: None, screens, glow, glow_grid: vec![0.0; GLOW_W * GLOW_H * 3], background: true, bar_color: None, wide_screen: None, wide_e: 0, linear: true, reserve: 0.0 })
     }
 
     pub fn resize(&mut self, w: u32, h: u32) {
@@ -327,6 +332,7 @@ impl Gfx {
     /// Uploads a picture at `scale` (both screens, RGBA, the upper first); the textures are made
     /// again when the scale changes.
     pub fn upload(&mut self, scale: usize, rgba: &[u8]) {
+        self.wide_e = 0;
         if scale != self.scale {
             self.scale = scale;
             self.screens = [
@@ -344,6 +350,28 @@ impl Gfx {
                 wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(w * 4), rows_per_image: Some(h) },
                 wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
             );
+        }
+    }
+
+    /// Uploads the widened upper screen (`(256 + 2 * e) * scale` by `192 * scale`, RGBA); the upper
+    /// screen is drawn from it until the next `upload`.
+    pub fn upload_wide(&mut self, scale: usize, e: usize, rgba: &[u8]) {
+        let (w, h) = ((256 + 2 * e as u32) * scale as u32, 192 * scale as u32);
+        if rgba.len() < (w * h * 4) as usize {
+            return;
+        }
+        if self.wide_screen.as_ref().map_or(true, |(_, s, ee)| (*s, *ee) != (scale, e)) {
+            let s = make_texture(&self.device, &self.bgl, &self.nearest, &self.linear_sampler, w, h, "upper wide");
+            self.wide_screen = Some((s, scale, e));
+        }
+        if let Some((s, _, _)) = &self.wide_screen {
+            self.queue.write_texture(
+                s.texture.as_image_copy(),
+                &rgba[..(w * h * 4) as usize],
+                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(w * 4), rows_per_image: Some(h) },
+                wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            );
+            self.wide_e = e;
         }
     }
 
@@ -408,13 +436,18 @@ impl Gfx {
         };
         let (w, h) = self.window_size();
         let rects = layout.fit(self.size());
-        for (s, r) in self.screens.iter().zip(rects.iter()) {
+        let wide = self.wide_screen.as_ref().filter(|_| self.wide_e > 0);
+        let pick = |i: usize| -> &Screen { if i == 0 { wide.map_or(&self.screens[0], |w| &w.0) } else { &self.screens[1] } };
+        let upper_w = 256.0 + 2.0 * if wide.is_some() { self.wide_e as f32 } else { 0.0 };
+        for (i, r) in rects.iter().enumerate() {
+            let s = pick(i);
+            let cols = if i == 0 { upper_w } else { 256.0 };
             if let Some(r) = r {
                 let q = Quad {
                     rect: [r.x / w * 2.0 - 1.0, 1.0 - r.y / h * 2.0, (r.x + r.w) / w * 2.0 - 1.0, 1.0 - (r.y + r.h) / h * 2.0],
                     fx: [fx.scanlines, fx.grid, fx.vignette, if fx.sharp { 1.0 } else { 0.0 }],
                     color: [fx.saturation, fx.contrast, fx.brightness, fx.gamma],
-                    dims: [256.0 * self.scale as f32, 192.0 * self.scale as f32, r.w / 256.0, 0.0],
+                    dims: [cols * self.scale as f32, 192.0 * self.scale as f32, r.w / cols, 0.0],
                     uvr: WHOLE,
                 };
                 self.queue.write_buffer(&s.uniform, 0, bytemuck::bytes_of(&q));
@@ -475,8 +508,9 @@ impl Gfx {
                 pass.set_bind_group(0, &self.glow.bind_linear, &[]);
                 pass.draw(0..4, 0..1);
             }
-            for (s, r) in self.screens.iter().zip(rects.iter()) {
+            for (i, r) in rects.iter().enumerate() {
                 if r.is_some() {
+                    let s = pick(i);
                     pass.set_bind_group(0, if self.linear { &s.bind_linear } else { &s.bind_nearest }, &[]);
                     pass.draw(0..4, 0..1);
                 }
