@@ -582,7 +582,7 @@ impl ApplicationHandler for App {
                 if let Some((scale, rgba)) = &frame {
                     self.dial_scene = dial::recognise(*scale, rgba);
                     self.counter_seen = layout::counter_in(*scale, rgba);
-                    self.edo_seen = layout::edo_in(*scale, rgba);
+                    self.edo_seen = layout::edo_in(*scale, rgba) && !layout::edo_title_in_hint(*scale, rgba);
                     self.prompt = layout::prompt_box(*scale, rgba);
                     let paper = layout::paper_in(*scale, rgba);
                     if paper && !self.paper {

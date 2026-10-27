@@ -189,6 +189,21 @@ pub fn edo_patch() -> Patch {
     Patch { screen: 0, src: Rect { x: 106.0, y: 80.0, w: 148.0, h: 60.0 }, dst: Rect { x: 106.0, y: 130.0, w: 148.0, h: 60.0 }, pinned: false }
 }
 
+/// Whether the pink of the title ("Hello!! SAVE DATA") reaches into the hint's place on the upper screen (the
+/// title moves in the confirmation screens): a cut of that place would show the lower edge of its letters.
+pub fn edo_title_in_hint(scale: usize, rgba: &[u8]) -> bool {
+    let (w, s) = (256 * scale, edo_patch().src);
+    let (mut n, mut pink) = (0usize, 0usize);
+    for y in (s.y as usize * scale..(s.y + s.h) as usize * scale).step_by(scale.max(1)) {
+        for x in (s.x as usize * scale..(s.x + s.w) as usize * scale).step_by(scale.max(1)) {
+            let Some(p) = rgba.get((y * w + x) * 4..(y * w + x) * 4 + 3) else { return false };
+            n += 1;
+            pink += (p[0] > 200 && p[1] < 90 && p[2] > 70 && p[2] < 200) as usize;
+        }
+    }
+    n > 0 && pink * 1000 >= n * 3
+}
+
 /// Whether the upper screen is one of Edo's (the pink title "Hello!! SAVE DATA" in its top band).
 pub fn edo_in(scale: usize, rgba: &[u8]) -> bool {
     let w = 256 * scale;
