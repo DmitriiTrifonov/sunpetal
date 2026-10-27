@@ -71,6 +71,9 @@ impl Menu {
                         ui.selectable_value(&mut s.video.lower, true, tx("lower (touch)", "нижний (касание)"));
                     });
                 }
+                if s.video.layout == "overlay" {
+                    ui.checkbox(&mut s.video.panel, tx("Lower screen as a panel (F8)", "Нижний экран панелью (F8)"));
+                }
                 egui::ComboBox::from_label(tx("Background", "Подложка")).selected_text(match s.video.background.as_str() {
                     "black" => tx("black", "чёрная"),
                     _ => tx("glow of the picture", "свечение картинки"),
@@ -261,6 +264,7 @@ pub fn layout_label(id: &str, lang: Lang) -> &str {
         ("stacked", Lang::Ru) => "друг под другом",
         ("side by side", Lang::Ru) => "рядом",
         ("single", Lang::Ru) => "один экран",
+        ("overlay", Lang::Ru) => "один экран и панель",
         ("upper only", Lang::Ru) => "только верхний",
         ("lower only", Lang::Ru) => "только нижний",
         (other, _) => other,

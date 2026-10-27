@@ -48,14 +48,31 @@ pub fn single(lower: bool) -> Layout {
     Layout { name: "single", size: (256.0, 192.0), screens: if lower { [None, Some(r(0.0, 0.0))] } else { [Some(r(0.0, 0.0)), None] } }
 }
 
-pub fn all() -> Vec<Layout> {
-    vec![stacked(), side_by_side(), single(false), top_only(), bottom_only()]
+/// The upper screen, and the lower one as a panel in the corner over it while `panel` is open (as
+/// the PS2 version shows its device: docs/RECON-SCREENS.md). The lower screen is drawn after the
+/// upper, so it is on top; touches land on the panel.
+pub fn overlay(panel: bool) -> Layout {
+    let (w, h) = (256.0 * PANEL, 192.0 * PANEL);
+    let lower = Rect { x: 256.0 - w - PANEL_GAP, y: 192.0 - h - PANEL_GAP, w, h };
+    Layout { name: "overlay", size: (256.0, 192.0), screens: [Some(r(0.0, 0.0)), panel.then_some(lower)] }
 }
 
-/// The layout a setting names; `single` shows the lower screen if `lower`.
-pub fn find(layouts: &[Layout], name: &str, lower: bool) -> Layout {
+/// The panel's size as a part of a screen, and its gap to the corner, in screen pixels.
+const PANEL: f32 = 0.6;
+const PANEL_GAP: f32 = 6.0;
+
+pub fn all() -> Vec<Layout> {
+    vec![stacked(), side_by_side(), single(false), overlay(false), top_only(), bottom_only()]
+}
+
+/// The layout a setting names; `single` shows the lower screen if `lower`, `overlay` the panel if
+/// `panel`.
+pub fn find(layouts: &[Layout], name: &str, lower: bool, panel: bool) -> Layout {
     if name == "single" {
         return single(lower);
+    }
+    if name == "overlay" {
+        return overlay(panel);
     }
     layouts.iter().find(|l| l.name == name).unwrap_or(&layouts[0]).clone()
 }
@@ -101,12 +118,31 @@ mod tests {
     #[test]
     fn the_single_layout_shows_the_screen_picked() {
         let all = all();
-        assert_eq!(find(&all, "single", false).screens.map(|s| s.is_some()), [true, false]);
-        assert_eq!(find(&all, "single", true).screens.map(|s| s.is_some()), [false, true]);
-        assert_eq!(find(&all, "nonsense", true).name, "stacked");
+        assert_eq!(find(&all, "single", false, false).screens.map(|s| s.is_some()), [true, false]);
+        assert_eq!(find(&all, "single", true, false).screens.map(|s| s.is_some()), [false, true]);
+        assert_eq!(find(&all, "nonsense", true, true).name, "stacked");
         // the picked lower screen takes touch
         assert!(single(true).touch((256.0, 192.0), (10.0, 10.0), false).is_some());
         assert!(single(false).touch((256.0, 192.0), (10.0, 10.0), false).is_none());
+    }
+
+    #[test]
+    fn the_panel_sits_in_the_corner_and_takes_the_touch() {
+        assert_eq!(overlay(false).screens.map(|s| s.is_some()), [true, false]);
+        let l = overlay(true);
+        let win = (512.0, 384.0);
+        let [up, panel] = l.fit(win);
+        let (up, panel) = (up.unwrap(), panel.unwrap());
+        assert_eq!((up.w, up.h), (512.0, 384.0));
+        // in the lower right corner, inside the window, smaller than the upper screen
+        assert!(panel.x + panel.w < 512.0 && panel.y + panel.h < 384.0 && panel.x > 512.0 * 0.3 && panel.y > 384.0 * 0.3);
+        assert!(panel.w < up.w);
+        // the panel's middle is the lower screen's middle; the rest of the window is no touch
+        let mid = (panel.x + panel.w / 2.0, panel.y + panel.h / 2.0);
+        let (x, y) = l.touch(win, mid, false).unwrap();
+        assert!((127..=128).contains(&x) && (95..=96).contains(&y));
+        assert_eq!(l.touch(win, (10.0, 10.0), false), None);
+        assert_eq!(overlay(false).touch(win, mid, false), None);
     }
 
     #[test]

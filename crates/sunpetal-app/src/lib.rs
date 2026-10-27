@@ -4,7 +4,7 @@
 //!     sunpetal-app ROM.nds [--out DIR] [--save FILE] [--mute] [--res N] [--menu]
 //!                          [--dump-textures DIR] [--texture-pack DIR]
 //!
-//! F1 or Esc: the settings menu (video, sound, keys, profiles). Hotkeys: F2 changes the layout, F8 the screen shown in the single layout, F3
+//! F1 or Esc: the settings menu (video, sound, keys, profiles). Hotkeys: F2 changes the layout, F8 the screen shown in the single layout (or the panel of the overlay one), F3
 //! the filter, F4 and F5 the 3D's internal resolution (1-8 times the DS's), F11 full screen, Tab
 //! (held) runs without waiting for the clock. The keys of the DS's buttons are set in the menu
 //! (default: arrows = D-pad, Z = A, X = B, S = X, A = Y, Q = L, W = R, Enter = START, Backspace =
@@ -101,12 +101,14 @@ struct App {
 
 impl App {
     fn layout(&self) -> layout::Layout {
-        layout::find(&self.layouts, &self.settings.video.layout, self.settings.video.lower)
+        layout::find(&self.layouts, &self.settings.video.layout, self.settings.video.lower, self.settings.video.panel)
     }
 
     /// Swaps the screen shown in the single layout; from another layout, goes into it.
     fn swap_screen(&mut self) {
-        if self.settings.video.layout == "single" {
+        if self.settings.video.layout == "overlay" {
+            self.settings.video.panel = !self.settings.video.panel;
+        } else if self.settings.video.layout == "single" {
             self.settings.video.lower = !self.settings.video.lower;
         } else {
             self.settings.video.layout = "single".into();
@@ -477,7 +479,7 @@ impl ApplicationHandler for App {
                 {
                     let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, .. } = self;
                     if let Some(g) = gfx {
-                        let layout = layout::find(layouts, &settings.video.layout, settings.video.lower);
+                        let layout = layout::find(layouts, &settings.video.layout, settings.video.lower, settings.video.panel);
                         let names: Vec<&str> = layouts.iter().map(|l| l.name).collect();
                         let fx = settings.effects.clone();
                         let internal = (256 * settings.video.res as u32, 192 * settings.video.res as u32);
@@ -530,6 +532,7 @@ impl ApplicationHandler for App {
                 if self.settings != self.applied {
                     let layout_changed = self.settings.video.layout != self.applied.video.layout
                         || self.settings.video.lower != self.applied.video.lower
+                        || self.settings.video.panel != self.applied.video.panel
                         || self.settings.video.res != self.applied.video.res
                         || self.settings.interface.language != self.applied.interface.language;
                     self.apply();
