@@ -546,6 +546,8 @@ pub struct Options {
     pub menu: bool,
     pub dump: Option<PathBuf>,
     pub pack: Option<PathBuf>,
+    /// The game language for this run (`--lang ru`; `--lang none`: the ROM's own text), over the setting.
+    pub lang: Option<String>,
 }
 
 /// Runs the game in a window until it closes.
@@ -554,6 +556,9 @@ pub fn run(o: Options, el: EventLoop<()>) {
     let mut settings = config::load();
     if let Some(r) = o.res {
         settings.video.res = r.clamp(1, 8);
+    }
+    if let Some(l) = o.lang {
+        settings.game.language = if l == "none" { String::new() } else { l };
     }
     let mut cfg = Config::new(&rom);
     cfg.out = o.out.unwrap_or_else(|| rom.parent().map(|p| p.to_path_buf()).unwrap_or_default());
@@ -639,7 +644,7 @@ pub fn run(o: Options, el: EventLoop<()>) {
 pub fn desktop_main() {
     let mut args = std::env::args().skip(1);
     let mut rom: Option<PathBuf> = None;
-    let mut o = Options { rom: PathBuf::new(), out: None, save: None, mute: false, res: None, menu: false, dump: None, pack: None };
+    let mut o = Options { rom: PathBuf::new(), out: None, save: None, mute: false, res: None, menu: false, dump: None, pack: None, lang: None };
     while let Some(a) = args.next() {
         match a.as_str() {
             "--out" => o.out = args.next().map(PathBuf::from),
@@ -651,6 +656,7 @@ pub fn desktop_main() {
             "--menu" => o.menu = true,
             "--dump-textures" => o.dump = args.next().map(PathBuf::from),
             "--texture-pack" => o.pack = args.next().map(PathBuf::from),
+            "--lang" => o.lang = args.next(),
             _ if rom.is_none() => rom = Some(PathBuf::from(a)),
             _ => {
                 eprintln!("unknown argument {}", a);
@@ -659,7 +665,7 @@ pub fn desktop_main() {
         }
     }
     let Some(rom) = rom else {
-        eprintln!("usage: sunpetal-app ROM.nds [--out DIR] [--save FILE] [--mute] [--res N] [--menu]");
+        eprintln!("usage: sunpetal-app ROM.nds [--out DIR] [--save FILE] [--mute] [--res N] [--menu] [--texture-pack FILE] [--lang ru|none]");
         std::process::exit(2);
     };
     if !rom.is_file() {
@@ -688,7 +694,7 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
         eprintln!("{}: no ROM there", rom.display());
         return;
     }
-    run(Options { rom, out: Some(dir), save: None, mute: false, res: Some(1), menu: false, dump: None, pack: None }, el);
+    run(Options { rom, out: Some(dir), save: None, mute: false, res: Some(1), menu: false, dump: None, pack: None, lang: None }, el);
 }
 
 #[cfg(target_os = "android")]
