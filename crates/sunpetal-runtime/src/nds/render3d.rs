@@ -713,19 +713,22 @@ fn shade_pass(strength: f32, radius: f32, t: &Target, w: usize, h: usize, s: usi
 }
 
 /// In each row, the pixels of the `e` columns at each side that no polygon covered (the depth is the
-/// clear depth) take everything of the nearest column of the picture inside them, when that edge is
-/// flat (the same colour over the next few columns: sky, a plain fill). An edge with detail (a column,
-/// a roof, a fence) is left: copying it would draw it out into a streak, mirroring it would double it.
+/// clear depth) take everything of the first far pixel (sky, ground, the scenery's distance) inside the
+/// picture's edge in that row. What is near (a column of the gate, a leaf of the palm, a car) is not
+/// drawn out: copying it would make a streak, mirroring it would double it; what lies behind it shows.
+/// The depth is 0-1, far near 1.
 fn extend_sides(t: &mut Target, job: &Job, w: usize, h: usize, e: usize) {
+    const FAR: f32 = 0.999;
     let cd = clear_depth(job.clear_depth);
+    let inner = w - 2 * e;
     for y in 0..h {
         let row = y * w;
-        let (l, r) = (row + e, row + w - e - 1);
-        let flat_l = (1..6).all(|k| t.color[l + k] == t.color[l] && t.alpha[l + k] == t.alpha[l]);
-        let flat_r = (1..6).all(|k| t.color[r - k] == t.color[r] && t.alpha[r - k] == t.alpha[r]);
+        let left = (0..inner).map(|k| row + e + k).find(|&i| t.depth[i] >= FAR);
+        let right = (0..inner).map(|k| row + w - e - 1 - k).find(|&i| t.depth[i] >= FAR);
         for x in 0..e {
-            for (i, from, flat) in [(row + x, l, flat_l), (row + w - 1 - x, r, flat_r)] {
-                if flat && t.depth[i] >= cd {
+            for (i, from) in [(row + x, left), (row + w - 1 - x, right)] {
+                let Some(from) = from else { continue };
+                if t.depth[i] >= cd {
                     t.color[i] = t.color[from];
                     t.alpha[i] = t.alpha[from];
                     t.depth[i] = t.depth[from];

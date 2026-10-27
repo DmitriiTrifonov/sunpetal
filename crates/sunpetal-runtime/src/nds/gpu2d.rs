@@ -823,17 +823,39 @@ impl Nds {
                     for (r, row) in chunk.chunks_mut(w * 3).enumerate() {
                         let y = k * rows_per + r;
                         let (y2, y3) = (y / s, y * f3 / s);
-                        // beside the screen's own 256 a flat edge (sky, a panel, a rule) runs on as it is; an edge with
-                        // detail (a hill's line, tree tops) is mirrored, or its row would be smeared out sideways
+                        // beside the screen's own 256: a flat edge (sky, a panel, a rule) runs on as it is; an edge
+                        // wholly painted with detail (a hill's line, tree tops) is mirrored, or its row would be
+                        // smeared out sideways; an edge with gaps (lettering on black) shows the plain background,
+                        // as a mirror would write the words twice
                         let base = Gpu2d::at(0, y2);
-                        let same = |a: usize, b: usize| self.gpu.px[base + 2 * a] == self.gpu.px[base + 2 * b] && self.gpu.px[base + 2 * a + 1] == self.gpu.px[base + 2 * b + 1];
-                        let (flat_l, flat_r) = ((1..6).all(|k| same(0, k)), (1..6).all(|k| same(255, 255 - k)));
+                        let px = |c: usize| (self.gpu.px[base + 2 * c], self.gpu.px[base + 2 * c + 1]);
+                        let black = |c: usize| px(c).0 & 0x3FFFF == 0;
+                        // mode: 0 the edge column runs on, 1 mirrored, 2 a fixed column (what lies beyond a short strip,
+                        // or the plain background)
+                        let side = |edge: usize, step: isize| -> (u8, usize) {
+                            let at = |k: usize| (edge as isize + step * k as isize) as usize;
+                            // how far the edge colour runs in
+                            let run = (1..250).take_while(|k| px(at(*k)) == px(edge)).count() + 1;
+                            if run >= 100 {
+                                return (0, edge); // a rule, a panel, the sky: all across
+                            }
+                            if run >= 6 {
+                                // a short strip at the edge (the game's flickering bars): not taken out into the margin,
+                                // the margin has what lies just beyond it
+                                return (2, at(run));
+                            }
+                            if (0..10).all(|k| !black(at(k))) {
+                                return (1, edge);
+                            }
+                            (2, (0..10).map(at).find(|c| black(*c)).unwrap_or(edge))
+                        };
+                        let ((mode_l, col_l), (mode_r, col_r)) = (side(0, 1), side(255, -1));
                         for x in 0..w {
                             let xs = x / s;
                             let x2 = if xs < e3 {
-                                if flat_l { 0 } else { (e3 - 1 - xs).min(255) }
+                                match mode_l { 0 => 0, 1 => (e3 - 1 - xs).min(255), _ => col_l }
                             } else if xs >= e3 + 256 {
-                                if flat_r { 255 } else { 255usize.saturating_sub(xs - e3 - 256) }
+                                match mode_r { 0 => 255, 1 => 255usize.saturating_sub(xs - e3 - 256), _ => col_r }
                             } else {
                                 xs - e3
                             };
