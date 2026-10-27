@@ -4,7 +4,7 @@
 //!     sunpetal-app ROM.nds [--out DIR] [--save FILE] [--mute] [--res N] [--menu]
 //!                          [--dump-textures DIR] [--texture-pack DIR]
 //!
-//! F1 or Esc: the settings menu (video, sound, keys, profiles). Hotkeys: F2 changes the layout, F3
+//! F1 or Esc: the settings menu (video, sound, keys, profiles). Hotkeys: F2 changes the layout, F8 the screen shown in the single layout, F3
 //! the filter, F4 and F5 the 3D's internal resolution (1-8 times the DS's), F11 full screen, Tab
 //! (held) runs without waiting for the clock. The keys of the DS's buttons are set in the menu
 //! (default: arrows = D-pad, Z = A, X = B, S = X, A = Y, Q = L, W = R, Enter = START, Backspace =
@@ -100,8 +100,19 @@ struct App {
 }
 
 impl App {
-    fn layout(&self) -> &layout::Layout {
-        self.layouts.iter().find(|l| l.name == self.settings.video.layout).unwrap_or(&self.layouts[0])
+    fn layout(&self) -> layout::Layout {
+        layout::find(&self.layouts, &self.settings.video.layout, self.settings.video.lower)
+    }
+
+    /// Swaps the screen shown in the single layout; from another layout, goes into it.
+    fn swap_screen(&mut self) {
+        if self.settings.video.layout == "single" {
+            self.settings.video.lower = !self.settings.video.lower;
+        } else {
+            self.settings.video.layout = "single".into();
+        }
+        self.pen_down = false;
+        self.update_pen();
     }
 
     fn send_keys(&self) {
@@ -331,6 +342,7 @@ impl ApplicationHandler for App {
                     KeyCode::F1 | KeyCode::Escape => self.toggle_menu(),
                     KeyCode::Tab if self.settings.emulation.fast_key => self.shared.fast.store(true, Ordering::Relaxed),
                     KeyCode::F2 => self.cycle_layout(),
+                    KeyCode::F8 => self.swap_screen(),
                     KeyCode::F3 => self.settings.video.linear = !self.settings.video.linear,
                     KeyCode::F7 => {
                         self.shared.toggle_skip();
@@ -398,6 +410,8 @@ impl ApplicationHandler for App {
                         } else if let Some(b) = band {
                             if touchpad::on_menu(b, p) {
                                 self.toggle_menu();
+                            } else if touchpad::on_screen_button(b, p) {
+                                self.swap_screen();
                             } else {
                                 self.pad_touches.insert(t.id, p);
                             }
@@ -463,7 +477,7 @@ impl ApplicationHandler for App {
                 {
                     let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, .. } = self;
                     if let Some(g) = gfx {
-                        let layout = layouts.iter().find(|l| l.name == settings.video.layout).unwrap_or(&layouts[0]).clone();
+                        let layout = layout::find(layouts, &settings.video.layout, settings.video.lower);
                         let names: Vec<&str> = layouts.iter().map(|l| l.name).collect();
                         let fx = settings.effects.clone();
                         let internal = (256 * settings.video.res as u32, 192 * settings.video.res as u32);
@@ -515,6 +529,7 @@ impl ApplicationHandler for App {
                 }
                 if self.settings != self.applied {
                     let layout_changed = self.settings.video.layout != self.applied.video.layout
+                        || self.settings.video.lower != self.applied.video.lower
                         || self.settings.video.res != self.applied.video.res
                         || self.settings.interface.language != self.applied.interface.language;
                     self.apply();

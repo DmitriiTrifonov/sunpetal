@@ -13,6 +13,8 @@ pub enum Kind {
     Button(&'static str),
     /// Opens the settings menu.
     Menu,
+    /// Swaps the screen shown when the layout has one.
+    Screen,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -56,6 +58,7 @@ pub fn controls(area: Rect) -> Vec<Control> {
     v.push(Control { kind: Kind::Button("R"), label: "R", shape: pill(0.67, 0.02, 0.3, 0.15) });
     v.push(Control { kind: Kind::Button("SELECT"), label: "SELECT", shape: pill(0.4, 0.4, 0.2, 0.11) });
     v.push(Control { kind: Kind::Button("START"), label: "START", shape: pill(0.4, 0.56, 0.2, 0.11) });
+    v.push(Control { kind: Kind::Screen, label: "SCREEN", shape: pill(0.4, 0.7, 0.2, 0.1) });
     v.push(Control { kind: Kind::Menu, label: "MENU", shape: pill(0.4, 0.84, 0.2, 0.1) });
     v
 }
@@ -100,6 +103,11 @@ pub fn pressed(area: Rect, points: &[(f32, f32)]) -> Vec<&'static str> {
 /// Whether a finger landing at `p` is on the menu button.
 pub fn on_menu(area: Rect, p: (f32, f32)) -> bool {
     controls(area).iter().any(|c| c.kind == Kind::Menu && c.shape.contains(p))
+}
+
+/// Whether a finger landing at `p` is on the screen-swap button.
+pub fn on_screen_button(area: Rect, p: (f32, f32)) -> bool {
+    controls(area).iter().any(|c| c.kind == Kind::Screen && c.shape.contains(p))
 }
 
 /// Draws the controls over the picture; `held` are the buttons now pressed. `ctx` works in points.
@@ -309,6 +317,7 @@ mod tests {
         let a = area();
         assert!(on_menu(a, centre(Kind::Menu)));
         assert!(!on_menu(a, centre(Kind::Button("START"))));
+        assert!(on_screen_button(a, centre(Kind::Screen)) && !on_screen_button(a, centre(Kind::Menu)) && !on_menu(a, centre(Kind::Screen)));
     }
 }
 

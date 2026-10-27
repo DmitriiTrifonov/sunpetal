@@ -43,8 +43,21 @@ pub fn bottom_only() -> Layout {
     Layout { name: "lower only", size: (256.0, 192.0), screens: [None, Some(r(0.0, 0.0))] }
 }
 
+/// One screen, the one the player picks (`lower`); the hotkey, the button and the menu swap it.
+pub fn single(lower: bool) -> Layout {
+    Layout { name: "single", size: (256.0, 192.0), screens: if lower { [None, Some(r(0.0, 0.0))] } else { [Some(r(0.0, 0.0)), None] } }
+}
+
 pub fn all() -> Vec<Layout> {
-    vec![stacked(), side_by_side(), top_only(), bottom_only()]
+    vec![stacked(), side_by_side(), single(false), top_only(), bottom_only()]
+}
+
+/// The layout a setting names; `single` shows the lower screen if `lower`.
+pub fn find(layouts: &[Layout], name: &str, lower: bool) -> Layout {
+    if name == "single" {
+        return single(lower);
+    }
+    layouts.iter().find(|l| l.name == name).unwrap_or(&layouts[0]).clone()
 }
 
 impl Layout {
@@ -83,6 +96,17 @@ mod tests {
         assert_eq!((up.w, up.h), (512.0, 384.0));
         assert_eq!(up.x, 244.0);
         assert_eq!(down.y, 384.0);
+    }
+
+    #[test]
+    fn the_single_layout_shows_the_screen_picked() {
+        let all = all();
+        assert_eq!(find(&all, "single", false).screens.map(|s| s.is_some()), [true, false]);
+        assert_eq!(find(&all, "single", true).screens.map(|s| s.is_some()), [false, true]);
+        assert_eq!(find(&all, "nonsense", true).name, "stacked");
+        // the picked lower screen takes touch
+        assert!(single(true).touch((256.0, 192.0), (10.0, 10.0), false).is_some());
+        assert!(single(false).touch((256.0, 192.0), (10.0, 10.0), false).is_none());
     }
 
     #[test]

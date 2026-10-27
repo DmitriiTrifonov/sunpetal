@@ -64,6 +64,13 @@ impl Menu {
                         ui.selectable_value(&mut s.video.layout, l.to_string(), layout_label(l, lang));
                     }
                 });
+                if s.video.layout == "single" {
+                    ui.horizontal(|ui| {
+                        ui.label(tx("Screen shown (F8):", "Какой экран (F8):"));
+                        ui.selectable_value(&mut s.video.lower, false, tx("upper", "верхний"));
+                        ui.selectable_value(&mut s.video.lower, true, tx("lower (touch)", "нижний (касание)"));
+                    });
+                }
                 egui::ComboBox::from_label(tx("Background", "Подложка")).selected_text(match s.video.background.as_str() {
                     "black" => tx("black", "чёрная"),
                     _ => tx("glow of the picture", "свечение картинки"),
@@ -253,6 +260,7 @@ pub fn layout_label(id: &str, lang: Lang) -> &str {
     match (id, lang) {
         ("stacked", Lang::Ru) => "друг под другом",
         ("side by side", Lang::Ru) => "рядом",
+        ("single", Lang::Ru) => "один экран",
         ("upper only", Lang::Ru) => "только верхний",
         ("lower only", Lang::Ru) => "только нижний",
         (other, _) => other,
