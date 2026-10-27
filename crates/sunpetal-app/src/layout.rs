@@ -70,6 +70,9 @@ pub struct Patch {
     pub screen: usize,
     pub src: Rect,
     pub dst: Rect,
+    /// Stays at the layout's own edge when the upper screen is widened, instead of keeping its place on
+    /// the 256 in the middle.
+    pub pinned: bool,
 }
 
 /// The studio logos at the start are on both screens at once; with one screen shown they come in
@@ -104,7 +107,7 @@ pub fn counter_in(scale: usize, rgba: &[u8]) -> bool {
 /// The counter in the lower screen's top left corner (the map's number) and where it goes on the
 /// upper screen when only that is shown.
 pub fn counter_patch() -> Patch {
-    Patch { screen: 1, src: Rect { x: 4.0, y: 7.0, w: 60.0, h: 13.0 }, dst: Rect { x: 4.0, y: 4.0, w: 60.0, h: 13.0 } }
+    Patch { screen: 1, src: Rect { x: 4.0, y: 7.0, w: 60.0, h: 13.0 }, dst: Rect { x: 4.0, y: 4.0, w: 60.0, h: 13.0 }, pinned: true }
 }
 
 fn r(x: f32, y: f32) -> Rect {
@@ -183,7 +186,7 @@ pub fn edge_color(layout: &Layout, scale: usize, rgba: &[u8]) -> Option<[f32; 3]
 /// The hint text of Edo's screens (what the chosen key does), cut from the upper screen and put
 /// into the free corner of the lower one, whose keys are the screen's use.
 pub fn edo_patch() -> Patch {
-    Patch { screen: 0, src: Rect { x: 106.0, y: 80.0, w: 148.0, h: 60.0 }, dst: Rect { x: 106.0, y: 130.0, w: 148.0, h: 60.0 } }
+    Patch { screen: 0, src: Rect { x: 106.0, y: 80.0, w: 148.0, h: 60.0 }, dst: Rect { x: 106.0, y: 130.0, w: 148.0, h: 60.0 }, pinned: false }
 }
 
 /// Whether the upper screen is one of Edo's (the pink title "Hello!! SAVE DATA" in its top band).
@@ -310,7 +313,7 @@ fn pick(layouts: &[Layout], v: &crate::config::Video, live: &Live) -> Layout {
     };
     // the title: the upper screen's film with the lower screen's "Press START" over it
     if let (Some(b), [Some(_), None]) = (live.prompt, l.screens) {
-        l.patches.push(Patch { screen: 1, src: b, dst: b });
+        l.patches.push(Patch { screen: 1, src: b, dst: b, pinned: false });
     }
     // Edo's screen on one: the keys of the lower screen, with the upper's hint text beside them
     if live.edo && l.screens[0].is_none() && l.screens[1].is_some() && l.patches.is_empty() {
@@ -363,7 +366,7 @@ impl Layout {
         self.screens[0] = Some(new_up);
         self.size.0 += 2.0 * e;
         // a patch on the upper screen lies on the middle 256
-        for p in &mut self.patches {
+        for p in self.patches.iter_mut().filter(|p| !p.pinned) {
             if p.dst.x >= up.x && p.dst.x < up.x + up.w && p.dst.y >= up.y && p.dst.y < up.y + up.h && self.screens[1].map_or(true, |lo| p.dst.y < lo.y || p.dst.x < lo.x) {
                 p.dst.x += e;
             }
@@ -566,7 +569,7 @@ mod tests {
         let b = Rect { x: 42.0, y: 74.0, w: 172.0, h: 44.0 };
         let live = Live { prompt: Some(b), ..Default::default() };
         let l = find(&all, &video("single", false, false, false), &live);
-        assert_eq!(l.patches, vec![Patch { screen: 1, src: b, dst: b }]);
+        assert_eq!(l.patches, vec![Patch { screen: 1, src: b, dst: b, pinned: false }]);
         // not when the lower screen is the one shown, or both
         assert!(find(&all, &video("single", true, false, false), &live).patches.is_empty());
         assert!(find(&all, &video("stacked", false, false, false), &live).patches.is_empty());
@@ -597,7 +600,8 @@ mod tests {
         l.widen(64.0);
         let (up, panel) = (l.screens[0].unwrap(), l.screens[1].unwrap());
         assert!((up.x + up.w) - (panel.x + panel.w) < 7.0);
-        assert_eq!(l.patches[0].dst.x, counter_patch().dst.x + 64.0);
+        // the counter stays in the corner of the whole window
+        assert_eq!(l.patches[0].dst.x, counter_patch().dst.x);
     }
 
     #[test]

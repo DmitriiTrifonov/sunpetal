@@ -435,7 +435,28 @@ impl Gx {
         // a widened view: x is taken in a frustum that much wider, so the clipping lets the sides in
         let big_w = 256 + 2 * self.wide as i64;
         if self.wide > 0 {
+            // the game's own panels and rules (flat, w the same all over, running to the screen's
+            // edge) run to the edge of the wider view too; everything else keeps its place
+            let flat = v[..n].iter().all(|x| x.p[3] == v[0].p[3]);
+            let (left, right) = (v[..n].iter().any(|x| x.p[0] == -x.p[3]), v[..n].iter().any(|x| x.p[0] == x.p[3]));
+            // only the untextured ones (a picture would be stretched), and a translucent one only when
+            // it is a band across most of the screen (a panel), not a narrow strip (it would veil the sides)
+            let untextured = (self.tex_param >> 26) & 7 == 0;
+            let wide_enough = v[..n].iter().map(|x| x.p[0]).max() > v[..n].iter().map(|x| x.p[0] + v[0].p[3]).min();
+            let stretch = flat && untextured && (left || right) && ((attr >> 16) & 31 == 31 || wide_enough);
+            // a band across most of the screen goes to both edges, even if it starts a little inside
+            // (the dialogue panel starts beside the portrait)
+            let (min_x, max_x) = (v[..n].iter().map(|x| x.p[0]).min().unwrap_or(0), v[..n].iter().map(|x| x.p[0]).max().unwrap_or(0));
             for x in &mut v[..n] {
+                if stretch {
+                    if x.p[0].abs() == x.p[3] {
+                        continue;
+                    }
+                    if wide_enough && (x.p[0] == min_x || x.p[0] == max_x) {
+                        x.p[0] = if x.p[0] == min_x { -x.p[3] } else { x.p[3] };
+                        continue;
+                    }
+                }
                 x.p[0] = (x.p[0] as i64 * 256 / big_w) as i32;
             }
         }

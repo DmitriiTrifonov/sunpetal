@@ -712,6 +712,30 @@ fn shade_pass(strength: f32, radius: f32, t: &Target, w: usize, h: usize, s: usi
     out
 }
 
+/// In each row, the pixels of the `e` columns at each side that no polygon covered (the depth is the
+/// clear depth) take everything of the nearest column of the picture inside them.
+fn extend_sides(t: &mut Target, job: &Job, w: usize, h: usize, e: usize) {
+    let cd = clear_depth(job.clear_depth);
+    for y in 0..h {
+        let row = y * w;
+        let (l, r) = (row + e, row + w - e - 1);
+        for x in 0..e {
+            for (i, from) in [(row + x, l), (row + w - 1 - x, r)] {
+                if t.depth[i] >= cd {
+                    t.color[i] = t.color[from];
+                    t.alpha[i] = t.alpha[from];
+                    t.depth[i] = t.depth[from];
+                    t.id[i] = t.id[from];
+                    t.fog[i] = t.fog[from];
+                    t.trans[i] = t.trans[from];
+                    t.oid[i] = t.oid[from];
+                    t.cover[i] = t.cover[from];
+                }
+            }
+        }
+    }
+}
+
 /// Draws a frame. Returns the picture and the mask of what it left out (`NOTE`).
 pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
     let mut notes = 0u32;
@@ -746,6 +770,11 @@ pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
         t.trans.extend(p.trans);
         t.oid.extend(p.oid);
         t.cover.extend(p.cover);
+    }
+    // a widened view: where the sides have no polygon (a sky the game drew only so far, the floor's
+    // far edge) the nearest column of the DS's own picture runs on
+    if job.width > 256 {
+        extend_sides(&mut t, job, w, h, (job.width - 256) / 2 * s);
     }
     if job.disp3dcnt & 0x20 != 0 {
         // edge marking: a pixel with a nearer-or-equal... no: a pixel beside a farther pixel of another

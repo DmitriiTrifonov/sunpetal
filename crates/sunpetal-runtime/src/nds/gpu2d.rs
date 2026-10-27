@@ -812,6 +812,7 @@ impl Nds {
         }
         let s = scale.max(1);
         let (f3, w3) = (self.frame3d_scale.max(1), (256 + 2 * e3) * self.frame3d_scale.max(1));
+        let c3 = e3 * f3;
         let (w, h) = ((256 + 2 * e3) * s, 192 * s);
         let mut rgb = vec![0u8; w * h * 3];
         let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(8);
@@ -826,7 +827,12 @@ impl Nds {
                             // the 2D layers at the nearest column of the screen's own 256
                             let x2 = (x / s).saturating_sub(e3).min(255);
                             let i = Gpu2d::at(0, y2) + 2 * x2;
-                            let c = compose(&self.gpu.px[i..i + 2], self.frame3d[y3 * w3 + x * f3 / s]);
+                            // beside the DS's own picture the 3D shows only on the rows where the picture's
+                            // edge has it: a panel or a rule over the 3D there runs on, not cut off by it
+                            let x3 = x * f3 / s;
+                            let edge = if x3 < c3 { c3 } else if x3 >= c3 + 256 * f3 { c3 + 256 * f3 - 1 } else { x3 };
+                            let p3 = if (self.frame3d[y3 * w3 + edge] >> 18) & 31 == 0 { 0 } else { self.frame3d[y3 * w3 + x3] };
+                            let c = compose(&self.gpu.px[i..i + 2], p3);
                             row[3 * x] = (c >> 16) as u8;
                             row[3 * x + 1] = (c >> 8) as u8;
                             row[3 * x + 2] = c as u8;

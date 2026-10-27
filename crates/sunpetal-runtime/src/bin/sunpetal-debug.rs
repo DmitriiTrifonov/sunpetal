@@ -72,6 +72,9 @@ struct Args {
     /// extension (the upper screen alone, 256 + 2N wide).
     #[arg(long, value_name = "PIXELS")]
     wide: Option<usize>,
+    /// The 3D's internal resolution (1-8 times the DS's) for `--shot`.
+    #[arg(long, value_name = "N")]
+    scale: Option<usize>,
     /// Print the state (last line, frame, map, story value 0, why autoplay stopped) as a JSON line at the end.
     #[arg(long)]
     state: bool,
@@ -257,6 +260,9 @@ fn run(a: Args) -> Result<(), String> {
     }
     let mut s = Session::open_with(a.rom.clone(), a.save.clone(), a.overlay.clone(), a.data.clone().zip(a.lang.clone()))?;
     sunpetal_runtime::nds::set_wide(a.wide.unwrap_or(0));
+    if let Some(n) = a.scale {
+        sunpetal_runtime::nds::set_scale(n);
+    }
     let tracker = Tracker::install();
     if let Some(d) = &a.text_dir {
         s.use_texts(d, a.watch)?;
