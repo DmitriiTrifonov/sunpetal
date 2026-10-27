@@ -167,6 +167,8 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     let (mut step, mut no_step) = ((0u32, 0u32), 0u32);
     let mut racing;
     let mut last_e = usize::MAX;
+    // drawn frames since the 3D last gave a widened picture (a fade, a film: the wide view is kept a while)
+    let mut no_wide = u32::MAX;
     while !shared.quit.load(Ordering::Relaxed) {
         if shared.paused.load(Ordering::Relaxed) {
             std::thread::sleep(Duration::from_millis(10));
@@ -215,7 +217,14 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
                 last_print = print;
             }
             // the widened picture first: the window takes the plain one and then looks for its wide partner
-            *shared.wide_frame.lock().unwrap() = if want_e > 0 { nds::upper_wide_rgba() } else { None };
+            let mut wide = if want_e > 0 { nds::upper_wide_rgba() } else { None };
+            no_wide = if wide.is_some() { 0 } else { no_wide.saturating_add(1) };
+            // no 3D for a moment: the plain upper screen, its edge columns run on, so the view does not
+            // jump between wide and narrow
+            if wide.is_none() && want_e > 0 && no_wide <= WIDE_KEEP_FRAMES {
+                wide = Some(extend_edges(picture.0, want_e, &picture.1));
+            }
+            *shared.wide_frame.lock().unwrap() = wide;
             *shared.frame.lock().unwrap() = Some(picture);
         }
         if skipping {
@@ -395,4 +404,24 @@ mod skip_tests {
         assert!(bright > 30, "the picture is black");
         shared.quit.store(true, Ordering::Relaxed);
     }
+}
+
+/// Drawn frames the wide view stays after the 3D stops giving a widened picture.
+const WIDE_KEEP_FRAMES: u32 = 90;
+
+/// The upper screen of `rgba` (both screens, `scale` times 256x192 each) `each_side` DS pixels wider on
+/// each side, the new columns the edge ones repeated.
+fn extend_edges(scale: usize, each_side: usize, rgba: &[u8]) -> (usize, usize, Vec<u8>) {
+    let (w, h, e) = (256 * scale, 192 * scale, each_side * scale);
+    let mut out = Vec::with_capacity((w + 2 * e) * h * 4);
+    for row in rgba[..w * h * 4].chunks_exact(w * 4) {
+        for _ in 0..e {
+            out.extend_from_slice(&row[..4]);
+        }
+        out.extend_from_slice(row);
+        for _ in 0..e {
+            out.extend_from_slice(&row[row.len() - 4..]);
+        }
+    }
+    (scale, each_side, out)
 }
