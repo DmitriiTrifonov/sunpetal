@@ -161,6 +161,41 @@ impl App {
         layout::Live { vblank: self.shared.vblank.load(Ordering::Relaxed), counter_seen: self.counter_seen, lower: self.auto_lower || self.hold.is_some(), edo: self.edo_seen, prompt: self.prompt, wide: self.wide_now as f32, scroll: (self.paper && self.auto_lower).then_some(self.scroll) }
     }
 
+    /// F10: the emulation writes the picture and its parts to `artifacts/shots`; this is what the window knows, for the
+    /// file beside them (commit, layout, window, widening, what the picture was taken for, settings).
+    fn dump_shot(&self) {
+        let v = &self.settings.video;
+        let commit = std::process::Command::new("git").args(["rev-parse", "--short", "HEAD"]).output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+        let dirty = std::process::Command::new("git").args(["status", "--porcelain"]).output().ok().is_some_and(|o| !o.stdout.is_empty());
+        let l = self.layout();
+        let (ww, wh) = self.gfx.as_ref().map_or((0, 0), |g| (g.size().0 as u32, g.size().1 as u32));
+        let meta = format!(
+            "\"commit\":{:?},\"dirty\":{},\"layout\":{:?},\"layout_setting\":{:?},\"window\":[{},{}],\"wide_each_side\":{},\"want_wide\":{},\"auto_lower\":{},\"hold\":{},\"counter_seen\":{},\"edo_seen\":{},\"paper\":{},\"scroll\":{},\"bar_color\":{},\"fit\":{:?},\"pixel_aspect\":{},\"res\":{},\"language\":{:?},\"patches\":{}",
+            commit,
+            dirty,
+            l.name,
+            v.layout,
+            ww,
+            wh,
+            self.wide_now,
+            v.wide,
+            self.auto_lower,
+            self.hold.is_some(),
+            self.counter_seen,
+            self.edo_seen,
+            self.paper,
+            self.scroll,
+            self.bar_color.map_or("null".to_string(), |c| format!("{:?}", c)),
+            v.fit,
+            v.pixel_aspect,
+            v.res,
+            self.settings.game.language,
+            l.patches.len()
+        );
+        *self.shared.dump_meta.lock().unwrap() = meta;
+        self.shared.dump.store(true, Ordering::Relaxed);
+    }
+
     /// Swaps the screen shown in the single layout; from another layout, goes into it.
     fn swap_screen(&mut self) {
         if self.settings.video.layout == "single" && self.settings.video.auto {
@@ -438,7 +473,7 @@ impl ApplicationHandler for App {
                     KeyCode::F2 => self.cycle_layout(),
                     KeyCode::F8 => self.swap_screen(),
                     KeyCode::F3 => self.settings.video.linear = !self.settings.video.linear,
-                    KeyCode::F10 => self.shared.dump.store(true, Ordering::Relaxed),
+                    KeyCode::F10 => self.dump_shot(),
                     KeyCode::F7 => {
                         self.shared.toggle_skip();
                     }

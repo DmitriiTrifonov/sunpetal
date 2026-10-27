@@ -90,6 +90,8 @@ pub struct Shared {
     pub skip: AtomicBool,
     /// Write the picture and its parts to artifacts/shots (F10).
     pub dump: AtomicBool,
+    /// What the window knows of the picture, as the inside of a JSON object, for the dump's file (set with `dump`).
+    pub dump_meta: Mutex<String>,
     /// A dialogue box is on the screen (set by the emulation each frame).
     pub dialogue: AtomicBool,
     /// The game says when its script runs, so a skip can go through dialogues (set by the emulation).
@@ -127,6 +129,7 @@ impl Shared {
             vblank: AtomicU64::new(0),
             wide_px: AtomicUsize::new(0),
             dump: AtomicBool::new(false),
+            dump_meta: Mutex::new(String::new()),
             wide_frame: Mutex::new(None),
             fast: AtomicBool::new(false),
             skip: AtomicBool::new(false),
@@ -213,6 +216,18 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             }
             let _ = nds::screenshot(&std::path::PathBuf::from(format!("{}.png", stem.display())));
             let _ = nds::screenshot_wide_layers(&stem);
+            let json = format!(
+                "{{\"vblank\":{},\"scene\":{},\"script\":{{\"idle\":{},\"waits\":{},\"mark\":{},\"step\":{}}},\"frame_scale\":{},{}}}\n",
+                nds::vblanks(),
+                nds::script_scene().map_or("null".to_string(), |v| format!("{:?}", v)),
+                json_opt(nds::script_idle()),
+                json_opt(nds::script_waits()),
+                json_opt(nds::script_mark()),
+                json_opt(nds::script_step().map(|(a, b)| [a, b])),
+                shared.scale.load(Ordering::Relaxed),
+                shared.dump_meta.lock().unwrap()
+            );
+            let _ = std::fs::write(format!("{}.json", stem.display()), json);
         }
         let t1 = Instant::now();
         let skipping = shared.skip.load(Ordering::Relaxed);
@@ -441,4 +456,9 @@ fn extend_edges(scale: usize, each_side: usize, rgba: &[u8]) -> (usize, usize, V
         }
     }
     (scale, each_side, out)
+}
+
+/// An optional number, flag or list as JSON.
+fn json_opt<T: std::fmt::Debug>(v: Option<T>) -> String {
+    v.map_or("null".to_string(), |v| format!("{:?}", v))
 }

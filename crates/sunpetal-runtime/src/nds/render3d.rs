@@ -713,20 +713,27 @@ fn shade_pass(strength: f32, radius: f32, t: &Target, w: usize, h: usize, s: usi
 }
 
 /// In each row, the pixels of the `e` columns at each side that no polygon covered (the depth is the
-/// clear depth) take everything of the first far pixel (sky, ground, the scenery's distance) inside the
-/// picture's edge in that row. What is near (a column of the gate, a leaf of the palm, a car) is not
-/// drawn out: copying it would make a streak, mirroring it would double it; what lies behind it shows.
-/// The depth is 0-1, far near 1.
+/// clear depth) are filled from the far part of the picture (sky, ground, the scenery's distance): a row
+/// that is flat at the edge runs on with its first far pixel; a row with a drawing (hills, tree tops) is
+/// mirrored, where the mirrored pixel is far too (copying the edge would draw it out into a streak). What
+/// is near (a column of the gate, a leaf of the palm, a car) is not drawn out or doubled; what lies behind
+/// it shows. The depth is 0-1, far near 1.
 fn extend_sides(t: &mut Target, job: &Job, w: usize, h: usize, e: usize) {
     const FAR: f32 = 0.999;
     let cd = clear_depth(job.clear_depth);
     let inner = w - 2 * e;
     for y in 0..h {
         let row = y * w;
+        let (l, r) = (row + e, row + w - e - 1);
         let left = (0..inner).map(|k| row + e + k).find(|&i| t.depth[i] >= FAR);
         let right = (0..inner).map(|k| row + w - e - 1 - k).find(|&i| t.depth[i] >= FAR);
+        let flat_l = (1..6).all(|k| t.color[l + k] == t.color[l] && t.alpha[l + k] == t.alpha[l]);
+        let flat_r = (1..6).all(|k| t.color[r - k] == t.color[r] && t.alpha[r - k] == t.alpha[r]);
         for x in 0..e {
-            for (i, from) in [(row + x, left), (row + w - 1 - x, right)] {
+            let d = e - 1 - x; // distance in from the picture's edge
+            let sides = [(row + x, left, l + d, flat_l), (row + w - 1 - x, right, r - d, flat_r)];
+            for (i, first_far, mirrored, flat) in sides {
+                let from = if !flat && t.depth[mirrored] >= FAR { Some(mirrored) } else { first_far };
                 let Some(from) = from else { continue };
                 if t.depth[i] >= cd {
                     t.color[i] = t.color[from];
