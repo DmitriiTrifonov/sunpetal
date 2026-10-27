@@ -94,13 +94,23 @@ impl Config {
 /// files of the overlay folder (they win). `rom` is the ROM as it is on disk.
 pub fn overlay_files(cfg: &Config, rom: &[u8]) -> Result<Vec<(String, Vec<u8>)>, String> {
     let mut files = Vec::new();
+    if let (None, Some(lang)) = (&cfg.data, &cfg.language) {
+        return Err(format!("the language `{}` is asked for, but there is no data file with translations (--data FILE)", lang));
+    }
     if let (Some(data), Some(lang)) = (&cfg.data, &cfg.language) {
         let c = sunpetal_data::container::Container::read_only(data, |t| t == b"TRAN" || t == b"META")?;
         if let Some(meta) = c.meta()? {
             meta.check_rom(sunpetal_data::delta::crc32(rom)).map_err(|e| format!("{}: {}", data.display(), e))?;
         }
-        let found = c.all(b"TRAN").filter_map(|s| sunpetal_data::translate::Translation::from_bytes(&s.data).ok()).find(|t| &t.lang == lang);
-        let t = found.ok_or_else(|| format!("{} has no translation `{}`", data.display(), lang))?;
+        let all: Vec<_> = c.all(b"TRAN").filter_map(|s| sunpetal_data::translate::Translation::from_bytes(&s.data).ok()).collect();
+        let t = all.iter().find(|t| &t.lang == lang).ok_or_else(|| {
+            let have: Vec<&str> = all.iter().map(|t| t.lang.as_str()).collect();
+            if have.is_empty() {
+                format!("{} has no translations (it holds only textures); play without a language", data.display())
+            } else {
+                format!("{} has no translation `{}`; it has: {}", data.display(), lang, have.join(", "))
+            }
+        })?;
         files.extend(t.overlay(rom)?);
     }
     if let Some(dir) = &cfg.overlay {

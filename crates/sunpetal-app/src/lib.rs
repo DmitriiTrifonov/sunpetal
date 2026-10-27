@@ -579,6 +579,8 @@ pub fn run(o: Options, el: EventLoop<()>) {
     if cfg.texture_pack.as_ref().is_some_and(|p| p.is_file()) && !settings.game.language.is_empty() {
         cfg.data = cfg.texture_pack.clone();
         cfg.language = Some(settings.game.language.clone());
+    } else if !settings.game.language.is_empty() {
+        eprintln!("the game language `{}` is set, but there is no data file to take it from (the texture setting or --texture-pack); the ROM's own text is used", settings.game.language);
     }
     let shared = Shared::new();
     shared.scale.store(settings.video.res, Ordering::Relaxed);
