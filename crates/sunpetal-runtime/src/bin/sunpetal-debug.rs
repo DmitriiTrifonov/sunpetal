@@ -156,8 +156,8 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             done(json!({}))
         }
         "shotwide" => {
-            sunpetal_runtime::nds::screenshot_wide(std::path::Path::new(w.first().ok_or("shotwide FILE")?))?;
-            done(json!({}))
+            let wide = sunpetal_runtime::nds::screenshot_wide(std::path::Path::new(w.first().ok_or("shotwide FILE")?))?;
+            done(json!({"wide": wide}))
         }
         "peek" => {
             let (a, n) = w.first().ok_or("peek ADDR[:LEN]")?.split_once(':').unwrap_or((w[0], "64"));

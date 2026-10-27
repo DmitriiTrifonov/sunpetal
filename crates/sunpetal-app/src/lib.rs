@@ -89,6 +89,9 @@ fn next_hold(hold: Option<Hold>, wants: bool, settled: bool) -> Option<Hold> {
 const TAP_FRAMES: u32 = 8;
 const HOLD_FRAMES: u32 = 1800;
 
+/// Frames the picture must ask for other bars before they change.
+const BAR_FRAMES: u32 = 20;
+
 /// Frames the picture must want the other screen before the single layout moves to it.
 const AUTO_FRAMES: u32 = 20;
 
@@ -138,6 +141,9 @@ struct App {
     wide_now: usize,
     /// The colour for the bars (`layout::edge_color`), from the last picture.
     bar_color: Option<[f32; 3]>,
+    /// What the picture asks of the bars now and for how many frames it has (a change waits, so the
+    /// bars do not flicker between a colour and the glow on a picture whose edge keeps changing).
+    bar_ask: (Option<[f32; 3]>, u32),
     /// The screen the picture wants (`layout::lower_wanted`) and for how many frames it has wanted it.
     want: (bool, u32),
     auto_lower: bool,
@@ -579,7 +585,16 @@ impl ApplicationHandler for App {
                     self.paper = paper;
                     // the bars of the window: the picture's edge colour if that is one
                     let layout = self.layout();
-                    self.bar_color = if self.settings.video.bars_match && self.settings.video.background == "glow" { layout::edge_color(&layout, *scale, rgba) } else { None };
+                    let ask = if self.settings.video.bars_match && self.settings.video.background == "glow" { layout::edge_color(&layout, *scale, rgba) } else { None };
+                    let same = match (ask, self.bar_ask.0) {
+                        (Some(a), Some(b)) => (0..3).all(|c| (a[c] - b[c]).abs() < 0.04),
+                        (None, None) => true,
+                        _ => false,
+                    };
+                    self.bar_ask = if same { (self.bar_ask.0, self.bar_ask.1 + 1) } else { (ask, 0) };
+                    if self.bar_ask.1 >= BAR_FRAMES {
+                        self.bar_color = self.bar_ask.0;
+                    }
                     // a change of screen waits until the picture has held for a moment (a fade, a
                     // flash between scenes would flicker it)
                     if let Some(w) = layout::lower_wanted(*scale, rgba) {
@@ -799,6 +814,7 @@ pub fn run(o: Options, el: EventLoop<()>) {
         counter_seen: false,
         edo_seen: false,
         paper: false,
+        bar_ask: (None, 0),
         scroll: 0.0,
         prompt: None,
         wide_now: 0,

@@ -169,6 +169,8 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     let mut last_e = usize::MAX;
     // drawn frames since the 3D last gave a widened picture (a fade, a film: the wide view is kept a while)
     let mut no_wide = u32::MAX;
+    // frames of real wide picture in a row before (a short one, as the logos' few, is no scene to keep)
+    let mut wide_streak = 0u32;
     while !shared.quit.load(Ordering::Relaxed) {
         if shared.paused.load(Ordering::Relaxed) {
             std::thread::sleep(Duration::from_millis(10));
@@ -219,9 +221,10 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             // the widened picture first: the window takes the plain one and then looks for its wide partner
             let mut wide = if want_e > 0 { nds::upper_wide_rgba() } else { None };
             no_wide = if wide.is_some() { 0 } else { no_wide.saturating_add(1) };
+            wide_streak = if wide.is_some() { wide_streak + 1 } else if no_wide > WIDE_KEEP_FRAMES { 0 } else { wide_streak };
             // no 3D for a moment: the plain upper screen, its edge columns run on, so the view does not
             // jump between wide and narrow
-            if wide.is_none() && want_e > 0 && no_wide <= WIDE_KEEP_FRAMES {
+            if wide.is_none() && want_e > 0 && no_wide <= WIDE_KEEP_FRAMES && wide_streak >= 30 {
                 wide = Some(extend_edges(picture.0, want_e, &picture.1));
             }
             *shared.wide_frame.lock().unwrap() = wide;
