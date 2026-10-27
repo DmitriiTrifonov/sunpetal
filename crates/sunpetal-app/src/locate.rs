@@ -58,7 +58,7 @@ pub fn find_rom(dirs: &[PathBuf]) -> Option<PathBuf> {
 pub fn no_game(dirs: &[PathBuf]) -> String {
     let places: Vec<String> = dirs.iter().map(|d| d.display().to_string()).collect();
     format!(
-        "no ROM to play: give one (sunpetal-app ROM.nds, or `rom` under [game] in {}), or put a .nds of the European release (and a {} for textures and translations) in one of: {}",
+        "no ROM to play: give one (sunpetal-app ROM.nds, or `rom` under [game] in {}), or put a .nds of the European release, or a {} that holds the game (sunpetal-pack-rom), in one of: {}",
         crate::config::dir().join("config.toml").display(),
         DATA_NAME,
         places.join(", ")

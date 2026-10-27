@@ -24,6 +24,7 @@ gilrs = "0.11.2"
 pollster = "1.0.1"
 serde = { version = "1.0.229", features = ["derive"] }
 sunpetal-runtime = { path = "../sunpetal-runtime", features = ["debug-tools"] }
+sunpetal-data = { path = "../sunpetal-data" }
 sys-locale = "0.3.2"
 toml = "1.1.8"
 wgpu = "30.0.1"

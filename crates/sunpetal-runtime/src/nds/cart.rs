@@ -71,8 +71,16 @@ fn chip_mask(rom_len: usize) -> u32 {
 
 impl Nds {
     pub(super) fn cart_open(&mut self) -> Result<(), String> {
-        let path = self.cfg.rom.clone();
-        let mut rom = fs::read(&path).map_err(|e| format!("cannot open {}: {}", path.display(), e))?;
+        // no ROM file named: the image kept in the data file
+        let (path, mut rom) = if self.cfg.rom.as_os_str().is_empty() {
+            let data = self.cfg.data.clone().ok_or("no ROM and no data file to start from")?;
+            let rom = sunpetal_data::dsrom::read(&data)?.ok_or_else(|| format!("{} holds no ROM, and none was named", data.display()))?;
+            (data, rom)
+        } else {
+            let path = self.cfg.rom.clone();
+            let rom = fs::read(&path).map_err(|e| format!("cannot open {}: {}", path.display(), e))?;
+            (path, rom)
+        };
         if rom.len() < 0x200 {
             return Err(format!("{} is too small to be a cartridge", path.display()));
         }

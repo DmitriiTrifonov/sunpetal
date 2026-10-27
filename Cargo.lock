@@ -2800,6 +2800,7 @@ dependencies = [
  "libc",
  "pollster",
  "serde",
+ "sunpetal-data",
  "sunpetal-runtime",
  "sys-locale",
  "toml",

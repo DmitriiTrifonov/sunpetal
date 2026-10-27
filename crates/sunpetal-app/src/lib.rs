@@ -562,7 +562,9 @@ pub fn run(o: Options, el: EventLoop<()>) {
         settings.game.language = if l == "none" { String::new() } else { l };
     }
     let mut cfg = Config::new(&rom);
-    cfg.out = o.out.unwrap_or_else(|| rom.parent().map(|p| p.to_path_buf()).unwrap_or_default());
+    // saves go beside the ROM; with no ROM file, beside the data file
+    let beside = if rom.as_os_str().is_empty() { o.pack.as_deref() } else { Some(rom.as_path()) };
+    cfg.out = o.out.unwrap_or_else(|| beside.and_then(|p| p.parent()).map(|p| p.to_path_buf()).unwrap_or_default());
     cfg.save = o.save;
     cfg.dump_textures = o.dump;
     cfg.texture_pack = o.pack.or_else(|| {
@@ -584,6 +586,9 @@ pub fn run(o: Options, el: EventLoop<()>) {
     if cfg.texture_pack.as_ref().is_some_and(|p| p.is_file()) && !settings.game.language.is_empty() {
         cfg.data = cfg.texture_pack.clone();
         cfg.language = Some(settings.game.language.clone());
+    }
+    if rom.as_os_str().is_empty() {
+        cfg.data = cfg.texture_pack.clone();
     } else if !settings.game.language.is_empty() {
         eprintln!("the game language `{}` is set, but there is no data file to take it from (the texture setting or --texture-pack); the ROM's own text is used", settings.game.language);
     }
@@ -676,19 +681,34 @@ pub fn desktop_main() {
     let rom = rom
         .or_else(|| Some(PathBuf::from(config::load().game.rom)).filter(|p| !p.as_os_str().is_empty()))
         .or_else(|| locate::find_rom(&dirs));
-    let Some(rom) = rom else {
-        eprintln!("usage: sunpetal-app [ROM.nds] [--out DIR] [--save FILE] [--mute] [--res N] [--menu] [--texture-pack FILE] [--lang ru|none]");
-        eprintln!("{}", locate::no_game(&dirs));
-        std::process::exit(2);
+    let rom = match rom {
+        Some(rom) => {
+            if !rom.is_file() {
+                eprintln!("{}: not a file (the ROM's path: sunpetal-app ROM.nds)", rom.display());
+                std::process::exit(2);
+            }
+            if let Err(e) = locate::check_rom(&rom) {
+                eprintln!("{}", e);
+                std::process::exit(2);
+            }
+            rom
+        }
+        // no ROM file: the image kept in the data file (the one named, the settings', or one found)
+        None => {
+            let named = o.pack.clone().or_else(|| Some(PathBuf::from(config::load().video.texture_pack)).filter(|p| !p.as_os_str().is_empty()));
+            match named.or_else(|| locate::find_data(&dirs)).filter(|p| sunpetal_data::dsrom::has_rom(p)) {
+                Some(data) => {
+                    o.pack = Some(data);
+                    PathBuf::new()
+                }
+                None => {
+                    eprintln!("usage: sunpetal-app [ROM.nds] [--out DIR] [--save FILE] [--mute] [--res N] [--menu] [--texture-pack FILE] [--lang ru|none]");
+                    eprintln!("{}", locate::no_game(&dirs));
+                    std::process::exit(2);
+                }
+            }
+        }
     };
-    if !rom.is_file() {
-        eprintln!("{}: not a file (the ROM's path: sunpetal-app ROM.nds)", rom.display());
-        std::process::exit(2);
-    }
-    if let Err(e) = locate::check_rom(&rom) {
-        eprintln!("{}", e);
-        std::process::exit(2);
-    }
     o.rom = rom;
     run(o, EventLoop::new().expect("an event loop"));
 }

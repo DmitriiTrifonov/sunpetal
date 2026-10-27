@@ -81,6 +81,28 @@ impl Container {
         Ok(Container { sections })
     }
 
+    /// The tags of a file's sections, in order, from its section table alone.
+    pub fn tags(path: &Path) -> Result<Vec<[u8; 4]>, String> {
+        let bad = |why: &str| format!("data file {}: {}", path.display(), why);
+        let mut f = fs::File::open(path).map_err(|e| bad(&e.to_string()))?;
+        let mut head = [0u8; 12];
+        f.read_exact(&mut head).map_err(|_| bad("too short"))?;
+        if &head[..8] != MAGIC {
+            return Err(bad("not a Sunpetal data file, or a newer version of it"));
+        }
+        let n = u32::from_le_bytes(head[8..12].try_into().unwrap()) as usize;
+        if n > MAX_SECTIONS {
+            return Err(bad("too many sections"));
+        }
+        let mut tags = Vec::new();
+        for _ in 0..n {
+            let mut s = [0u8; 20];
+            f.read_exact(&mut s).map_err(|_| bad("section table cut short"))?;
+            tags.push(s[..4].try_into().unwrap());
+        }
+        Ok(tags)
+    }
+
     /// The sections with `tag`.
     pub fn all(&self, tag: &[u8; 4]) -> impl Iterator<Item = &Section> {
         let tag = *tag;
