@@ -127,6 +127,8 @@ impl Default for Interface {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
 #[serde(default)]
 pub struct Game {
+    /// The ROM to play when none is named on the command line; empty: look in the usual folders.
+    pub rom: String,
     /// The language of the translation in the data file to play with (`ru`); empty: the ROM's own
     /// text. Read when the game starts.
     pub language: String,

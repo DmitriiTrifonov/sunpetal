@@ -19,6 +19,7 @@ mod effects;
 mod emu;
 mod gfx;
 mod layout;
+mod locate;
 mod post;
 mod touchpad;
 mod ui;
@@ -567,7 +568,11 @@ pub fn run(o: Options, el: EventLoop<()>) {
     cfg.texture_pack = o.pack.or_else(|| {
         let p = PathBuf::from(&settings.video.texture_pack);
         if settings.video.texture_pack.is_empty() {
-            None
+            let found = locate::find_data(&locate::search_dirs());
+            if let Some(f) = &found {
+                eprintln!("data file: {}", f.display());
+            }
+            found
         } else if p.exists() {
             Some(p)
         } else {
@@ -666,12 +671,22 @@ pub fn desktop_main() {
             }
         }
     }
+    // no ROM named: the one in the settings, then one found in the usual folders
+    let dirs = locate::search_dirs();
+    let rom = rom
+        .or_else(|| Some(PathBuf::from(config::load().game.rom)).filter(|p| !p.as_os_str().is_empty()))
+        .or_else(|| locate::find_rom(&dirs));
     let Some(rom) = rom else {
-        eprintln!("usage: sunpetal-app ROM.nds [--out DIR] [--save FILE] [--mute] [--res N] [--menu] [--texture-pack FILE] [--lang ru|none]");
+        eprintln!("usage: sunpetal-app [ROM.nds] [--out DIR] [--save FILE] [--mute] [--res N] [--menu] [--texture-pack FILE] [--lang ru|none]");
+        eprintln!("{}", locate::no_game(&dirs));
         std::process::exit(2);
     };
     if !rom.is_file() {
         eprintln!("{}: not a file (the ROM's path: sunpetal-app ROM.nds)", rom.display());
+        std::process::exit(2);
+    }
+    if let Err(e) = locate::check_rom(&rom) {
+        eprintln!("{}", e);
         std::process::exit(2);
     }
     o.rom = rom;
