@@ -451,7 +451,8 @@ impl Gx {
             let w0 = v[0].p[3];
             let tall = (max_y - min_y) as i64 * 100 >= w0 as i64 * 2 * 90;
             let (on_left, on_right) = (max_x as i64 * 10 <= -(w0 as i64) * 2, min_x as i64 * 10 >= w0 as i64 * 2);
-            let edge_strip = flat && untextured && !stretch && tall && (on_left != on_right);
+            let alpha_here = (attr >> 16) & 31;
+            let edge_strip = flat && untextured && !stretch && tall && (on_left != on_right) && alpha_here > 0 && alpha_here < 31;
             for x in &mut v[..n] {
                 if stretch {
                     if x.p[0].abs() == x.p[3] {
