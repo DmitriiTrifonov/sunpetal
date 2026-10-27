@@ -129,6 +129,8 @@ struct App {
     counter_seen: bool,
     /// The upper screen is Edo's (`layout::edo_in`).
     edo_seen: bool,
+    /// The title's "Press START" box (`layout::prompt_box`).
+    prompt: Option<layout::Rect>,
     /// The colour for the bars (`layout::edge_color`), from the last picture.
     bar_color: Option<[f32; 3]>,
     /// The screen the picture wants (`layout::lower_wanted`) and for how many frames it has wanted it.
@@ -145,7 +147,7 @@ impl App {
     }
 
     fn live(&self) -> layout::Live {
-        layout::Live { vblank: self.shared.vblank.load(Ordering::Relaxed), counter_seen: self.counter_seen, lower: self.auto_lower || self.hold.is_some(), edo: self.edo_seen }
+        layout::Live { vblank: self.shared.vblank.load(Ordering::Relaxed), counter_seen: self.counter_seen, lower: self.auto_lower || self.hold.is_some(), edo: self.edo_seen, prompt: self.prompt }
     }
 
     /// Swaps the screen shown in the single layout; from another layout, goes into it.
@@ -547,6 +549,7 @@ impl ApplicationHandler for App {
                     self.dial_scene = dial::recognise(*scale, rgba);
                     self.counter_seen = layout::counter_in(*scale, rgba);
                     self.edo_seen = layout::edo_in(*scale, rgba);
+                    self.prompt = layout::prompt_box(*scale, rgba);
                     // the bars of the window: the picture's edge colour if that is one
                     let layout = self.layout();
                     self.bar_color = if self.settings.video.bars_match && self.settings.video.background == "glow" { layout::edge_color(&layout, *scale, rgba) } else { None };
@@ -569,8 +572,8 @@ impl ApplicationHandler for App {
                 let fade = self.skip_fade;
                 let mut action = None;
                 {
-                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, edo_seen, bar_color, auto_lower, hold, .. } = self;
-                    let live = layout::Live { vblank: shared.vblank.load(Ordering::Relaxed), counter_seen: *counter_seen, lower: *auto_lower || hold.is_some(), edo: *edo_seen };
+                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, edo_seen, prompt, bar_color, auto_lower, hold, .. } = self;
+                    let live = layout::Live { vblank: shared.vblank.load(Ordering::Relaxed), counter_seen: *counter_seen, lower: *auto_lower || hold.is_some(), edo: *edo_seen, prompt: *prompt };
                     if let Some(g) = gfx {
                         let layout = layout::find(layouts, &settings.video, &live);
                         g.bar_color = *bar_color;
@@ -751,6 +754,7 @@ pub fn run(o: Options, el: EventLoop<()>) {
         win_size: (512, 768),
         counter_seen: false,
         edo_seen: false,
+        prompt: None,
         bar_color: None,
         want: (false, 0),
         auto_lower: false,

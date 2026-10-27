@@ -200,6 +200,44 @@ pub fn edo_in(scale: usize, rgba: &[u8]) -> bool {
     n > 0 && pink * 100 >= n * 5
 }
 
+/// The title's "Press START" box on the lower screen (a blue box with a white rim on black, the
+/// words in the language of the game): where it is, in the lower screen's pixels, with its rim. The
+/// upper screen has the film at that time; the box is put over it where it is.
+pub fn prompt_box(scale: usize, rgba: &[u8]) -> Option<Rect> {
+    let (w, h) = (256 * scale, 192 * scale);
+    let top = h;
+    if rgba.len() < w * h * 2 * 4 {
+        return None;
+    }
+    let (mut x0, mut y0, mut x1, mut y1, mut blue, mut lit) = (usize::MAX, usize::MAX, 0usize, 0usize, 0usize, 0usize);
+    for y in (0..h).step_by(scale.max(1)) {
+        for x in (0..w).step_by(scale.max(1)) {
+            let o = ((top + y) * w + x) * 4;
+            let (r, g, b) = (rgba[o] as i32, rgba[o + 1] as i32, rgba[o + 2] as i32);
+            if r + g + b > 60 {
+                lit += 1;
+            }
+            if b >= 100 && r < 60 && b >= g + 40 {
+                blue += 1;
+                (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+            }
+        }
+    }
+    // a box: enough blue, a compact area, and nothing else lit on the screen but its rim
+    if blue < 300 || x1 <= x0 || y1 <= y0 {
+        return None;
+    }
+    let area = ((x1 - x0) / scale.max(1) + 1) * ((y1 - y0) / scale.max(1) + 1);
+    if blue * 100 < area * 50 || lit > blue * 2 + 400 {
+        return None;
+    }
+    let k = scale.max(1) as f32;
+    let rim = 4.0;
+    let (x0, y0, x1, y1) = (x0 as f32 / k - rim, y0 as f32 / k - rim, x1 as f32 / k + 1.0 + rim, y1 as f32 / k + 1.0 + rim);
+    let (x0, y0, x1, y1) = (x0.max(0.0), y0.max(0.0), x1.min(256.0), y1.min(192.0));
+    Some(Rect { x: x0, y: y0, w: x1 - x0, h: y1 - y0 })
+}
+
 /// What the picture says now, for the layouts that depend on it.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Live {
@@ -211,6 +249,8 @@ pub struct Live {
     pub lower: bool,
     /// The upper screen is Edo's (`edo_in`).
     pub edo: bool,
+    /// The title's "Press START" box on the lower screen (`prompt_box`).
+    pub prompt: Option<Rect>,
 }
 
 /// Which screen the game wants the player at, from the lower screen's picture: the lower, when it
@@ -231,7 +271,8 @@ pub fn lower_wanted(scale: usize, rgba: &[u8]) -> Option<bool> {
         }
     }
     let content = lit * 100 >= n * 10;
-    Some(content && !counter_in(scale, rgba))
+    // the title's prompt is lit but is no menu: the upper screen is what is looked at
+    Some(content && !counter_in(scale, rgba) && prompt_box(scale, rgba).is_none())
 }
 
 pub fn find(layouts: &[Layout], v: &crate::config::Video, live: &Live) -> Layout {
@@ -253,6 +294,10 @@ fn pick(layouts: &[Layout], v: &crate::config::Video, live: &Live) -> Layout {
         "overlay" => overlay(v.panel),
         name => layouts.iter().find(|l| l.name == name).unwrap_or(&layouts[0]).clone(),
     };
+    // the title: the upper screen's film with the lower screen's "Press START" over it
+    if let (Some(b), [Some(_), None]) = (live.prompt, l.screens) {
+        l.patches.push(Patch { screen: 1, src: b, dst: b });
+    }
     // Edo's screen on one: the keys of the lower screen, with the upper's hint text beside them
     if live.edo && l.screens[0].is_none() && l.screens[1].is_some() && l.patches.is_empty() {
         l.patches.push(edo_patch());
@@ -330,7 +375,7 @@ mod tests {
     }
 
     fn live(vblank: u64, counter_seen: bool) -> Live {
-        Live { vblank, counter_seen, lower: false, edo: false }
+        Live { vblank, counter_seen, lower: false, edo: false, prompt: None }
     }
 
     #[test]
@@ -439,6 +484,57 @@ mod tests {
             assert!(!edo_in(scale, &title([20, 90, 240])));
             assert!(!edo_in(scale, &vec![0u8; 256 * 384 * 4 * scale * scale]));
         }
+    }
+
+    #[test]
+    fn the_start_prompt_is_a_blue_box_alone_on_the_lower_screen() {
+        for scale in [1, 2] {
+            let (w, h) = (256 * scale, 384 * scale);
+            let mut v = vec![0u8; w * h * 4];
+            // blue 46..210 x 78..114 on the lower screen, a white rim of 2 pixels
+            for y in 192 * scale..h {
+                for x in 0..w {
+                    let (px, py) = (x / scale, y / scale - 192);
+                    let inside = (46..210).contains(&px) && (78..114).contains(&py);
+                    let rim = (44..212).contains(&px) && (76..116).contains(&py);
+                    let o = (y * w + x) * 4;
+                    if inside && px % 4 == 0 && (86..106).contains(&py) {
+                        // the words, white on the blue
+                        v[o..o + 3].copy_from_slice(&[255, 255, 255]);
+                    } else if inside {
+                        v[o..o + 3].copy_from_slice(&[0, 150, 255]);
+                    } else if rim {
+                        v[o..o + 3].copy_from_slice(&[255, 255, 255]);
+                    }
+                }
+            }
+            let b = prompt_box(scale, &v).unwrap();
+            assert!((b.x - 42.0).abs() <= 2.0 && (b.y - 74.0).abs() <= 2.0 && (b.w - 172.0).abs() <= 4.0 && (b.h - 44.0).abs() <= 4.0, "{:?}", b);
+            // wanted: not the lower screen (the film above is looked at)
+            assert_eq!(lower_wanted(scale, &v), Some(false));
+            // black, a menu (lit all over): no prompt
+            assert_eq!(prompt_box(scale, &vec![0u8; w * h * 4]), None);
+            let mut menu = v.clone();
+            for y in 192 * scale..h {
+                for x in 0..w {
+                    let o = (y * w + x) * 4;
+                    menu[o..o + 3].copy_from_slice(&[200, 120, 40]);
+                }
+            }
+            assert_eq!(prompt_box(scale, &menu), None);
+        }
+    }
+
+    #[test]
+    fn the_prompt_goes_over_the_upper_screen_where_it_is() {
+        let all = all();
+        let b = Rect { x: 42.0, y: 74.0, w: 172.0, h: 44.0 };
+        let live = Live { prompt: Some(b), ..Default::default() };
+        let l = find(&all, &video("single", false, false, false), &live);
+        assert_eq!(l.patches, vec![Patch { screen: 1, src: b, dst: b }]);
+        // not when the lower screen is the one shown, or both
+        assert!(find(&all, &video("single", true, false, false), &live).patches.is_empty());
+        assert!(find(&all, &video("stacked", false, false, false), &live).patches.is_empty());
     }
 
     #[test]
