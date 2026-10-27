@@ -65,11 +65,12 @@ impl Menu {
                     }
                 });
                 if s.video.layout == "single" {
-                    ui.horizontal(|ui| {
+                    ui.checkbox(&mut s.video.auto, tx("The screen follows the game (a scene: upper, a menu: lower)", "Экран следует за игрой (сцена: верхний, меню: нижний)"));
+                    ui.add_enabled_ui(!s.video.auto, |ui| ui.horizontal(|ui| {
                         ui.label(tx("Screen shown (F8):", "Какой экран (F8):"));
                         ui.selectable_value(&mut s.video.lower, false, tx("upper", "верхний"));
                         ui.selectable_value(&mut s.video.lower, true, tx("lower (touch)", "нижний (касание)"));
-                    });
+                    }));
                 }
                 ui.checkbox(&mut s.video.counter, tx("Counter on the upper screen when it is alone", "Счётчик на верхнем экране, когда он один"));
                 ui.checkbox(&mut s.video.logos_in_turn, tx("Logos in turn when one screen is shown", "Логотипы по очереди, когда виден один экран"));

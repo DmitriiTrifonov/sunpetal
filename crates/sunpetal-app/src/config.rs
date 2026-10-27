@@ -23,6 +23,9 @@ pub struct Video {
     pub panel: bool,
     /// With one screen shown (upper only): the lower screen's counter on it, in the corner.
     pub counter: bool,
+    /// In the `single` layout: the screen follows the game (the lower for a menu, the upper for a
+    /// scene) instead of the choice in `lower`.
+    pub auto: bool,
     /// With one screen shown: the logos at the start, which are on both screens, one after another.
     pub logos_in_turn: bool,
     pub fullscreen: bool,
@@ -38,7 +41,7 @@ pub struct Video {
 
 impl Default for Video {
     fn default() -> Video {
-        Video { res: 2, linear: true, layout: "stacked".into(), lower: false, panel: false, counter: true, logos_in_turn: true, fullscreen: false, background: "glow".into(), show_stats: false, texture_pack: String::new(), window: [512, 768] }
+        Video { res: 2, linear: true, layout: "stacked".into(), lower: false, panel: false, counter: true, auto: true, logos_in_turn: true, fullscreen: false, background: "glow".into(), show_stats: false, texture_pack: String::new(), window: [512, 768] }
     }
 }
 

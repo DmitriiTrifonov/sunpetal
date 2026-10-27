@@ -64,6 +64,9 @@ fn pad_button(b: gilrs::Button) -> u32 {
     }
 }
 
+/// Frames the picture must want the other screen before the single layout moves to it.
+const AUTO_FRAMES: u32 = 20;
+
 struct App {
     shared: Arc<Shared>,
     ring: Option<Arc<audio::Ring>>,
@@ -99,11 +102,18 @@ struct App {
     win_size: (u32, u32),
     /// The lower screen has the map's counter (`layout::counter_in`, from the last picture).
     counter_seen: bool,
+    /// The screen the picture wants (`layout::lower_wanted`) and for how many frames it has wanted it.
+    want: (bool, u32),
+    auto_lower: bool,
 }
 
 impl App {
     fn layout(&self) -> layout::Layout {
-        layout::find(&self.layouts, &self.settings.video, self.shared.vblank.load(Ordering::Relaxed), self.counter_seen)
+        layout::find(&self.layouts, &self.settings.video, &self.live())
+    }
+
+    fn live(&self) -> layout::Live {
+        layout::Live { vblank: self.shared.vblank.load(Ordering::Relaxed), counter_seen: self.counter_seen, lower: self.auto_lower }
     }
 
     /// Swaps the screen shown in the single layout; from another layout, goes into it.
@@ -111,7 +121,9 @@ impl App {
         if self.settings.video.layout == "overlay" {
             self.settings.video.panel = !self.settings.video.panel;
         } else if self.settings.video.layout == "single" {
-            self.settings.video.lower = !self.settings.video.lower;
+            // the player's own choice: from the screen now shown, and the game stops deciding
+            self.settings.video.lower = if self.settings.video.auto { !self.auto_lower } else { !self.settings.video.lower };
+            self.settings.video.auto = false;
         } else {
             self.settings.video.layout = "single".into();
         }
@@ -470,6 +482,14 @@ impl ApplicationHandler for App {
                 if let Some((scale, rgba)) = &frame {
                     self.dial_scene = dial::recognise(*scale, rgba);
                     self.counter_seen = layout::counter_in(*scale, rgba);
+                    // a change of screen waits until the picture has held for a moment (a fade, a
+                    // flash between scenes would flicker it)
+                    if let Some(w) = layout::lower_wanted(*scale, rgba) {
+                        self.want = if w == self.want.0 { (w, self.want.1 + 1) } else { (w, 0) };
+                        if self.want.1 >= AUTO_FRAMES {
+                            self.auto_lower = w;
+                        }
+                    }
                 }
                 if let (Some((scale, rgba)), Some(g)) = (frame, &mut self.gfx) {
                     g.upload(scale, &rgba);
@@ -480,9 +500,10 @@ impl ApplicationHandler for App {
                 let fade = self.skip_fade;
                 let mut action = None;
                 {
-                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, .. } = self;
+                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, auto_lower, .. } = self;
+                    let live = layout::Live { vblank: shared.vblank.load(Ordering::Relaxed), counter_seen: *counter_seen, lower: *auto_lower };
                     if let Some(g) = gfx {
-                        let layout = layout::find(layouts, &settings.video, shared.vblank.load(Ordering::Relaxed), *counter_seen);
+                        let layout = layout::find(layouts, &settings.video, &live);
                         let names: Vec<&str> = layouts.iter().map(|l| l.name).collect();
                         let fx = settings.effects.clone();
                         let internal = (256 * settings.video.res as u32, 192 * settings.video.res as u32);
@@ -536,6 +557,7 @@ impl ApplicationHandler for App {
                     let layout_changed = self.settings.video.layout != self.applied.video.layout
                         || self.settings.video.lower != self.applied.video.lower
                         || self.settings.video.panel != self.applied.video.panel
+                        || self.settings.video.auto != self.applied.video.auto
                         || self.settings.video.res != self.applied.video.res
                         || self.settings.interface.language != self.applied.interface.language;
                     self.apply();
@@ -658,6 +680,8 @@ pub fn run(o: Options, el: EventLoop<()>) {
         pads: gilrs::Gilrs::new().map_err(|e| eprintln!("no pads: {}", e)).ok(),
         win_size: (512, 768),
         counter_seen: false,
+        want: (false, 0),
+        auto_lower: false,
     };
     el.run_app(&mut app).expect("the event loop");
     // the window is closed: stop the machine (its thread saves the backup memory and exits)
