@@ -21,16 +21,44 @@ const MIN_FAR: usize = 12;
 const KEY: usize = 8;
 const CANDIDATES: usize = 32;
 
-pub fn crc32(data: &[u8]) -> u32 {
-    let mut table = [0u32; 256];
-    for (i, t) in table.iter_mut().enumerate() {
-        let mut c = i as u32;
-        for _ in 0..8 {
-            c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
+/// CRC-32 (the zlib one) that takes its bytes in pieces.
+pub struct Crc32 {
+    table: [u32; 256],
+    state: u32,
+}
+
+impl Crc32 {
+    pub fn new() -> Crc32 {
+        let mut table = [0u32; 256];
+        for (i, t) in table.iter_mut().enumerate() {
+            let mut c = i as u32;
+            for _ in 0..8 {
+                c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
+            }
+            *t = c;
         }
-        *t = c;
+        Crc32 { table, state: !0 }
     }
-    !data.iter().fold(!0u32, |c, b| table[((c ^ *b as u32) & 0xFF) as usize] ^ (c >> 8))
+
+    pub fn update(&mut self, data: &[u8]) {
+        self.state = data.iter().fold(self.state, |c, b| self.table[((c ^ *b as u32) & 0xFF) as usize] ^ (c >> 8));
+    }
+
+    pub fn finish(&self) -> u32 {
+        !self.state
+    }
+}
+
+impl Default for Crc32 {
+    fn default() -> Crc32 {
+        Crc32::new()
+    }
+}
+
+pub fn crc32(data: &[u8]) -> u32 {
+    let mut c = Crc32::new();
+    c.update(data);
+    c.finish()
 }
 
 pub(crate) fn put_varint(out: &mut Vec<u8>, mut v: u64) {

@@ -58,6 +58,7 @@ fn run() -> Result<(), String> {
     };
     c.sections.retain(|s| &s.tag != b"TRAN" || Translation::from_bytes(&s.data).map_or(true, |t| t.lang != lang));
     c.add(b"TRAN", bytes.clone());
+    c.set_rom(rom[0xC..0x10].try_into().map_err(|_| "the ROM is too short")?, tr.rom_crc);
     c.write(&out)?;
     println!("{}: {} texts in {} files, {} deltas, section {} bytes, {} problems", lang, tr.table.texts(), tr.table.files(), tr.deltas.len(), bytes.len(), problems.len());
     Ok(())

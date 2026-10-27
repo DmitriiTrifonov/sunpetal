@@ -95,7 +95,10 @@ impl Config {
 pub fn overlay_files(cfg: &Config, rom: &[u8]) -> Result<Vec<(String, Vec<u8>)>, String> {
     let mut files = Vec::new();
     if let (Some(data), Some(lang)) = (&cfg.data, &cfg.language) {
-        let c = sunpetal_data::container::Container::read_only(data, |t| t == b"TRAN")?;
+        let c = sunpetal_data::container::Container::read_only(data, |t| t == b"TRAN" || t == b"META")?;
+        if let Some(meta) = c.meta()? {
+            meta.check_rom(sunpetal_data::delta::crc32(rom)).map_err(|e| format!("{}: {}", data.display(), e))?;
+        }
         let found = c.all(b"TRAN").filter_map(|s| sunpetal_data::translate::Translation::from_bytes(&s.data).ok()).find(|t| &t.lang == lang);
         let t = found.ok_or_else(|| format!("{} has no translation `{}`", data.display(), lang))?;
         files.extend(t.overlay(rom)?);
