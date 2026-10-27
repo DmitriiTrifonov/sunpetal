@@ -730,6 +730,8 @@ pub struct Options {
     pub pack: Option<PathBuf>,
     /// The game language for this run (`--lang ru`; `--lang none`: the ROM's own text), over the setting.
     pub lang: Option<String>,
+    /// The widened 3D view for this run (`--wide on|off`), over the setting.
+    pub wide: Option<bool>,
 }
 
 /// Runs the game in a window until it closes.
@@ -738,6 +740,9 @@ pub fn run(o: Options, el: EventLoop<()>) {
     let mut settings = config::load();
     if let Some(r) = o.res {
         settings.video.res = r.clamp(1, 8);
+    }
+    if let Some(w) = o.wide {
+        settings.video.wide = w;
     }
     if let Some(l) = o.lang {
         settings.game.language = if l == "none" { String::new() } else { l };
@@ -849,7 +854,7 @@ pub fn run(o: Options, el: EventLoop<()>) {
 pub fn desktop_main() {
     let mut args = std::env::args().skip(1);
     let mut rom: Option<PathBuf> = None;
-    let mut o = Options { rom: PathBuf::new(), out: None, save: None, mute: false, res: None, menu: false, dump: None, pack: None, lang: None };
+    let mut o = Options { rom: PathBuf::new(), out: None, save: None, mute: false, res: None, menu: false, dump: None, pack: None, lang: None, wide: None };
     while let Some(a) = args.next() {
         match a.as_str() {
             "--out" => o.out = args.next().map(PathBuf::from),
@@ -862,6 +867,7 @@ pub fn desktop_main() {
             "--dump-textures" => o.dump = args.next().map(PathBuf::from),
             "--texture-pack" => o.pack = args.next().map(PathBuf::from),
             "--lang" => o.lang = args.next(),
+            "--wide" => o.wide = args.next().map(|v| !matches!(v.as_str(), "off" | "0" | "no")),
             _ if rom.is_none() => rom = Some(PathBuf::from(a)),
             _ => {
                 eprintln!("unknown argument {}", a);
