@@ -214,8 +214,9 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
                 still = if print == last_print { still + 1 } else { 0 };
                 last_print = print;
             }
-            *shared.frame.lock().unwrap() = Some(picture);
+            // the widened picture first: the window takes the plain one and then looks for its wide partner
             *shared.wide_frame.lock().unwrap() = if want_e > 0 { nds::upper_wide_rgba() } else { None };
+            *shared.frame.lock().unwrap() = Some(picture);
         }
         if skipping {
             skipped += 1;
