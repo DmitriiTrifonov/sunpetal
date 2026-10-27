@@ -447,6 +447,11 @@ impl Gx {
             // a band across most of the screen goes to both edges, even if it starts a little inside
             // (the dialogue panel starts beside the portrait)
             let (min_x, max_x) = (v[..n].iter().map(|x| x.p[0]).min().unwrap_or(0), v[..n].iter().map(|x| x.p[0]).max().unwrap_or(0));
+            let (min_y, max_y) = (v[..n].iter().map(|x| x.p[1]).min().unwrap_or(0), v[..n].iter().map(|x| x.p[1]).max().unwrap_or(0));
+            let w0 = v[0].p[3];
+            let tall = (max_y - min_y) as i64 * 100 >= w0 as i64 * 2 * 90;
+            let (on_left, on_right) = (max_x as i64 * 10 <= -(w0 as i64) * 2, min_x as i64 * 10 >= w0 as i64 * 2);
+            let edge_strip = flat && untextured && !stretch && tall && (on_left != on_right);
             for x in &mut v[..n] {
                 if stretch {
                     if x.p[0].abs() == x.p[3] {
@@ -458,6 +463,12 @@ impl Gx {
                     }
                 }
                 x.p[0] = (x.p[0] as i64 * 256 / big_w) as i32;
+                // a strip the game lays against one edge of its picture (the flickering bars of the "on air"
+                // frame, the wipe of the dialogue panel) stays against that edge of the wider view
+                if edge_strip {
+                    let w = x.p[3] as i64;
+                    x.p[0] -= (w - w * 256 / big_w) as i32 * if on_left { 1 } else { -1 };
+                }
             }
         }
         if attr & 0x1000 == 0 && v[..n].iter().any(|x| x.p[2] > x.p[3]) {
