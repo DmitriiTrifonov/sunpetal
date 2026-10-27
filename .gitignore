@@ -13,3 +13,4 @@ target/
 # разное
 .DS_Store
 __pycache__/
+artifacts/
