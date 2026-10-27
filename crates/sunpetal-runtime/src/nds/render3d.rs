@@ -713,17 +713,19 @@ fn shade_pass(strength: f32, radius: f32, t: &Target, w: usize, h: usize, s: usi
 }
 
 /// In each row, the pixels of the `e` columns at each side that no polygon covered (the depth is the
-/// clear depth) take everything of the mirrored column of the picture inside them (copying the edge
-/// column would draw whatever ends there, a column or a roof, out into a streak).
+/// clear depth) take everything of the nearest column of the picture inside them, when that edge is
+/// flat (the same colour over the next few columns: sky, a plain fill). An edge with detail (a column,
+/// a roof, a fence) is left: copying it would draw it out into a streak, mirroring it would double it.
 fn extend_sides(t: &mut Target, job: &Job, w: usize, h: usize, e: usize) {
     let cd = clear_depth(job.clear_depth);
     for y in 0..h {
         let row = y * w;
+        let (l, r) = (row + e, row + w - e - 1);
+        let flat_l = (1..6).all(|k| t.color[l + k] == t.color[l] && t.alpha[l + k] == t.alpha[l]);
+        let flat_r = (1..6).all(|k| t.color[r - k] == t.color[r] && t.alpha[r - k] == t.alpha[r]);
         for x in 0..e {
-            let d = e - 1 - x; // distance in from the picture's edge
-            let (l, r) = (row + e + d, row + w - e - 1 - d);
-            for (i, from) in [(row + x, l), (row + w - 1 - x, r)] {
-                if t.depth[i] >= cd {
+            for (i, from, flat) in [(row + x, l, flat_l), (row + w - 1 - x, r, flat_r)] {
+                if flat && t.depth[i] >= cd {
                     t.color[i] = t.color[from];
                     t.alpha[i] = t.alpha[from];
                     t.depth[i] = t.depth[from];
