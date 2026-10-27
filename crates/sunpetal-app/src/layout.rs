@@ -283,7 +283,7 @@ pub fn paper_in(scale: usize, rgba: &[u8]) -> bool {
             let o = (((top + y * scale) * w) + x * scale) * 4;
             let p = &rgba[o..o + 3];
             n += 1;
-            paper += ((p[0] as i32 - 250).abs() <= 14 && (p[1] as i32 - 200).abs() <= 14 && (p[2] as i32 - 127).abs() <= 18) as usize;
+            paper += ((p[0] as i32 - 226).abs() <= 12 && (p[1] as i32 - 193).abs() <= 12 && (p[2] as i32 - 135).abs() <= 14) as usize;
         }
     }
     paper * 100 >= n * 35
@@ -821,7 +821,7 @@ mod tests {
         let mut rgba = vec![0u8; 256 * 192 * 2 * 4];
         assert!(!paper_in(1, &rgba));
         for px in rgba[256 * 192 * 4..].chunks_exact_mut(4) {
-            px.copy_from_slice(&[250, 200, 127, 255]);
+            px.copy_from_slice(&[226, 193, 135, 255]);
         }
         assert!(paper_in(1, &rgba));
         // 48 down: 144 rows of the upper screen, then 48 of the lower; a touch at the window's bottom is the lower's row 47
