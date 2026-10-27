@@ -2,7 +2,7 @@
 //! the translated ROM, both against the original ROM. For the author of a translation; the player
 //! gets the data file and never needs the translated ROM.
 //!
-//!     sunpetal-pack-translation --rom ORIGINAL.nds --translated TRANSLATED.nds --table text/ru.csv \
+//!     sunpetal-pack-translation --rom ORIGINAL.nds [--translated TRANSLATED.nds] --table text/ru.csv \
 //!         --lang ru [--column Русский] [--base ue] --out sunpetal.data [--merge OTHER.spdata]
 //!
 //! With `--merge` the sections of that file are kept (the pictures), the translation of the same
@@ -41,13 +41,21 @@ fn run() -> Result<(), String> {
             _ => return Err(format!("unknown argument {}", a)),
         }
     }
-    let (Some(rom), Some(done), Some(table), Some(out)) = (rom, done, table, out) else {
-        return Err("usage: sunpetal-pack-translation --rom ORIGINAL.nds --translated TRANSLATED.nds --table ru.csv --lang ru --out sunpetal.data".into());
+    let (Some(rom), Some(table), Some(out)) = (rom, table, out) else {
+        return Err("usage: sunpetal-pack-translation --rom ORIGINAL.nds [--translated TRANSLATED.nds] --table ru.csv --lang ru --out sunpetal.data".into());
     };
     let read = |p: &PathBuf| std::fs::read(p).map_err(|e| format!("{}: {}", p.display(), e));
     let table = Table::from_csv(&String::from_utf8(read(&table)?).map_err(|e| e.to_string())?, &column)?;
-    let (rom, done) = (read(&rom)?, read(&done)?);
+    // without a translated ROM there is no graphics and font to carry: the texts alone
+    let rom = read(&rom)?;
+    let compare = done.is_some();
+    let done = match &done {
+        Some(p) => read(p)?,
+        None => rom.clone(),
+    };
     let (tr, problems) = Translation::make(&rom, &done, table, &lang, &base)?;
+    // with no translated ROM there is nothing to compare the texts with
+    let problems = if compare { problems } else { Vec::new() };
     for p in &problems {
         eprintln!("warning: {}", p);
     }

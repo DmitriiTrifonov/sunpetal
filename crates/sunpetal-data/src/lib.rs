@@ -4,6 +4,8 @@ pub mod container;
 pub mod delta;
 pub mod dsrom;
 pub mod lz10;
+pub mod nftr;
 pub mod nitrofs;
 pub mod script;
+pub mod tools;
 pub mod translate;
