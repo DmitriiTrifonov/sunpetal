@@ -259,6 +259,15 @@ pub(super) struct Gx {
 }
 
 impl Gx {
+    /// A clip-space x as the widened frustum has it (the picture is `256 + 2 * wide` wide for the same x range).
+    fn widen_x(&self, x: i64) -> i64 {
+        if self.wide == 0 {
+            x
+        } else {
+            x * 256 / (256 + 2 * self.wide as i64)
+        }
+    }
+
     pub(super) fn set_wide(&mut self, each_side: usize) {
         self.wide = each_side;
     }
@@ -1104,7 +1113,9 @@ impl Nds {
             return g.build.polys.len() as u32 | g.build.nverts_ds << 16;
         }
         if (0x0400_0620..0x0400_0630).contains(&off) {
-            return g.pos_result[((off - 0x0400_0620) >> 2) as usize] as u32;
+            let i = ((off - 0x0400_0620) >> 2) as usize;
+            // widened: the game tests what it sends against the wider view (its own culling), x as the frustum has it
+            return if i == 0 { g.widen_x(g.pos_result[0] as i64) as u32 } else { g.pos_result[i] as u32 };
         }
         if (0x0400_0630..0x0400_0636).contains(&off) {
             let i = ((off - 0x0400_0630) >> 1) as usize;
@@ -1112,7 +1123,9 @@ impl Nds {
         }
         if (0x0400_0640..0x0400_0680).contains(&off) {
             g.update_clip();
-            return g.mtx_clip[((off - 0x0400_0640) >> 2) as usize] as u32;
+            let i = ((off - 0x0400_0640) >> 2) as usize;
+            // the x row (elements 0, 4, 8, 12 of the matrix), as the wider frustum has it, for the game's own culling
+            return if i % 4 == 0 { g.widen_x(g.mtx_clip[i] as i64) as u32 } else { g.mtx_clip[i] as u32 };
         }
         if (0x0400_0680..0x0400_06A4).contains(&off) {
             let i = ((off - 0x0400_0680) >> 2) as usize;
