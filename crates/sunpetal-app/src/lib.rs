@@ -572,7 +572,13 @@ impl ApplicationHandler for App {
                         self.send_keys();
                     }
                 }
-                let frame = self.shared.frame.lock().unwrap().take();
+                // the picture and its wide partner, taken together (the emulation writes them so)
+                let (frame, wide_pair) = {
+                    let mut slot = self.shared.frame.lock().unwrap();
+                    let f = slot.take();
+                    let w = if f.is_some() { self.shared.wide_frame.lock().unwrap().take() } else { None };
+                    (f, w)
+                };
                 if let Some((scale, rgba)) = &frame {
                     self.dial_scene = dial::recognise(*scale, rgba);
                     self.counter_seen = layout::counter_in(*scale, rgba);
@@ -608,7 +614,7 @@ impl ApplicationHandler for App {
                 if let (Some((scale, rgba)), Some(g)) = (frame, &mut self.gfx) {
                     g.upload(scale, &rgba);
                     // the 3D scene widened, when the emulation made one for this picture
-                    match self.shared.wide_frame.lock().unwrap().take() {
+                    match wide_pair {
                         Some((sc, e, px)) => {
                             g.upload_wide(sc, e, &px);
                             self.wide_now = e;

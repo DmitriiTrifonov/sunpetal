@@ -227,8 +227,11 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             if wide.is_none() && want_e > 0 && no_wide <= WIDE_KEEP_FRAMES && wide_streak >= 30 {
                 wide = Some(extend_edges(picture.0, want_e, &picture.1));
             }
+            // both under the picture's lock, so the window takes the pair or neither
+            let mut slot = shared.frame.lock().unwrap();
             *shared.wide_frame.lock().unwrap() = wide;
-            *shared.frame.lock().unwrap() = Some(picture);
+            *slot = Some(picture);
+            drop(slot);
         }
         if skipping {
             skipped += 1;
