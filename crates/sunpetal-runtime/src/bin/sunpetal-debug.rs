@@ -6,7 +6,7 @@
 //! `--repl` reads commands from stdin, one per line, and answers each with a line of JSON
 //! (`{"ok":true,...}` or `{"error":"..."}`):
 //!
-//!     run N | press KEYS [FRAMES] | tap X Y [FRAMES] | shot FILE
+//!     run N | press KEYS [FRAMES] | tap X Y [FRAMES] | shot FILE | shotwide FILE (with --wide)
 //!     log FILE|off | advance [FRAMES] | walk N [FRAMES] | shown | peek ADDR[:LEN] | find TEXT | findhex HEX | calls FRAMES FILE [KEYS] | callsarg FRAMES LO[-HI] [KEYS] | quit
 use std::io::BufRead;
 use std::path::PathBuf;
@@ -153,6 +153,10 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
         }
         "shot" => {
             s.shot(std::path::Path::new(w.first().ok_or("shot FILE")?))?;
+            done(json!({}))
+        }
+        "shotwide" => {
+            sunpetal_runtime::nds::screenshot_wide(std::path::Path::new(w.first().ok_or("shotwide FILE")?))?;
             done(json!({}))
         }
         "peek" => {

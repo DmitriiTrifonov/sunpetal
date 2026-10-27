@@ -396,6 +396,14 @@ impl ApplicationHandler for App {
             WindowEvent::KeyboardInput { event, .. } => {
                 let PhysicalKey::Code(code) = event.physical_key else { return };
                 let down = event.state == ElementState::Pressed;
+                // a page of paper scrolled over both screens: up and down move it, the game does not get them
+                if self.live().scroll.is_some() && !self.menu.open && matches!(code, KeyCode::ArrowUp | KeyCode::ArrowDown) {
+                    if down {
+                        let d = if code == KeyCode::ArrowUp { -24.0 } else { 24.0 };
+                        self.scroll = (self.scroll + d).clamp(0.0, 192.0);
+                    }
+                    return;
+                }
                 // buttons are released whatever the menu is doing; pressed only in the game
                 if let Some(&b) = self.keymap.get(&code) {
                     if !down {
