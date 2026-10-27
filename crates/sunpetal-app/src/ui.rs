@@ -72,6 +72,7 @@ impl Menu {
                     });
                 }
                 ui.checkbox(&mut s.video.counter, tx("Counter on the upper screen when it is alone", "Счётчик на верхнем экране, когда он один"));
+                ui.checkbox(&mut s.video.logos_in_turn, tx("Logos in turn when one screen is shown", "Логотипы по очереди, когда виден один экран"));
                 if s.video.layout == "overlay" {
                     ui.checkbox(&mut s.video.panel, tx("Lower screen as a panel (F8)", "Нижний экран панелью (F8)"));
                 }

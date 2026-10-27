@@ -97,11 +97,13 @@ struct App {
     pad: u32,
     pads: Option<gilrs::Gilrs>,
     win_size: (u32, u32),
+    /// The lower screen has the map's counter (`layout::counter_in`, from the last picture).
+    counter_seen: bool,
 }
 
 impl App {
     fn layout(&self) -> layout::Layout {
-        layout::find(&self.layouts, &self.settings.video)
+        layout::find(&self.layouts, &self.settings.video, self.shared.vblank.load(Ordering::Relaxed), self.counter_seen)
     }
 
     /// Swaps the screen shown in the single layout; from another layout, goes into it.
@@ -467,6 +469,7 @@ impl ApplicationHandler for App {
                 let frame = self.shared.frame.lock().unwrap().take();
                 if let Some((scale, rgba)) = &frame {
                     self.dial_scene = dial::recognise(*scale, rgba);
+                    self.counter_seen = layout::counter_in(*scale, rgba);
                 }
                 if let (Some((scale, rgba)), Some(g)) = (frame, &mut self.gfx) {
                     g.upload(scale, &rgba);
@@ -477,9 +480,9 @@ impl ApplicationHandler for App {
                 let fade = self.skip_fade;
                 let mut action = None;
                 {
-                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, .. } = self;
+                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, .. } = self;
                     if let Some(g) = gfx {
-                        let layout = layout::find(layouts, &settings.video);
+                        let layout = layout::find(layouts, &settings.video, shared.vblank.load(Ordering::Relaxed), *counter_seen);
                         let names: Vec<&str> = layouts.iter().map(|l| l.name).collect();
                         let fx = settings.effects.clone();
                         let internal = (256 * settings.video.res as u32, 192 * settings.video.res as u32);
@@ -654,6 +657,7 @@ pub fn run(o: Options, el: EventLoop<()>) {
         pad: 0,
         pads: gilrs::Gilrs::new().map_err(|e| eprintln!("no pads: {}", e)).ok(),
         win_size: (512, 768),
+        counter_seen: false,
     };
     el.run_app(&mut app).expect("the event loop");
     // the window is closed: stop the machine (its thread saves the backup memory and exits)

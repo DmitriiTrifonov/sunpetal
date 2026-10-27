@@ -30,6 +30,35 @@ pub struct Patch {
     pub dst: Rect,
 }
 
+/// The studio logos at the start are on both screens at once; with one screen shown they come in
+/// turn: which screen to show at this DS frame (`Some(true)`: the lower), or none of the logos.
+/// The frames are those of the European ROM's start (measured: upper Rising Star Games, lower
+/// the Grasshopper crest then h.a.n.d., then Marvelous above Act Imagine).
+pub fn logo_screen(vblank: u64) -> Option<bool> {
+    const TURNS: [(u64, u64, bool); 5] = [(230, 320, false), (320, 560, true), (560, 700, false), (700, 800, true), (800, 800, false)];
+    TURNS.iter().find(|(from, to, _)| (*from..*to).contains(&vblank)).map(|t| t.2)
+}
+
+/// Whether the lower screen's picture has the counter where it is cut from: a dark box with bright
+/// digits (`rgba`: both screens, the upper first, `scale` times 256x192 each). A black corner (the
+/// title) or a plain one (a menu) has none, and nothing is cut from it.
+pub fn counter_in(scale: usize, rgba: &[u8]) -> bool {
+    let s = counter_patch().src;
+    let (w, top) = (256 * scale, 192 * scale);
+    let (mut n, mut dark, mut bright) = (0usize, 0usize, 0usize);
+    for y in (s.y as usize * scale..(s.y + s.h) as usize * scale).step_by(scale.max(1)) {
+        for x in (s.x as usize * scale..(s.x + s.w) as usize * scale).step_by(scale.max(1)) {
+            let o = ((top + y) * w + x) * 4;
+            let Some(p) = rgba.get(o..o + 3) else { return false };
+            let sum = p[0] as u32 + p[1] as u32 + p[2] as u32;
+            n += 1;
+            dark += (sum < 150) as usize;
+            bright += (sum > 600) as usize;
+        }
+    }
+    n > 0 && dark * 10 >= n * 5 && bright * 100 >= n * 8
+}
+
 /// The counter in the lower screen's top left corner (the map's number) and where it goes on the
 /// upper screen when only that is shown.
 pub fn counter_patch() -> Patch {
@@ -84,14 +113,20 @@ pub fn all() -> Vec<Layout> {
 
 /// The layout a setting names; `single` shows the lower screen if `lower`, `overlay` the panel if
 /// `panel`.
-pub fn find(layouts: &[Layout], v: &crate::config::Video) -> Layout {
+pub fn find(layouts: &[Layout], v: &crate::config::Video, vblank: u64, counter_seen: bool) -> Layout {
+    // one screen shown: the logos come in turn
+    if v.logos_in_turn && matches!(v.layout.as_str(), "single" | "overlay") {
+        if let Some(lower) = logo_screen(vblank) {
+            return single(lower);
+        }
+    }
     let mut l = match v.layout.as_str() {
         "single" => single(v.lower),
         "overlay" => overlay(v.panel),
         name => layouts.iter().find(|l| l.name == name).unwrap_or(&layouts[0]).clone(),
     };
     // the number of the lower screen goes on the upper one when that is all there is
-    if v.counter && l.screens[0].is_some() && l.screens[1].is_none() {
+    if v.counter && counter_seen && l.screens[0].is_some() && l.screens[1].is_none() {
         l.patches.push(counter_patch());
     }
     l
@@ -149,26 +184,79 @@ mod tests {
     #[test]
     fn the_single_layout_shows_the_screen_picked() {
         let all = all();
-        assert_eq!(find(&all, &video("single", false, false, false)).screens.map(|s| s.is_some()), [true, false]);
-        assert_eq!(find(&all, &video("single", true, false, false)).screens.map(|s| s.is_some()), [false, true]);
-        assert_eq!(find(&all, &video("nonsense", true, true, false)).name, "stacked");
+        assert_eq!(find(&all, &video("single", false, false, false), 0, true).screens.map(|s| s.is_some()), [true, false]);
+        assert_eq!(find(&all, &video("single", true, false, false), 0, true).screens.map(|s| s.is_some()), [false, true]);
+        assert_eq!(find(&all, &video("nonsense", true, true, false), 0, true).name, "stacked");
         // the picked lower screen takes touch
         assert!(single(true).touch((256.0, 192.0), (10.0, 10.0), false).is_some());
         assert!(single(false).touch((256.0, 192.0), (10.0, 10.0), false).is_none());
     }
 
     #[test]
+    fn the_logos_come_in_turn_on_one_screen_and_only_there() {
+        let all = all();
+        assert_eq!(logo_screen(100), None);
+        assert_eq!(logo_screen(250), Some(false));
+        assert_eq!(logo_screen(400), Some(true));
+        assert_eq!(logo_screen(750), Some(true));
+        assert_eq!(logo_screen(2000), None);
+        let one = video("single", false, false, true);
+        assert_eq!(find(&all, &one, 400, true).screens.map(|s| s.is_some()), [false, true]);
+        // no counter patch on a logo, the chosen screen after them, both screens untouched
+        assert!(find(&all, &one, 250, true).patches.is_empty());
+        assert_eq!(find(&all, &one, 2000, true).screens.map(|s| s.is_some()), [true, false]);
+        assert_eq!(find(&all, &video("stacked", false, false, false), 400, true).screens.map(|s| s.is_some()), [true, true]);
+        let mut off = video("single", false, false, false);
+        off.logos_in_turn = false;
+        assert_eq!(find(&all, &off, 400, true).screens.map(|s| s.is_some()), [true, false]);
+    }
+
+    /// Both screens, `scale` times 256x192, all black; the lower one's corner drawn by `paint`.
+    fn frame(scale: usize, paint: impl Fn(usize, usize) -> [u8; 3]) -> Vec<u8> {
+        let (w, h) = (256 * scale, 384 * scale);
+        let mut v = vec![0u8; w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                let o = (y * w + x) * 4;
+                let p = if y >= 192 * scale { paint(x / scale, y / scale - 192) } else { [0, 0, 0] };
+                v[o..o + 3].copy_from_slice(&p);
+            }
+        }
+        v
+    }
+
+    #[test]
+    fn the_counter_is_found_by_its_dark_box_and_bright_digits() {
+        for scale in [1, 2] {
+            // a dark box with digits (every third column bright), as the map's
+            let counter = frame(scale, |x, y| if (4..64).contains(&x) && (7..20).contains(&y) && x % 3 == 0 { [255, 255, 255] } else { [10, 20, 30] });
+            assert!(counter_in(scale, &counter));
+            // black (the title), light (a menu), a dark box with no digits
+            assert!(!counter_in(scale, &frame(scale, |_, _| [0, 0, 0])));
+            assert!(!counter_in(scale, &frame(scale, |_, _| [200, 120, 40])));
+            assert!(!counter_in(scale, &frame(scale, |_, _| [10, 20, 30])));
+        }
+        assert!(!counter_in(1, &[]));
+    }
+
+    #[test]
+    fn no_counter_on_the_screen_no_patch() {
+        let all = all();
+        assert!(find(&all, &video("single", false, false, true), 0, false).patches.is_empty());
+    }
+
+    #[test]
     fn the_counter_goes_on_the_upper_screen_only_when_it_is_alone() {
         let all = all();
-        assert_eq!(find(&all, &video("single", false, false, true)).patches, vec![counter_patch()]);
-        assert_eq!(find(&all, &video("overlay", false, false, true)).patches.len(), 1);
+        assert_eq!(find(&all, &video("single", false, false, true), 0, true).patches, vec![counter_patch()]);
+        assert_eq!(find(&all, &video("overlay", false, false, true), 0, true).patches.len(), 1);
         // not with the panel open, the lower screen showing, both screens, or the setting off
-        assert!(find(&all, &video("overlay", false, true, true)).patches.is_empty());
-        assert!(find(&all, &video("single", true, false, true)).patches.is_empty());
-        assert!(find(&all, &video("stacked", false, false, true)).patches.is_empty());
-        assert!(find(&all, &video("single", false, false, false)).patches.is_empty());
+        assert!(find(&all, &video("overlay", false, true, true), 0, true).patches.is_empty());
+        assert!(find(&all, &video("single", true, false, true), 0, true).patches.is_empty());
+        assert!(find(&all, &video("stacked", false, false, true), 0, true).patches.is_empty());
+        assert!(find(&all, &video("single", false, false, false), 0, true).patches.is_empty());
         // fitted like the screens: the corner of a window twice the size is at twice the offset
-        let l = find(&all, &video("single", false, false, true));
+        let l = find(&all, &video("single", false, false, true), 0, true);
         let d = l.fit_rect((512.0, 384.0), l.patches[0].dst);
         assert_eq!((d.x, d.y, d.w), (8.0, 8.0, 120.0));
     }

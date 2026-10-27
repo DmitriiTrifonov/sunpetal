@@ -1,7 +1,7 @@
 //! The machine on its own thread: the runtime keeps its state per thread, and the window's thread
 //! belongs to the window. Frames and sound go out, input comes in, through `Shared`.
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -58,6 +58,10 @@ pub struct Input {
     pub pen: Option<(i32, i32)>,
 }
 
+/// The game's first screens, a black "Licensed by Nintendo" notice, end by this VBlank (the studio
+/// logos begin at ~230). Nothing here is licensed by Nintendo, so it is run through unseen.
+const NOTICE_END_VBLANKS: u64 = 215;
+
 /// The vblank at which the logos at the start end (the screens go black, then the title): the game
 /// takes no input before it (A, START and the stylus change nothing), so a click races through them.
 const LOGOS_END_VBLANKS: u64 = 580;
@@ -73,6 +77,8 @@ pub struct Shared {
     /// A click (a tap) came while the logos were on: run on, without waiting or sound, until they end.
     pub logo_click: AtomicBool,
     pub quit: AtomicBool,
+    /// The DS frame the machine is at (set by the emulation each frame).
+    pub vblank: AtomicU64,
     /// Run without waiting for the clock.
     pub fast: AtomicBool,
     /// Skip: run without waiting until the picture stops changing (the game waits for the player).
@@ -111,6 +117,7 @@ impl Shared {
             extras: Mutex::new(nds::Extras::default()),
             logo_click: AtomicBool::new(false),
             quit: AtomicBool::new(false),
+            vblank: AtomicU64::new(0),
             fast: AtomicBool::new(false),
             skip: AtomicBool::new(false),
             dialogue: AtomicBool::new(false),
@@ -169,8 +176,9 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         }
         // with the game's marks a skip draws nothing (the screen is dark for it: the frames cost only the game's
         // own time); without them it needs the picture, at the native size, the cheapest
-        let skipping_now = shared.skip.load(Ordering::Relaxed) || racing;
-        let draw = !(skipping_now && shared.marks.load(Ordering::Relaxed));
+        let notice = nds::vblanks() < NOTICE_END_VBLANKS;
+        let skipping_now = shared.skip.load(Ordering::Relaxed) || racing || notice;
+        let draw = !notice && !(skipping_now && shared.marks.load(Ordering::Relaxed));
         nds::set_scale(if skipping_now { 1 } else { shared.scale.load(Ordering::Relaxed) });
         nds::set_extras(*shared.extras.lock().unwrap());
         nds::set_draw(draw);
@@ -258,13 +266,14 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             counted = 0;
             since = Instant::now();
         }
+        shared.vblank.store(nds::vblanks(), Ordering::Relaxed);
         let samples = nds::take_samples();
         if let Some(a) = &audio {
-            if !skipping && !racing {
+            if !skipping && !racing && !notice {
                 a.push(&samples);
             }
         }
-        if shared.fast.load(Ordering::Relaxed) || skipping || racing {
+        if shared.fast.load(Ordering::Relaxed) || skipping || racing || notice {
             next = Instant::now();
             continue;
         }
