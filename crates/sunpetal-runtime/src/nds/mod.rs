@@ -566,6 +566,25 @@ pub fn screenshot(path: &std::path::Path) -> Result<(), String> {
     w.write_image_data(&rgb).map_err(|e| e.to_string())
 }
 
+/// The widened upper screen as PNGs of its parts: `<stem>_wide.png` (all), `<stem>_2d.png` and `<stem>_3d.png`;
+/// false if there is no widened picture.
+pub fn screenshot_wide_layers(stem: &std::path::Path) -> Result<bool, String> {
+    for (suffix, layers) in [("wide", 3u8), ("2d", 1), ("3d", 2)] {
+        let Some((scale, e, rgb)) = nds(|n| n.upper_wide_rgb_layers(n.scale, layers).map(|(e, rgb)| (n.scale, e, rgb))) else { return Ok(false) };
+        let path = std::path::PathBuf::from(format!("{}_{}.png", stem.display(), suffix));
+        if let Some(d) = path.parent() {
+            let _ = std::fs::create_dir_all(d);
+        }
+        let f = std::fs::File::create(&path).map_err(|e| format!("{}: {}", path.display(), e))?;
+        let mut enc = png::Encoder::new(std::io::BufWriter::new(f), (256 + 2 * e as u32) * scale as u32, 192 * scale as u32);
+        enc.set_color(png::ColorType::Rgb);
+        enc.set_depth(png::BitDepth::Eight);
+        let mut w = enc.write_header().map_err(|e| e.to_string())?;
+        w.write_image_data(&rgb).map_err(|e| e.to_string())?;
+    }
+    Ok(true)
+}
+
 /// The widened upper screen (`upper_wide_rgba`) as a PNG; false if there is none to write.
 pub fn screenshot_wide(path: &std::path::Path) -> Result<bool, String> {
     let Some((scale, e, rgb)) = nds(|n| n.upper_wide_rgb(n.scale).map(|(e, rgb)| (n.scale, e, rgb))) else { return Ok(false) };

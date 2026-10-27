@@ -88,6 +88,8 @@ pub struct Shared {
     pub fast: AtomicBool,
     /// Skip: run without waiting until the picture stops changing (the game waits for the player).
     pub skip: AtomicBool,
+    /// Write the picture and its parts to artifacts/shots (F10).
+    pub dump: AtomicBool,
     /// A dialogue box is on the screen (set by the emulation each frame).
     pub dialogue: AtomicBool,
     /// The game says when its script runs, so a skip can go through dialogues (set by the emulation).
@@ -124,6 +126,7 @@ impl Shared {
             quit: AtomicBool::new(false),
             vblank: AtomicU64::new(0),
             wide_px: AtomicUsize::new(0),
+            dump: AtomicBool::new(false),
             wide_frame: Mutex::new(None),
             fast: AtomicBool::new(false),
             skip: AtomicBool::new(false),
@@ -202,6 +205,14 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         let t0 = Instant::now();
         if !nds::run_frame() {
             break;
+        }
+        if shared.dump.swap(false, Ordering::Relaxed) {
+            let stem = std::path::PathBuf::from(format!("artifacts/shots/v{}", nds::vblanks()));
+            if let Some(d) = stem.parent() {
+                let _ = std::fs::create_dir_all(d);
+            }
+            let _ = nds::screenshot(&std::path::PathBuf::from(format!("{}.png", stem.display())));
+            let _ = nds::screenshot_wide_layers(&stem);
         }
         let t1 = Instant::now();
         let skipping = shared.skip.load(Ordering::Relaxed);

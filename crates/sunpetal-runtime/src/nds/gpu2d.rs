@@ -805,6 +805,11 @@ impl Nds {
     /// middle and their edge columns run on to the sides (a rule, a panel); the 3D is the widened
     /// picture. `None` when the 3D is not on the upper screen or the view is not widened.
     pub(crate) fn upper_wide_rgb(&self, scale: usize) -> Option<(usize, Vec<u8>)> {
+        self.upper_wide_rgb_layers(scale, 3)
+    }
+
+    /// As `upper_wide_rgb`, with only the layers in `layers` (bit 0 the 2D, bit 1 the 3D): for looking at a picture's parts.
+    pub(crate) fn upper_wide_rgb_layers(&self, scale: usize, layers: u8) -> Option<(usize, Vec<u8>)> {
         let e3 = self.frame3d_wide;
         let a_top = self.gpu2d_top_is_a();
         if e3 == 0 || !a_top || self.io_reg16(9, 0x0400_0000) & 8 == 0 {
@@ -865,7 +870,8 @@ impl Nds {
                             let x3 = x * f3 / s;
                             let edge = if x3 < c3 { c3 } else if x3 >= c3 + 256 * f3 { c3 + 256 * f3 - 1 } else { x3 };
                             let p3 = if (self.frame3d[y3 * w3 + edge] >> 18) & 31 == 0 { 0 } else { self.frame3d[y3 * w3 + x3] };
-                            let c = compose(&self.gpu.px[i..i + 2], p3);
+                            let words = if layers & 1 != 0 { [self.gpu.px[i], self.gpu.px[i + 1]] } else { [0, 0] };
+                            let c = compose(&words, if layers & 2 != 0 { p3 } else { 0 });
                             row[3 * x] = (c >> 16) as u8;
                             row[3 * x + 1] = (c >> 8) as u8;
                             row[3 * x + 2] = c as u8;

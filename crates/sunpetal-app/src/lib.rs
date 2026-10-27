@@ -438,6 +438,7 @@ impl ApplicationHandler for App {
                     KeyCode::F2 => self.cycle_layout(),
                     KeyCode::F8 => self.swap_screen(),
                     KeyCode::F3 => self.settings.video.linear = !self.settings.video.linear,
+                    KeyCode::F10 => self.shared.dump.store(true, Ordering::Relaxed),
                     KeyCode::F7 => {
                         self.shared.toggle_skip();
                     }
