@@ -4,7 +4,7 @@
 //!     sunpetal-app ROM.nds [--out DIR] [--save FILE] [--mute] [--res N] [--menu]
 //!                          [--dump-textures DIR] [--texture-pack DIR]
 //!
-//! F1 or Esc: the settings menu (video, sound, keys, profiles). Hotkeys: F2 changes the layout, F8 the screen shown in the single layout (or the panel of the overlay one), F3
+//! F1 or Esc: the settings menu (video, sound, keys, profiles). Hotkeys: F2 changes the layout, F8 the game's menu in the single layout while the screen follows the game (START and the lower screen, B and back), else the screen shown (or the panel of the overlay layout), F3
 //! the filter, F4 and F5 the 3D's internal resolution (1-8 times the DS's), F11 full screen, Tab
 //! (held) runs without waiting for the clock. The keys of the DS's buttons are set in the menu
 //! (default: arrows = D-pad, Z = A, X = B, S = X, A = Y, Q = L, W = R, Enter = START, Backspace =
@@ -64,6 +64,31 @@ fn pad_button(b: gilrs::Button) -> u32 {
     }
 }
 
+/// Where the single layout is while the player is in the game's menu, opened by the button.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Hold {
+    /// Held on the lower screen, with the frames passed, until the menu shows something.
+    Waiting(u32),
+    /// The menu has shown something: held until the picture is the map again.
+    Seen,
+}
+
+/// The hold after a picture that wants the lower screen (`wants`) or not, `settled` when it has
+/// wanted so for the moment a change of screen takes.
+fn next_hold(hold: Option<Hold>, wants: bool, settled: bool) -> Option<Hold> {
+    match hold {
+        Some(Hold::Waiting(_)) if wants => Some(Hold::Seen),
+        Some(Hold::Waiting(n)) if n < HOLD_FRAMES => Some(Hold::Waiting(n + 1)),
+        Some(Hold::Waiting(_)) => None,
+        Some(Hold::Seen) if !wants && settled => None,
+        h => h,
+    }
+}
+
+/// Frames a button pressed by the app stays down, and the frames the menu may take to show.
+const TAP_FRAMES: u32 = 8;
+const HOLD_FRAMES: u32 = 1800;
+
 /// Frames the picture must want the other screen before the single layout moves to it.
 const AUTO_FRAMES: u32 = 20;
 
@@ -105,6 +130,9 @@ struct App {
     /// The screen the picture wants (`layout::lower_wanted`) and for how many frames it has wanted it.
     want: (bool, u32),
     auto_lower: bool,
+    hold: Option<Hold>,
+    /// A button the app presses (bit) and the frames it has left.
+    tap: (u32, u32),
 }
 
 impl App {
@@ -113,11 +141,15 @@ impl App {
     }
 
     fn live(&self) -> layout::Live {
-        layout::Live { vblank: self.shared.vblank.load(Ordering::Relaxed), counter_seen: self.counter_seen, lower: self.auto_lower }
+        layout::Live { vblank: self.shared.vblank.load(Ordering::Relaxed), counter_seen: self.counter_seen, lower: self.auto_lower || self.hold.is_some() }
     }
 
     /// Swaps the screen shown in the single layout; from another layout, goes into it.
     fn swap_screen(&mut self) {
+        if self.settings.video.layout == "single" && self.settings.video.auto {
+            self.game_menu();
+            return;
+        }
         if self.settings.video.layout == "overlay" {
             self.settings.video.panel = !self.settings.video.panel;
         } else if self.settings.video.layout == "single" {
@@ -133,7 +165,28 @@ impl App {
 
     fn send_keys(&self) {
         let touch = self.touch_held.iter().fold(0, |a, n| a | bit(n));
-        self.shared.input.lock().unwrap().keys = self.kb | self.pad | touch;
+        self.shared.input.lock().unwrap().keys = self.kb | self.pad | touch | self.tap.0;
+    }
+
+    /// The game's menu on one screen: from the scene, START (which brings up the game's menu button on
+    /// the lower screen) and the lower screen held until the menu has been used; from the menu, B
+    /// (back) and the upper screen.
+    fn game_menu(&mut self) {
+        if self.hold.is_some() || self.auto_lower {
+            self.hold = None;
+            self.press("B");
+        } else {
+            self.hold = Some(Hold::Waiting(0));
+            self.press("START");
+        }
+        self.pen_down = false;
+        self.update_pen();
+    }
+
+    /// A button pressed for a moment, as by a finger.
+    fn press(&mut self, name: &str) {
+        self.tap = (bit(name), TAP_FRAMES);
+        self.send_keys();
     }
 
     fn save(&mut self) {
@@ -478,6 +531,13 @@ impl ApplicationHandler for App {
                     // on a phone the window stays, with the reason
                     self.stopped_msg = Some(why);
                 }
+                if self.tap.1 > 0 {
+                    self.tap.1 -= 1;
+                    if self.tap.1 == 0 {
+                        self.tap.0 = 0;
+                        self.send_keys();
+                    }
+                }
                 let frame = self.shared.frame.lock().unwrap().take();
                 if let Some((scale, rgba)) = &frame {
                     self.dial_scene = dial::recognise(*scale, rgba);
@@ -489,6 +549,7 @@ impl ApplicationHandler for App {
                         if self.want.1 >= AUTO_FRAMES {
                             self.auto_lower = w;
                         }
+                        self.hold = next_hold(self.hold, w, self.want.1 >= AUTO_FRAMES);
                     }
                 }
                 if let (Some((scale, rgba)), Some(g)) = (frame, &mut self.gfx) {
@@ -500,8 +561,8 @@ impl ApplicationHandler for App {
                 let fade = self.skip_fade;
                 let mut action = None;
                 {
-                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, auto_lower, .. } = self;
-                    let live = layout::Live { vblank: shared.vblank.load(Ordering::Relaxed), counter_seen: *counter_seen, lower: *auto_lower };
+                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, auto_lower, hold, .. } = self;
+                    let live = layout::Live { vblank: shared.vblank.load(Ordering::Relaxed), counter_seen: *counter_seen, lower: *auto_lower || hold.is_some() };
                     if let Some(g) = gfx {
                         let layout = layout::find(layouts, &settings.video, &live);
                         let names: Vec<&str> = layouts.iter().map(|l| l.name).collect();
@@ -682,6 +743,8 @@ pub fn run(o: Options, el: EventLoop<()>) {
         counter_seen: false,
         want: (false, 0),
         auto_lower: false,
+        hold: None,
+        tap: (0, 0),
     };
     el.run_app(&mut app).expect("the event loop");
     // the window is closed: stop the machine (its thread saves the backup memory and exits)
@@ -782,3 +845,35 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
 
 #[cfg(target_os = "android")]
 mod android;
+
+#[cfg(test)]
+mod hold_tests {
+    use super::*;
+
+    #[test]
+    fn the_menu_is_held_until_it_has_been_used_and_the_map_is_back() {
+        let mut h = Some(Hold::Waiting(0));
+        // the game's menu button on the map: still the map, held
+        for _ in 0..100 {
+            h = next_hold(h, false, true);
+        }
+        assert_eq!(h, Some(Hold::Waiting(100)));
+        // the menu shows something: seen; a moment of map in between does not let go
+        h = next_hold(h, true, false);
+        assert_eq!(h, Some(Hold::Seen));
+        h = next_hold(h, false, false);
+        assert_eq!(h, Some(Hold::Seen));
+        // the map for good: let go
+        assert_eq!(next_hold(h, false, true), None);
+    }
+
+    #[test]
+    fn a_menu_never_opened_is_let_go_after_a_while() {
+        let mut h = Some(Hold::Waiting(0));
+        for _ in 0..HOLD_FRAMES + 1 {
+            h = next_hold(h, false, true);
+        }
+        assert_eq!(h, None);
+        assert_eq!(next_hold(None, true, true), None);
+    }
+}
