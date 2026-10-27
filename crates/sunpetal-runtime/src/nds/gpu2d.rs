@@ -823,9 +823,20 @@ impl Nds {
                     for (r, row) in chunk.chunks_mut(w * 3).enumerate() {
                         let y = k * rows_per + r;
                         let (y2, y3) = (y / s, y * f3 / s);
+                        // beside the screen's own 256 a flat edge (sky, a panel, a rule) runs on as it is; an edge with
+                        // detail (a hill's line, tree tops) is mirrored, or its row would be smeared out sideways
+                        let base = Gpu2d::at(0, y2);
+                        let same = |a: usize, b: usize| self.gpu.px[base + 2 * a] == self.gpu.px[base + 2 * b] && self.gpu.px[base + 2 * a + 1] == self.gpu.px[base + 2 * b + 1];
+                        let (flat_l, flat_r) = ((1..6).all(|k| same(0, k)), (1..6).all(|k| same(255, 255 - k)));
                         for x in 0..w {
-                            // the 2D layers at the nearest column of the screen's own 256
-                            let x2 = (x / s).saturating_sub(e3).min(255);
+                            let xs = x / s;
+                            let x2 = if xs < e3 {
+                                if flat_l { 0 } else { (e3 - 1 - xs).min(255) }
+                            } else if xs >= e3 + 256 {
+                                if flat_r { 255 } else { 255usize.saturating_sub(xs - e3 - 256) }
+                            } else {
+                                xs - e3
+                            };
                             let i = Gpu2d::at(0, y2) + 2 * x2;
                             // beside the DS's own picture the 3D shows only on the rows where the picture's
                             // edge has it: a panel or a rule over the 3D there runs on, not cut off by it
