@@ -130,6 +130,8 @@ struct App {
     win_size: (u32, u32),
     /// The lower screen has the map's counter (`layout::counter_in`, from the last picture).
     counter_seen: bool,
+    /// The lower screen has the action icon (`layout::hint_in`).
+    hint_seen: bool,
     /// The upper screen is Edo's (`layout::edo_in`).
     edo_seen: bool,
     /// The title's "Press START" box (`layout::prompt_box`).
@@ -158,7 +160,7 @@ impl App {
     }
 
     fn live(&self) -> layout::Live {
-        layout::Live { vblank: self.shared.vblank.load(Ordering::Relaxed), counter_seen: self.counter_seen, lower: self.auto_lower || self.hold.is_some(), edo: self.edo_seen, prompt: self.prompt, wide: self.wide_now as f32, scroll: (self.paper && self.auto_lower).then_some(self.scroll) }
+        layout::Live { vblank: self.shared.vblank.load(Ordering::Relaxed), counter_seen: self.counter_seen, hint_seen: self.hint_seen, lower: self.auto_lower || self.hold.is_some(), edo: self.edo_seen, prompt: self.prompt, wide: self.wide_now as f32, scroll: (self.paper && self.auto_lower).then_some(self.scroll) }
     }
 
     /// F10: the emulation writes the picture and its parts to `artifacts/shots`; this is what the window knows, for the
@@ -618,6 +620,7 @@ impl ApplicationHandler for App {
                 if let Some((scale, rgba)) = &frame {
                     self.dial_scene = dial::recognise(*scale, rgba);
                     self.counter_seen = layout::counter_in(*scale, rgba);
+                    self.hint_seen = layout::hint_in(*scale, rgba);
                     self.edo_seen = layout::edo_in(*scale, rgba) && !layout::edo_title_in_hint(*scale, rgba);
                     self.prompt = layout::prompt_box(*scale, rgba);
                     let paper = layout::paper_in(*scale, rgba);
@@ -664,8 +667,8 @@ impl ApplicationHandler for App {
                 let fade = self.skip_fade;
                 let mut action = None;
                 {
-                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, edo_seen, prompt, bar_color, auto_lower, hold, wide_now, paper, scroll, .. } = self;
-                    let live = layout::Live { vblank: shared.vblank.load(Ordering::Relaxed), counter_seen: *counter_seen, lower: *auto_lower || hold.is_some(), edo: *edo_seen, prompt: *prompt, wide: *wide_now as f32, scroll: (*paper && *auto_lower).then_some(*scroll) };
+                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, hint_seen, edo_seen, prompt, bar_color, auto_lower, hold, wide_now, paper, scroll, .. } = self;
+                    let live = layout::Live { vblank: shared.vblank.load(Ordering::Relaxed), counter_seen: *counter_seen, hint_seen: *hint_seen, lower: *auto_lower || hold.is_some(), edo: *edo_seen, prompt: *prompt, wide: *wide_now as f32, scroll: (*paper && *auto_lower).then_some(*scroll) };
                     if let Some(g) = gfx {
                         let layout = layout::find(layouts, &settings.video, &live);
                         g.bar_color = *bar_color;
@@ -859,6 +862,7 @@ pub fn run(o: Options, el: EventLoop<()>) {
         pads: gilrs::Gilrs::new().map_err(|e| eprintln!("no pads: {}", e)).ok(),
         win_size: (512, 768),
         counter_seen: false,
+        hint_seen: false,
         edo_seen: false,
         paper: false,
         bar_ask: (None, 0),

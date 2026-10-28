@@ -49,6 +49,13 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
         let w = max(fwidth(p), vec2<f32>(0.0001));
         uv = (pi + 0.5 + clamp((p - pi - 0.5) / w, vec2<f32>(-0.5), vec2<f32>(0.5))) / ts;
     }
+    if (q.dims.w > 0.5) {
+        // a round patch: the circle in the rectangle only
+        let r = (in.loc - vec2<f32>(0.5)) * 2.0;
+        if (dot(r, r) > 1.0) {
+            discard;
+        }
+    }
     var c = textureSample(tex, samp, uv).rgb;
     // the DS's own pixels and lines, only where the window has room to show them
     let room = clamp(q.dims.z - 1.0, 0.0, 1.0);
@@ -466,7 +473,7 @@ impl Gfx {
                     rect: [d.x / w * 2.0 - 1.0, 1.0 - d.y / h * 2.0, (d.x + d.w) / w * 2.0 - 1.0, 1.0 - (d.y + d.h) / h * 2.0],
                     fx: [0.0, 0.0, 0.0, if fx.sharp { 1.0 } else { 0.0 }],
                     color: [fx.saturation, fx.contrast, fx.brightness, fx.gamma],
-                    dims: [256.0 * self.scale as f32, 192.0 * self.scale as f32, 0.0, 0.0],
+                    dims: [256.0 * self.scale as f32, 192.0 * self.scale as f32, 0.0, if p.round { 1.0 } else { 0.0 }],
                     uvr: [p.src.x / 256.0, p.src.y / 192.0, (p.src.x + p.src.w) / 256.0, (p.src.y + p.src.h) / 192.0],
                 };
                 self.queue.write_buffer(&self.screens[p.screen].extras[i].uniform, 0, bytemuck::bytes_of(&q));

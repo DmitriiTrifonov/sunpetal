@@ -70,9 +70,11 @@ pub struct Patch {
     pub screen: usize,
     pub src: Rect,
     pub dst: Rect,
-    /// Stays at the layout's own edge when the upper screen is widened, instead of keeping its place on
-    /// the 256 in the middle.
+    /// Stays at the layout's own edge (the left, or the right if it lies in the right half) when the upper
+    /// screen is widened, instead of keeping its place on the 256 in the middle.
     pub pinned: bool,
+    /// Only the circle in the rectangle (an icon).
+    pub round: bool,
 }
 
 /// The studio logos at the start are on both screens at once; with one screen shown they come in
@@ -107,7 +109,30 @@ pub fn counter_in(scale: usize, rgba: &[u8]) -> bool {
 /// The counter in the lower screen's top left corner (the map's number) and where it goes on the
 /// upper screen when only that is shown.
 pub fn counter_patch() -> Patch {
-    Patch { screen: 1, src: Rect { x: 4.0, y: 7.0, w: 60.0, h: 13.0 }, dst: Rect { x: 4.0, y: 4.0, w: 60.0, h: 13.0 }, pinned: true }
+    Patch { screen: 1, src: Rect { x: 4.0, y: 7.0, w: 59.0, h: 13.0 }, dst: Rect { x: 4.0, y: 4.0, w: 59.0, h: 13.0 }, pinned: true, round: false }
+}
+
+/// The icon in the lower screen's bottom right corner that shows when something can be acted on (a
+/// black disc in a red ring), and where it goes on the upper screen when only that is shown.
+pub fn hint_patch() -> Patch {
+    Patch { screen: 1, src: Rect { x: 163.0, y: 137.0, w: 39.0, h: 39.0 }, dst: Rect { x: 224.0, y: 4.0, w: 28.0, h: 28.0 }, pinned: true, round: true }
+}
+
+/// Whether the lower screen shows that icon: its red ring (15% of the square on the screen measured, none
+/// without it) is there.
+pub fn hint_in(scale: usize, rgba: &[u8]) -> bool {
+    let s = hint_patch().src;
+    let (w, top) = (256 * scale, 192 * scale);
+    let (mut n, mut red) = (0usize, 0usize);
+    for y in (s.y as usize * scale..(s.y + s.h) as usize * scale).step_by(scale.max(1)) {
+        for x in (s.x as usize * scale..(s.x + s.w) as usize * scale).step_by(scale.max(1)) {
+            let o = ((top + y) * w + x) * 4;
+            let Some(p) = rgba.get(o..o + 3) else { return false };
+            n += 1;
+            red += (p[0] > 190 && p[1] < 80 && p[2] < 120) as usize;
+        }
+    }
+    n > 0 && red * 100 >= n * 8
 }
 
 fn r(x: f32, y: f32) -> Rect {
@@ -186,7 +211,7 @@ pub fn edge_color(layout: &Layout, scale: usize, rgba: &[u8]) -> Option<[f32; 3]
 /// The hint text of Edo's screens (what the chosen key does), cut from the upper screen and put
 /// into the free corner of the lower one, whose keys are the screen's use.
 pub fn edo_patch() -> Patch {
-    Patch { screen: 0, src: Rect { x: 106.0, y: 80.0, w: 148.0, h: 60.0 }, dst: Rect { x: 106.0, y: 130.0, w: 148.0, h: 60.0 }, pinned: false }
+    Patch { screen: 0, src: Rect { x: 106.0, y: 80.0, w: 148.0, h: 60.0 }, dst: Rect { x: 106.0, y: 130.0, w: 148.0, h: 60.0 }, pinned: false, round: false }
 }
 
 /// Whether the pink of the title ("Hello!! SAVE DATA") reaches into the hint's place on the upper screen (the
@@ -272,6 +297,8 @@ pub struct Live {
     pub vblank: u64,
     /// The lower screen has the map's counter (`counter_in`).
     pub counter_seen: bool,
+    /// The lower screen shows the action icon (`hint_in`).
+    pub hint_seen: bool,
     /// The lower screen is the one to show (`lower_wanted`, settled).
     pub lower: bool,
     /// The upper screen is Edo's (`edo_in`).
@@ -310,10 +337,10 @@ pub fn scrolled(scroll: f32) -> Layout {
     let s = scroll.clamp(0.0, 192.0);
     let mut patches = Vec::new();
     if s < 192.0 {
-        patches.push(Patch { screen: 0, src: Rect { x: 0.0, y: s, w: 256.0, h: 192.0 - s }, dst: Rect { x: 0.0, y: 0.0, w: 256.0, h: 192.0 - s }, pinned: false });
+        patches.push(Patch { screen: 0, src: Rect { x: 0.0, y: s, w: 256.0, h: 192.0 - s }, dst: Rect { x: 0.0, y: 0.0, w: 256.0, h: 192.0 - s }, pinned: false, round: false });
     }
     if s > 0.0 {
-        patches.push(Patch { screen: 1, src: Rect { x: 0.0, y: 0.0, w: 256.0, h: s }, dst: Rect { x: 0.0, y: 192.0 - s, w: 256.0, h: s }, pinned: false });
+        patches.push(Patch { screen: 1, src: Rect { x: 0.0, y: 0.0, w: 256.0, h: s }, dst: Rect { x: 0.0, y: 192.0 - s, w: 256.0, h: s }, pinned: false, round: false });
     }
     Layout { name: "single", size: (256.0, 192.0), screens: [None, None], patches, fit: Fit::default() }
 }
@@ -367,7 +394,7 @@ fn pick(layouts: &[Layout], v: &crate::config::Video, live: &Live) -> Layout {
     };
     // the title: the upper screen's film with the lower screen's "Press START" over it
     if let (Some(b), [Some(_), None]) = (live.prompt, l.screens) {
-        l.patches.push(Patch { screen: 1, src: b, dst: b, pinned: false });
+        l.patches.push(Patch { screen: 1, src: b, dst: b, pinned: false, round: false });
     }
     // Edo's screen on one: the keys of the lower screen, with the upper's hint text beside them
     if live.edo && l.screens[0].is_none() && l.screens[1].is_some() && l.patches.is_empty() {
@@ -376,6 +403,10 @@ fn pick(layouts: &[Layout], v: &crate::config::Video, live: &Live) -> Layout {
     // the number of the lower screen goes on the upper one when that is all there is
     if v.counter && counter_seen && l.screens[0].is_some() && l.screens[1].is_none() {
         l.patches.push(counter_patch());
+        // and the icon of what can be acted on, beside it
+        if live.hint_seen {
+            l.patches.push(hint_patch());
+        }
     }
     l
 }
@@ -419,6 +450,12 @@ impl Layout {
         }
         self.screens[0] = Some(new_up);
         self.size.0 += 2.0 * e;
+        // a pinned patch in the right half keeps the right corner
+        for p in self.patches.iter_mut().filter(|p| p.pinned) {
+            if p.dst.x + p.dst.w / 2.0 > up.x + up.w / 2.0 && p.dst.y < up.y + up.h {
+                p.dst.x += 2.0 * e;
+            }
+        }
         // a patch on the upper screen lies on the middle 256
         for p in self.patches.iter_mut().filter(|p| !p.pinned) {
             if p.dst.x >= up.x && p.dst.x < up.x + up.w && p.dst.y >= up.y && p.dst.y < up.y + up.h && self.screens[1].map_or(true, |lo| p.dst.y < lo.y || p.dst.x < lo.x) {
@@ -475,7 +512,7 @@ mod tests {
     }
 
     fn live(vblank: u64, counter_seen: bool) -> Live {
-        Live { vblank, counter_seen, lower: false, edo: false, prompt: None, wide: 0.0, scroll: None }
+        Live { vblank, counter_seen, hint_seen: false, lower: false, edo: false, prompt: None, wide: 0.0, scroll: None }
     }
 
     #[test]
@@ -631,7 +668,7 @@ mod tests {
         let b = Rect { x: 42.0, y: 74.0, w: 172.0, h: 44.0 };
         let live = Live { prompt: Some(b), ..Default::default() };
         let l = find(&all, &video("single", false, false, false), &live);
-        assert_eq!(l.patches, vec![Patch { screen: 1, src: b, dst: b, pinned: false }]);
+        assert_eq!(l.patches, vec![Patch { screen: 1, src: b, dst: b, pinned: false, round: false }]);
         // not when the lower screen is the one shown, or both
         assert!(find(&all, &video("single", true, false, false), &live).patches.is_empty());
         assert!(find(&all, &video("stacked", false, false, false), &live).patches.is_empty());
@@ -694,6 +731,25 @@ mod tests {
     }
 
     #[test]
+    fn a_pinned_patch_on_the_right_goes_to_the_right_corner_when_widened() {
+        let mut l = single(false);
+        l.patches = vec![counter_patch(), hint_patch()];
+        l.widen(40.0);
+        assert_eq!(l.patches[0].dst.x, counter_patch().dst.x);
+        assert_eq!(l.patches[1].dst.x, hint_patch().dst.x + 80.0);
+    }
+
+    #[test]
+    fn the_action_icon_is_found_by_its_red_ring() {
+        for scale in [1usize, 2] {
+            let icon = frame(scale, |x, y| if (163..202).contains(&x) && (137..176).contains(&y) && (x + y) % 4 == 0 { [220, 20, 60] } else { [60, 90, 150] });
+            assert!(hint_in(scale, &icon));
+            assert!(!hint_in(scale, &frame(scale, |_, _| [60, 90, 150])));
+        }
+        assert!(!hint_in(1, &[]));
+    }
+
+    #[test]
     fn no_counter_on_the_screen_no_patch() {
         let all = all();
         assert!(find(&all, &video("single", false, false, true), &live(0, false)).patches.is_empty());
@@ -712,7 +768,7 @@ mod tests {
         // fitted like the screens: the corner of a window twice the size is at twice the offset
         let l = find(&all, &video("single", false, false, true), &live(0, true));
         let d = l.fit_rect((512.0, 384.0), l.patches[0].dst);
-        assert_eq!((d.x, d.y, d.w), (8.0, 8.0, 120.0));
+        assert_eq!((d.x, d.y, d.w), (8.0, 8.0, 118.0));
     }
 
     #[test]
