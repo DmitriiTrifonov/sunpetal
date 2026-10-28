@@ -83,6 +83,15 @@ impl Menu {
                 }
                 ui.checkbox(&mut s.video.counter, tx("Counter on the upper screen when it is alone", "Счётчик на верхнем экране, когда он один"));
                 ui.checkbox(&mut s.video.logos_in_turn, tx("Logos in turn when one screen is shown", "Логотипы по очереди, когда виден один экран"));
+                if matches!(s.video.layout.as_str(), "single" | "overlay") && s.video.auto {
+                    egui::ComboBox::from_label(tx("Dial puzzle (both screens)", "Головоломка с диском (оба экрана)")).selected_text(match s.video.puzzle.as_str() {
+                        "side" => tx("side by side", "рядом"),
+                        _ => tx("lower screen as a panel (PS2)", "нижний экран панелью (как на PS2)"),
+                    }).show_ui(ui, |ui| {
+                        ui.selectable_value(&mut s.video.puzzle, "inset".to_string(), tx("lower screen as a panel (PS2)", "нижний экран панелью (как на PS2)"));
+                        ui.selectable_value(&mut s.video.puzzle, "side".to_string(), tx("side by side", "рядом"));
+                    });
+                }
                 if s.video.layout == "overlay" {
                     ui.checkbox(&mut s.video.panel, tx("Lower screen as a panel (F8)", "Нижний экран панелью (F8)"));
                 }

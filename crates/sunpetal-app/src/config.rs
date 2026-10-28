@@ -38,6 +38,9 @@ pub struct Video {
     pub pixel_aspect: f32,
     /// With one screen shown: the logos at the start, which are on both screens, one after another.
     pub logos_in_turn: bool,
+    /// The dial puzzle, which is read above and worked below: `inset` (the upper screen whole, the lower a panel in
+    /// its corner, as on the PS2) or `side` (both screens side by side).
+    pub puzzle: String,
     pub fullscreen: bool,
     /// Behind the screens: "glow" (their colours, blurred) or "black".
     pub background: String,
@@ -51,7 +54,7 @@ pub struct Video {
 
 impl Default for Video {
     fn default() -> Video {
-        Video { res: 2, linear: true, layout: "stacked".into(), lower: false, panel: false, counter: true, auto: true, wide: true, bars_match: true, fit: "fit".into(), pixel_aspect: 1.0, logos_in_turn: true, fullscreen: false, background: "glow".into(), show_stats: false, texture_pack: String::new(), window: [512, 768] }
+        Video { res: 2, linear: true, layout: "stacked".into(), lower: false, panel: false, counter: true, auto: true, wide: true, bars_match: true, fit: "fit".into(), pixel_aspect: 1.0, logos_in_turn: true, puzzle: "inset".into(), fullscreen: false, background: "glow".into(), show_stats: false, texture_pack: String::new(), window: [512, 768] }
     }
 }
 

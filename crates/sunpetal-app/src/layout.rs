@@ -168,13 +168,40 @@ pub fn single(lower: bool) -> Layout {
 /// the PS2 version shows its device: docs/RECON-SCREENS.md). The lower screen is drawn after the
 /// upper, so it is on top; touches land on the panel.
 pub fn overlay(panel: bool) -> Layout {
-    let (w, h) = (256.0 * PANEL, 192.0 * PANEL);
+    panel_at(panel, PANEL)
+}
+
+/// The dial puzzle's panel: smaller, so that it stays under the row of digits (to y 97 of the upper screen, with
+/// four of them) and the answer's text above it.
+pub fn puzzle_panel() -> Layout {
+    panel_at(true, PUZZLE_PANEL)
+}
+
+/// Whether the upper screen has the puzzle's LED red or yellow (its digits and their frames, the question) where
+/// the puzzle's panel would be: the panel would cover them.
+pub fn led_under_panel(scale: usize, rgba: &[u8]) -> bool {
+    let Some(p) = puzzle_panel().screens[1] else { return false };
+    let w = 256 * scale;
+    let mut n = 0;
+    for y in (p.y as usize * scale..(p.y + p.h) as usize * scale).step_by(scale.max(1)) {
+        for x in (p.x as usize * scale..(p.x + p.w) as usize * scale).step_by(scale.max(1)) {
+            let Some(c) = rgba.get((y * w + x) * 4..(y * w + x) * 4 + 3) else { return false };
+            let (r, g, b) = (c[0] as u32, c[1] as u32, c[2] as u32);
+            n += (r > 170 && g < 70 && b < 90 || r > 200 && g > 180 && b < 90) as usize;
+        }
+    }
+    n >= 6
+}
+
+fn panel_at(panel: bool, size: f32) -> Layout {
+    let (w, h) = (256.0 * size, 192.0 * size);
     let lower = Rect { x: 256.0 - w - PANEL_GAP, y: 192.0 - h - PANEL_GAP, w, h };
     Layout { name: "overlay", size: (256.0, 192.0), screens: [Some(r(0.0, 0.0)), panel.then_some(lower)], patches: Vec::new(), fit: Fit::default() }
 }
 
 /// The panel's size as a part of a screen, and its gap to the corner, in screen pixels.
 const PANEL: f32 = 0.6;
+const PUZZLE_PANEL: f32 = 0.45;
 const PANEL_GAP: f32 = 6.0;
 
 pub fn all() -> Vec<Layout> {
@@ -299,6 +326,10 @@ pub struct Live {
     pub counter_seen: bool,
     /// The lower screen shows the action icon (`hint_in`).
     pub hint_seen: bool,
+    /// A puzzle that needs both screens is on (the dial: the number it shows and the answer's animation are above).
+    pub both: bool,
+    /// ... and its LED digits are where the panel would be (`led_under_panel`), so both go side by side.
+    pub both_side: bool,
     /// The lower screen is the one to show (`lower_wanted`, settled).
     pub lower: bool,
     /// The upper screen is Edo's (`edo_in`).
@@ -386,6 +417,10 @@ fn pick(layouts: &[Layout], v: &crate::config::Video, live: &Live) -> Layout {
     }
     if let (Some(sc), "single", true) = (live.scroll, v.layout.as_str(), v.auto) {
         return scrolled(sc);
+    }
+    // a puzzle read on the upper screen and worked on the lower one: both (the PS2's way, the lower as a panel, or side by side)
+    if live.both && v.auto && matches!(v.layout.as_str(), "single" | "overlay") {
+        return if v.puzzle == "side" || live.both_side { side_by_side() } else { puzzle_panel() };
     }
     let mut l = match v.layout.as_str() {
         "single" => single(if v.auto { live.lower } else { v.lower }),
@@ -512,7 +547,7 @@ mod tests {
     }
 
     fn live(vblank: u64, counter_seen: bool) -> Live {
-        Live { vblank, counter_seen, hint_seen: false, lower: false, edo: false, prompt: None, wide: 0.0, scroll: None }
+        Live { vblank, counter_seen, hint_seen: false, both: false, both_side: false, lower: false, edo: false, prompt: None, wide: 0.0, scroll: None }
     }
 
     #[test]
@@ -737,6 +772,48 @@ mod tests {
         l.widen(40.0);
         assert_eq!(l.patches[0].dst.x, counter_patch().dst.x);
         assert_eq!(l.patches[1].dst.x, hint_patch().dst.x + 80.0);
+    }
+
+    #[test]
+    fn a_puzzle_with_both_screens_shows_them_side_by_side() {
+        let all = all();
+        let mut v = video("single", false, false, true);
+        v.auto = true;
+        let mut lv = live(0, false);
+        assert_eq!(find(&all, &v, &lv).name, "single");
+        lv.both = true;
+        assert_eq!(find(&all, &v, &lv).name, "overlay");
+        assert_eq!(find(&all, &v, &lv).screens[1], puzzle_panel().screens[1]);
+        lv.both_side = true;
+        assert_eq!(find(&all, &v, &lv).name, "side by side");
+        lv.both_side = false;
+        v.puzzle = "side".into();
+        assert_eq!(find(&all, &v, &lv).name, "side by side");
+        v.auto = false;
+        assert_eq!(find(&all, &v, &lv).name, "single");
+    }
+
+    #[test]
+    fn led_digits_under_the_puzzle_panel_are_found() {
+        let p = puzzle_panel().screens[1].unwrap();
+        for scale in [1usize, 2] {
+            let w = 256 * scale;
+            let mut f = vec![0u8; w * 192 * scale * 4 * 2];
+            assert!(!led_under_panel(scale, &f));
+            for y in 60..90 {
+                for x in 40..90 {
+                    let o = (y * scale * w + x * scale) * 4;
+                    f[o..o + 3].copy_from_slice(&[230, 20, 40]);
+                }
+            }
+            assert!(!led_under_panel(scale, &f)); // digits above the panel
+            let (x, y) = (p.x as usize + 5, p.y as usize + 5);
+            let o = (y * scale * w + x * scale) * 4;
+            for k in 0..16 {
+                f[o + k * 4..o + k * 4 + 3].copy_from_slice(&[230, 20, 40]);
+            }
+            assert!(led_under_panel(scale, &f));
+        }
     }
 
     #[test]

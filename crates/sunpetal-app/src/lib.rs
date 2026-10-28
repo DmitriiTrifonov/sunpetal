@@ -90,6 +90,8 @@ const TAP_FRAMES: u32 = 8;
 const HOLD_FRAMES: u32 = 1800;
 
 /// Frames the picture must ask for other bars before they change.
+/// Frames both screens stay up after the dial puzzle was last seen.
+const PUZZLE_FRAMES: u32 = 240;
 const BAR_FRAMES: u32 = 3;
 
 /// Frames the picture must want the other screen before the single layout moves to it.
@@ -132,6 +134,10 @@ struct App {
     counter_seen: bool,
     /// The lower screen has the action icon (`layout::hint_in`).
     hint_seen: bool,
+    /// Frames left of showing both screens for the dial puzzle (its answer's animation is on the upper one).
+    puzzle_hold: u32,
+    /// For this puzzle the panel would cover the LED digits: both screens side by side (`layout::led_under_panel`).
+    puzzle_side: bool,
     /// The upper screen is Edo's (`layout::edo_in`).
     edo_seen: bool,
     /// The title's "Press START" box (`layout::prompt_box`).
@@ -160,7 +166,7 @@ impl App {
     }
 
     fn live(&self) -> layout::Live {
-        layout::Live { vblank: self.shared.vblank.load(Ordering::Relaxed), counter_seen: self.counter_seen, hint_seen: self.hint_seen, lower: self.auto_lower || self.hold.is_some(), edo: self.edo_seen, prompt: self.prompt, wide: self.wide_now as f32, scroll: (self.paper && self.auto_lower).then_some(self.scroll) }
+        layout::Live { vblank: self.shared.vblank.load(Ordering::Relaxed), counter_seen: self.counter_seen, hint_seen: self.hint_seen, both: self.puzzle_hold > 0, both_side: self.puzzle_side, lower: self.auto_lower || self.hold.is_some(), edo: self.edo_seen, prompt: self.prompt, wide: self.wide_now as f32, scroll: (self.paper && self.auto_lower).then_some(self.scroll) }
     }
 
     /// F10: the emulation writes the picture and its parts to `artifacts/shots`; this is what the window knows, for the
@@ -619,6 +625,23 @@ impl ApplicationHandler for App {
                 };
                 if let Some((scale, rgba)) = &frame {
                     self.dial_scene = dial::recognise(*scale, rgba);
+                    // the dial's answer plays out on the upper screen a while after the dial is gone
+                    let was = self.puzzle_hold;
+                    self.puzzle_hold = if self.dial_scene {
+                        PUZZLE_FRAMES
+                    } else if layout::counter_in(*scale, rgba) {
+                        0 // the map is back: the walk goes on
+                    } else {
+                        self.puzzle_hold.saturating_sub(1)
+                    };
+                    if was > 0 && self.puzzle_hold == 0 && layout::counter_in(*scale, rgba) {
+                        // the puzzle is done: straight to the upper screen, the lower's map is not shown after it
+                        self.auto_lower = false;
+                        self.hold = None;
+                        self.want = (false, AUTO_FRAMES);
+                    }
+                    // the digits' place is known once they are there; the layout then stays till the puzzle is done
+                    self.puzzle_side = self.puzzle_hold > 0 && (self.puzzle_side || layout::led_under_panel(*scale, rgba));
                     self.counter_seen = layout::counter_in(*scale, rgba);
                     self.hint_seen = layout::hint_in(*scale, rgba);
                     self.edo_seen = layout::edo_in(*scale, rgba) && !layout::edo_title_in_hint(*scale, rgba);
@@ -667,8 +690,8 @@ impl ApplicationHandler for App {
                 let fade = self.skip_fade;
                 let mut action = None;
                 {
-                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, hint_seen, edo_seen, prompt, bar_color, auto_lower, hold, wide_now, paper, scroll, .. } = self;
-                    let live = layout::Live { vblank: shared.vblank.load(Ordering::Relaxed), counter_seen: *counter_seen, hint_seen: *hint_seen, lower: *auto_lower || hold.is_some(), edo: *edo_seen, prompt: *prompt, wide: *wide_now as f32, scroll: (*paper && *auto_lower).then_some(*scroll) };
+                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, hint_seen, puzzle_hold, puzzle_side, edo_seen, prompt, bar_color, auto_lower, hold, wide_now, paper, scroll, .. } = self;
+                    let live = layout::Live { vblank: shared.vblank.load(Ordering::Relaxed), counter_seen: *counter_seen, hint_seen: *hint_seen, both: *puzzle_hold > 0, both_side: *puzzle_side, lower: *auto_lower || hold.is_some(), edo: *edo_seen, prompt: *prompt, wide: *wide_now as f32, scroll: (*paper && *auto_lower).then_some(*scroll) };
                     if let Some(g) = gfx {
                         let layout = layout::find(layouts, &settings.video, &live);
                         g.bar_color = *bar_color;
@@ -863,6 +886,8 @@ pub fn run(o: Options, el: EventLoop<()>) {
         win_size: (512, 768),
         counter_seen: false,
         hint_seen: false,
+        puzzle_hold: 0,
+        puzzle_side: false,
         edo_seen: false,
         paper: false,
         bar_ask: (None, 0),
