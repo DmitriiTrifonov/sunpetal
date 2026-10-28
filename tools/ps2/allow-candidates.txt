@@ -1,0 +1,100 @@
+# DS textures whose best PS2 picture was checked by eye (tools/ps2/near_misses.py sheets) and is the same
+# picture, though the thresholds of build-data.py refuse it. Same format as allow.txt; NOT yet in allow.txt.
+# confidence: high = same picture, tone/contrast/sharpness differ; medium = same composition, silhouette or layout differs a little.
+# Basis: luma_corr >= 0.72 on all of them (see docs/PS2-RECON.md, second pass).
+
+# confidence: high
+128x128_5_28e1cc778b4b9ffc_faa8bd5f2f1e9f1b.png  # car atlas (PS2 sharper)
+128x128_5_3109370ad9485360_5c63627a8762daf8.png  # pink panel
+128x128_5_8bb3133b2e78502c_fb961fbe98fe129a.png  # floor plan / map tile
+128x128_5_f87bc886a5ed72d8_3c46987876244900.png  # orange panel
+128x64_5_1089c67a648c0830_c65d62416b2ea5c0.png  # cliff strip
+64x128_5_269328dc07d49e5d_58e09ca48ee0369d.png  # blue palm tree
+64x128_5_c961311e43f53853_020b9a82acead353.png  # palm tree
+128x32_5_b0a498b01cc1829e_c02bb2f1e4963583.png  # banner
+64x64_5_00ac7da30696a675_500d39a4352fee86.png  # tiles
+64x64_5_0245894c4d004878_d2913e62300525b4.png  # wood planks
+64x64_5_0607f136b3b42a8d_30c6b638c247eace.png  # grass edge
+64x64_5_06c9107eddf7c5f5_bd646d7ca1236c38.png  # palm tree
+64x64_5_09f9f9d648425968_fc316fbadb494aaa.png  # car atlas
+64x64_5_112ccb584ec5d817_489158e232d5158d.png  # bush
+64x64_5_140cd14bec5f1742_72815a2b3283042c.png  # dark grass
+64x64_5_23b24515941a5a5e_e7f2633a10cff1a0.png  # stone wall
+64x64_5_26db53827428870c_ebad6fa87b5b98a1.png  # tree crown
+64x64_5_334f7c956ab6f950_c8fa05ce71bef221.png  # sky gradient
+64x64_5_361fae8058839e6f_b8b3381dff59a83a.png  # car atlas
+64x64_5_3ee5ea037a56f21a_c0d0efc9f9312175.png  # grass
+64x64_5_4b99106dea4894c8_940f7ec50a09d394.png  # bus atlas
+64x64_5_523959eb84e29355_eed9c57f61d63455.png  # sky gradient
+64x64_5_5a6c436b7ee5856f_ea29150cdc99f77f.png  # pastel sky and wood atlas
+64x64_5_6abbe12196a05627_d7d307d9c4b49d57.png  # jungle hills
+64x64_5_6f7e70281f620fb5_c945b9ecb8622435.png  # aircraft atlas
+64x64_5_701499d254c82928_e7ab2db0f2c5d6d2.png  # grass with hay patch
+64x64_5_749f16d59238e557_feb272f48f5ca911.png  # tree crowns
+64x64_5_80724ec9eb6f0b3c_8ddba3a7a1c9c68d.png  # grass
+64x64_5_8246c0306c0d8462_ceea5df5200c6876.png  # rock with warm light
+64x64_5_884b558f4d2258a4_306bd5dfecef6ef6.png  # rock
+64x64_5_a67b20a86a6bb7e3_3d0b60d254c94e9c.png  # foliage cliff
+64x64_5_ac804bbd27fb3965_2e2dcacc8e7c3d5e.png  # cliffs
+64x64_5_aea2be857fe3e186_67f7bf8fabf61612.png  # shop sign
+64x64_5_aef6c211398ff19a_81d5f51913b48570.png  # grass
+64x64_5_c44bba71e21f0f32_06e83c4d43ca1e10.png  # stained-glass windows
+64x64_5_cbee47923b00b7c6_35e20a87faf22350.png  # stone wall
+64x64_5_ce3968c28345b3aa_c0017f2b311e8c51.png  # patterned fabric
+64x64_5_ceb49fe4a22c9935_3df3cfe84383f48a.png  # palm tree
+32x64_5_2b894e2b180524e9_cae64c7945e3930a.png  # elevator door
+32x64_5_2c003bc535d2da34_4e06eca555846a04.png  # glass tower
+32x64_5_4a44c665b7e68593_d670bfe742a2559c.png  # door
+32x64_5_83a937ce8bb2284c_87a72edc7ffba5e4.png  # lattice window
+32x64_5_a4c6f205cd30beef_4f9d6a5b79b6051a.png  # wooden shutters
+32x64_5_e99c965dbdc11e7a_ca23790112f0d1df.png  # wood panel
+64x32_5_38abfbfce2df629e_cc875702991e3bf3.png  # flowers
+64x32_5_39c27de9882feeec_8397e96db32e1802.png  # bamboo fence
+64x32_5_3a7930d7e6d4c54d_9d438fdf5863d7ce.png  # bamboo blind
+64x32_5_8204c3990a328e54_efd843ca36d18a48.png  # cliffs, DS darker
+64x32_5_a7f755e801acd873_27c4eb619edd786e.png  # trash box
+64x32_5_acf607711d6f793e_ab9f152824e8faa1.png  # cloud strip
+64x32_5_b7b8db9b4d93132f_34ab0a9af2438993.png  # bush strip
+64x32_5_bdcb49be3254dc3c_ee73acf8811e7e47.png  # flowers
+64x32_5_cbd69448aa58372a_4476dfc477cfaf02.png  # cloud strip
+64x32_5_e383a3ba0d959896_8da312b31dfc8159.png  # foliage strip
+16x64_5_da309618a22b2f06_9953865a03a42f57.png  # lamp
+32x32_5_170545fc67f10102_2f929e8693817ea8.png  # fruit
+32x32_5_178ebaf445aecbd0_9d750186e6fdfb19.png  # burlap
+32x32_5_1b08c60117d83cdb_961eaa317f4b162d.png  # shutters
+32x32_5_25d52a3149690a33_75b7db61e48fcd08.png  # red curtains
+32x32_5_2aa3efa4a2fbdc1a_1bcf92ef98efb6c4.png  # doors
+32x32_5_2ab4888e564c0924_f2f6d256bd9d3d90.png  # white sheet
+32x32_5_2fe66a9479c5d7e6_6e073d85974bb3a2.png  # wooden doors
+32x32_5_44ac91583d921c83_5d596a3ad89894e1.png  # carved panels
+32x32_5_4b1c755c596b8cb0_e2d3222c5c2a8295.png  # wood planks
+32x32_5_52a3682f0cb4ede8_1c886974146ca3d3.png  # yellow quilt
+32x32_5_52a3682f0cb4ede8_56ce014f41355b3e.png  # yellow quilt
+32x32_5_5db254263035ed9d_d0e545900dbbf5bb.png  # red leaves
+32x32_5_76bd8cce7d22698a_e672f1bcd0a0b1e0.png  # bottles
+32x32_5_795ade63e3ff7553_43a0ea369d8d18aa.png  # moss
+32x32_5_7cb096881c430577_c6d96511e2c0eef1.png  # moss
+32x32_5_7dc4e3d5e13f38d1_d44965d5eea084d5.png  # white sheet
+32x32_5_7f0a4fbd58a31a2d_2bc66c355b5a8b8b.png  # shutters
+32x32_5_8d5cad67268fc6d7_607a231058ec31ef.png  # fence and stone
+32x32_5_b13087ceeadd6d4a_b0216dbb53cf8575.png  # window
+32x32_5_c196f58749a792c9_2dcd3112da22ec75.png  # rusty plate
+32x32_5_ccfe22229bc512d7_a43c41a1669412d2.png  # cream circles
+32x32_5_d86cd0cfb4bc2a54_f0149e1c253a779d.png  # figures
+32x32_5_e6331b3a334838b1_5b37823a3d06a4e7.png  # flowers
+32x32_5_f52b577cc022a8f9_81a5fddfe2b957b3.png  # radio
+32x32_5_f52b577cc022a8f9_8b649814193dfc61.png  # radio
+32x32_5_fd29a7acc8728d4d_e8d7d81df86a253e.png  # jukebox
+
+# confidence: medium
+64x64_5_04d86ed0a26a8296_7ab19cfa64558ff7.png  # mountains, PS2 cut differently
+64x64_5_1f95196cb352b50d_c6a1a46593a419b3.png  # yellow tree, silhouette a little fuller
+64x64_5_323fdb8bf495cb4c_37db9759e3c88d16.png  # cracked stone, layout shifted
+64x64_5_3782e3c56dfcbe2b_815d117186fa3e4d.png  # metal mesh, PS2 brighter
+64x64_5_59576b7d4d3a0048_e881d91e42d2d27f.png  # dark tree, silhouette a little different
+64x64_5_87b7d77a45c01aa3_84a04c311cad42ad.png  # foliage strip, edge differs
+64x64_5_8f2ad17314594cc3_c39254a5e8ec1aca.png  # dark tree, silhouette differs
+64x64_5_b16630044273926c_278bf3b1273cc02e.png  # cliffs, PS2 lighter
+32x32_5_7ce27c78122e1ba4_6b2257828eb6968e.png  # dark horizon strip, blurred
+32x32_5_a33d9db094ea593b_bdfa00ab3ec688fb.png  # dark red blur
+32x32_5_c6ee34a0c4fdc197_fceb53f1911ece8d.png  # orange plate, layout partly shifted
