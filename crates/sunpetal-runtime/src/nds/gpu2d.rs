@@ -838,7 +838,7 @@ impl Nds {
                             let x3 = x * f3 / s;
                             let edge = if x3 < c3 { c3 } else if x3 >= c3 + 256 * f3 { c3 + 256 * f3 - 1 } else { x3 };
                             let p3 = if (self.frame3d[y3 * w3 + edge] >> 18) & 31 == 0 { 0 } else { self.frame3d[y3 * w3 + x3] };
-                            let words = if layers & 1 != 0 { [self.gpu.px[i], self.gpu.px[i + 1]] } else { [0, 0] };
+                            let words = if layers & 1 != 0 { [self.gpu.px[i], self.gpu.px[i + 1]] } else if layers & 2 != 0 { [1 << 24, 0] } else { [0, 0] }; // mode 1: the 3D replaces
                             let c = compose(&words, if layers & 2 != 0 { p3 } else { 0 });
                             row[3 * x] = (c >> 16) as u8;
                             row[3 * x + 1] = (c >> 8) as u8;

@@ -714,27 +714,40 @@ fn shade_pass(strength: f32, radius: f32, t: &Target, w: usize, h: usize, s: usi
 
 /// In each row, the pixels of the `e` columns at each side that no polygon covered (the depth is the
 /// clear depth) are filled from the far part of the picture (sky, ground, the scenery's distance): a row
-/// that is flat at the edge runs on with its first far pixel; a row with a drawing (hills, tree tops) is
-/// mirrored, where the mirrored pixel is far too (copying the edge would draw it out into a streak). What
-/// is near (a column of the gate, a leaf of the palm, a car) is not drawn out or doubled; what lies behind
-/// it shows. The depth is 0-1, far near 1.
+/// runs on with the first sky pixel in from the edge (else the first far one): the hills and the fence
+/// the game draws on past the 4:3 itself, and a crown at the edge copied out would be a streak. What is
+/// near (a column of the gate, a leaf of the palm, a car) is not drawn out or doubled; what lies behind it shows. The depth is 0-1, far near 1.
 fn extend_sides(t: &mut Target, job: &Job, w: usize, h: usize, e: usize) {
     const FAR: f32 = 0.999;
+    const SKY: f32 = 0.99996;
     let cd = clear_depth(job.clear_depth);
     let inner = w - 2 * e;
+    // per row and side: the pixel the row runs on with, and whether it is sky. The sky first: a crown or a
+    // ridge at the edge, run out, would be a streak
+    let pick = |t: &Target, y: usize, at: &dyn Fn(usize) -> usize| {
+        let sky = (0..inner).map(at).find(|&i| t.depth[i] >= SKY).map(|i| (i, true));
+        sky.or_else(|| (0..inner).map(at).find(|&i| t.depth[i] >= FAR).map(|i| (i, false))).map(|p| (y, p))
+    };
+    let srcs: Vec<[Option<(usize, (usize, bool))>; 2]> = (0..h)
+        .map(|y| {
+            let row = y * w;
+            [pick(t, y, &|k| row + e + k), pick(t, y, &|k| row + w - e - 1 - k)]
+        })
+        .collect();
+    // a row without sky (the hills' plane ends here): what is behind it is the sky, which the game drew
+    // only so far; the nearest row above (else below) with sky gives it, the horizon's
+    let sky_of = |side: usize, y: usize| -> Option<usize> {
+        (0..h)
+            .map(|d| [y.checked_sub(d), Some(y + d).filter(|&r| r < h)])
+            .find_map(|rs| rs.into_iter().flatten().find_map(|r| srcs[r][side].filter(|s| s.1 .1).map(|s| s.1 .0)))
+    };
+    let skies: Vec<[Option<usize>; 2]> = (0..h).map(|y| [sky_of(0, y), sky_of(1, y)]).collect();
     for y in 0..h {
         let row = y * w;
-        let (l, r) = (row + e, row + w - e - 1);
-        let left = (0..inner).map(|k| row + e + k).find(|&i| t.depth[i] >= FAR);
-        let right = (0..inner).map(|k| row + w - e - 1 - k).find(|&i| t.depth[i] >= FAR);
-        let flat_l = (1..6).all(|k| t.color[l + k] == t.color[l] && t.alpha[l + k] == t.alpha[l]);
-        let flat_r = (1..6).all(|k| t.color[r - k] == t.color[r] && t.alpha[r - k] == t.alpha[r]);
         for x in 0..e {
-            let d = e - 1 - x; // distance in from the picture's edge
-            let sides = [(row + x, left, l + d, flat_l), (row + w - 1 - x, right, r - d, flat_r)];
-            for (i, first_far, mirrored, flat) in sides {
-                let from = if !flat && t.depth[mirrored] >= FAR { Some(mirrored) } else { first_far };
-                let Some(from) = from else { continue };
+            for (side, i) in [(0, row + x), (1, row + w - 1 - x)] {
+                let Some((_, (from, sky))) = srcs[y][side] else { continue };
+                let from = if sky { from } else { skies[y][side].unwrap_or(from) };
                 if t.depth[i] >= cd {
                     t.color[i] = t.color[from];
                     t.alpha[i] = t.alpha[from];
@@ -787,7 +800,7 @@ pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
     }
     // a widened view: where the sides have no polygon (a sky the game drew only so far, the floor's
     // far edge) the nearest column of the DS's own picture runs on
-    if job.width > 256 {
+    if job.width > 256 && std::env::var_os("SUNPETAL_NO_EXTEND").is_none() {
         extend_sides(&mut t, job, w, h, (job.width - 256) / 2 * s);
     }
     if job.disp3dcnt & 0x20 != 0 {
