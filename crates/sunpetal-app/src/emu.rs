@@ -206,7 +206,10 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             last_e = want_e;
         }
         nds::set_scale(if skipping_now { 1 } else { shared.scale.load(Ordering::Relaxed) });
-        nds::set_extras(*shared.extras.lock().unwrap());
+        let mut extras = *shared.extras.lock().unwrap();
+        // the window's 3D is drawn at scale x samples at most (`effects::MSAA_BUDGET`): more would not keep up
+        extras.msaa = crate::effects::effective_msaa(shared.scale.load(Ordering::Relaxed) as u32, extras.msaa);
+        nds::set_extras(extras);
         if let Some(pack) = shared.pack_swap.lock().unwrap().take() {
             if let Err(e) = nds::set_texture_pack(pack.as_deref()) {
                 eprintln!("texture set: {}", e);

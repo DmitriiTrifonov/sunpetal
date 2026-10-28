@@ -39,6 +39,7 @@ impl Menu {
         let lang = Lang::resolve(&s.interface.language);
         let tx = move |en: &'static str, ru: &'static str| if lang == Lang::Ru { ru } else { en };
         let mut action = None;
+        let video_res = s.video.res as u32;
         let mut open = self.open;
         egui::Window::new(tx("Sunpetal: settings", "Sunpetal: настройки")).open(&mut open).resizable(false).collapsible(false).vscroll(true).max_height((ctx.content_rect().height() - 48.0).max(120.0)).show(ctx, |ui| {
             egui::ComboBox::from_label("Language / Язык")
@@ -189,6 +190,16 @@ impl Menu {
                         ui.selectable_value(&mut e.msaa, 2, "2x2");
                         ui.selectable_value(&mut e.msaa, 4, "4x4");
                     });
+                if e.msaa > 0 {
+                    let used = crate::effects::effective_msaa(video_res, e.msaa);
+                    if used != e.msaa {
+                        ui.colored_label(egui::Color32::from_rgb(230, 160, 40), if used == 0 {
+                            tx("too heavy at this 3D resolution: not drawn (lower the 3D resolution or use 2x2)", "слишком тяжело при таком разрешении 3D: не включено (уменьшите разрешение 3D или возьмите 2x2)").to_string()
+                        } else {
+                            format!("{} {}x{}", tx("too heavy at this 3D resolution, in the window:", "слишком тяжело при таком разрешении 3D, в окне:"), used, used)
+                        });
+                    }
+                }
                 ui.checkbox(&mut e.fxaa, tx("Smooth edges (FXAA)", "Сглаживание краёв (FXAA)"));
                 let sl = |v: &str| match v {
                     "smooth" => tx("Smooth", "Гладкое"),

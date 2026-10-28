@@ -56,6 +56,20 @@ impl Default for Effects {
 /// The presets' ids, in the order the menu and the hotkey go through them.
 pub const PRESETS: [&str; 6] = ["none", "sharp", "lcd", "crt", "vivid", "glow"];
 
+/// The most the 3D is drawn at (its scale times the samples per side) in the window, which has to keep up with the game;
+/// `sunpetal-headless` has no such limit.
+pub const MSAA_BUDGET: u32 = 4;
+
+/// The samples per side the window really uses: the asked ones, brought down (4 to 2 to none) until scale times
+/// samples is within `MSAA_BUDGET`.
+pub fn effective_msaa(scale: u32, msaa: u8) -> u8 {
+    let mut m = msaa;
+    while m > 0 && scale * m as u32 > MSAA_BUDGET {
+        m = if m >= 4 { 2 } else { 0 };
+    }
+    m
+}
+
 impl Effects {
     /// What the 3D renderer is to add.
     pub fn extras(&self) -> sunpetal_runtime::nds::Extras {
@@ -149,5 +163,20 @@ mod tests {
         e.sanitize();
         assert_eq!((e.scanlines, e.gamma, e.brightness), (1.0, 1.0, -0.3));
         assert_eq!(e.preset, "custom");
+    }
+}
+
+#[cfg(test)]
+mod msaa_tests {
+    use super::*;
+
+    #[test]
+    fn the_window_keeps_the_supersampling_within_its_budget() {
+        assert_eq!(effective_msaa(1, 4), 4);
+        assert_eq!(effective_msaa(2, 4), 2);
+        assert_eq!(effective_msaa(2, 2), 2);
+        assert_eq!(effective_msaa(3, 2), 0);
+        assert_eq!(effective_msaa(4, 4), 0);
+        assert_eq!(effective_msaa(5, 0), 0);
     }
 }
