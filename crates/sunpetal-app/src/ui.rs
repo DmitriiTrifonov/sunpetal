@@ -348,7 +348,9 @@ fn pack_sets(current: &str) -> Vec<String> {
     thread_local! {
         static CACHE: RefCell<Option<(PathBuf, Instant, Vec<String>)>> = const { RefCell::new(None) };
     }
-    let Some(dir) = Path::new(current).parent().filter(|d| !d.as_os_str().is_empty()).map(Path::to_path_buf) else { return Vec::new() };
+    // with no pack chosen ("the game's own pictures") the folder is the one the last pack was in
+    let last = CACHE.with(|c| c.borrow().as_ref().map(|(d, _, _)| d.clone()));
+    let Some(dir) = Path::new(current).parent().filter(|d| !d.as_os_str().is_empty()).map(Path::to_path_buf).or(last) else { return Vec::new() };
     CACHE.with(|c| {
         let mut c = c.borrow_mut();
         if let Some((d, t, v)) = c.as_ref() {
