@@ -446,7 +446,7 @@ impl Gx {
             // ... or a strip that is not tall (the glitch bands of the title's FSR screen start at the edge, however short)
             let tall = {
                 let (lo, hi) = (v[..n].iter().map(|x| x.p[1]).min().unwrap_or(0), v[..n].iter().map(|x| x.p[1]).max().unwrap_or(0));
-                (hi - lo) as i64 * 100 >= v[0].p[3] as i64 * 2 * 90
+                (hi as i64 - lo as i64) * 100 >= v[0].p[3] as i64 * 2 * 90
             };
             let stretch = flat && untextured && (left || right) && ((attr >> 16) & 31 == 31 || wide_enough || !tall);
             // a band across most of the screen goes to both edges, even if it starts a little inside

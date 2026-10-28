@@ -89,9 +89,9 @@ fn next_hold(hold: Option<Hold>, wants: bool, settled: bool) -> Option<Hold> {
 const TAP_FRAMES: u32 = 8;
 const HOLD_FRAMES: u32 = 1800;
 
-/// Frames the picture must ask for other bars before they change.
 /// Frames both screens stay up after the dial puzzle was last seen.
 const PUZZLE_FRAMES: u32 = 240;
+/// Frames the picture must ask for other bars before they change.
 const BAR_FRAMES: u32 = 3;
 
 /// Frames the picture must want the other screen before the single layout moves to it.

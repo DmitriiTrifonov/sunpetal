@@ -501,7 +501,8 @@ impl Gfx {
             };
             self.queue.write_buffer(&pick(i).extras[MAX_PATCHES].uniform, 0, bytemuck::bytes_of(&q));
         }
-        if self.background && self.bar_color.is_none() && edge.is_none() {
+        // (two screens, or none lone: the glow, as in the glow mode)
+        if (self.background || self.edge_bars) && self.bar_color.is_none() && edge.is_none() {
             // the whole window, dimmed, no screen effects
             let q = Quad { rect: [-1.0, 1.0, 1.0, -1.0], fx: [0.0, 0.0, 0.55, 0.0], color: [1.1, 0.9, -0.2, 1.0], dims: [GLOW_W as f32, GLOW_H as f32, 0.0, 0.0], uvr: WHOLE };
             self.queue.write_buffer(&self.glow.uniform, 0, bytemuck::bytes_of(&q));
@@ -537,7 +538,7 @@ impl Gfx {
                 let e = &pick(i).extras[MAX_PATCHES];
                 pass.set_bind_group(0, if self.linear { &e.bind_linear } else { &e.bind_nearest }, &[]);
                 pass.draw(0..4, 0..1);
-            } else if self.background && self.bar_color.is_none() {
+            } else if (self.background || self.edge_bars) && self.bar_color.is_none() {
                 pass.set_bind_group(0, &self.glow.bind_linear, &[]);
                 pass.draw(0..4, 0..1);
             }
