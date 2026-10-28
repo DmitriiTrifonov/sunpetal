@@ -166,6 +166,8 @@ struct App {
     hold: Option<Hold>,
     /// A button the app presses (bit) and the frames it has left.
     tap: (u32, u32),
+    /// The restart was asked for: once the machine has stopped, the program starts again.
+    restart: bool,
 }
 
 impl App {
@@ -807,6 +809,12 @@ impl ApplicationHandler for App {
                     el.exit();
                     return;
                 }
+                if action == Some(ui::Action::Restart) {
+                    self.save();
+                    self.restart = true;
+                    el.exit();
+                    return;
+                }
                 if self.settings != self.applied {
                     let layout_changed = self.settings.video.layout != self.applied.video.layout
                         || self.settings.video.lower != self.applied.video.lower
@@ -962,6 +970,7 @@ pub fn run(o: Options, el: EventLoop<()>) {
         auto_lower: false,
         hold: None,
         tap: (0, 0),
+        restart: false,
     };
     el.run_app(&mut app).expect("the event loop");
     // the window is closed: stop the machine (its thread saves the backup memory and exits)
@@ -975,6 +984,51 @@ pub fn run(o: Options, el: EventLoop<()>) {
     let why = shared.stopped.lock().unwrap().clone();
     if let Some(why) = why {
         eprintln!("stopped: {}", why);
+    }
+    if app.restart {
+        let pack = app.settings.video.texture_pack.clone();
+        match std::env::current_exe().and_then(|exe| std::process::Command::new(exe).args(restart_args(std::env::args_os().skip(1).collect(), &pack)).spawn()) {
+            Ok(_) => {}
+            Err(e) => eprintln!("restart: {}", e),
+        }
+    }
+}
+
+/// The command line of the restarted program: the same, except that what the settings now hold wins over the
+/// options that override them (the texture pack the menu may have changed, the width, the resolution, the language).
+fn restart_args(mut args: Vec<std::ffi::OsString>, pack: &str) -> Vec<std::ffi::OsString> {
+    let mut out = Vec::new();
+    while !args.is_empty() {
+        let a = args.remove(0);
+        if matches!(a.to_str(), Some("--texture-pack" | "--wide" | "--res" | "--lang")) {
+            if !args.is_empty() {
+                args.remove(0);
+            }
+            continue;
+        }
+        out.push(a);
+    }
+    if !pack.is_empty() {
+        out.push("--texture-pack".into());
+        out.push(pack.into());
+    }
+    out
+}
+
+#[cfg(test)]
+mod restart_tests {
+    use super::restart_args;
+    use std::ffi::OsString;
+
+    fn os(v: &[&str]) -> Vec<OsString> {
+        v.iter().map(OsString::from).collect()
+    }
+
+    #[test]
+    fn a_restart_keeps_the_line_but_the_settings_win_over_the_overrides() {
+        let line = os(&["rom.nds", "--out", "dir", "--texture-pack", "old.data", "--wide", "on", "--mute", "--lang", "ru"]);
+        assert_eq!(restart_args(line.clone(), "new.data"), os(&["rom.nds", "--out", "dir", "--mute", "--texture-pack", "new.data"]));
+        assert_eq!(restart_args(line, ""), os(&["rom.nds", "--out", "dir", "--mute"]));
     }
 }
 

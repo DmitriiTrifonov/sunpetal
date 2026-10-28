@@ -10,6 +10,8 @@ pub const NAMES: [&str; 12] = ["A", "B", "SELECT", "START", "RIGHT", "LEFT", "UP
 #[derive(PartialEq, Debug)]
 pub enum Action {
     Quit,
+    /// Start the program anew (the settings saved, the game's backup memory written first).
+    Restart,
 }
 
 pub struct Menu {
@@ -19,11 +21,13 @@ pub struct Menu {
     profile_name: String,
     profiles: Vec<String>,
     message: String,
+    /// The restart button was pressed once: the next press does it.
+    restart_ask: bool,
 }
 
 impl Menu {
     pub fn new() -> Menu {
-        Menu { open: false, rebinding: None, profile_name: String::new(), profiles: config::profiles(), message: String::new() }
+        Menu { open: false, rebinding: None, profile_name: String::new(), profiles: config::profiles(), message: String::new(), restart_ask: false }
     }
 
     pub fn toggle(&mut self) {
@@ -317,6 +321,14 @@ impl Menu {
                 }
                 if ui.button(tx("Close", "Закрыть")).clicked() {
                     self.open = false;
+                }
+                let ask = self.restart_ask;
+                let label = if ask { tx("Progress not saved in the game is lost. Press again to restart", "Несохранённый прогресс пропадёт. Нажмите ещё раз для перезапуска") } else { tx("Restart the game", "Перезапустить игру") };
+                if ui.button(label).clicked() {
+                    if ask {
+                        action = Some(Action::Restart);
+                    }
+                    self.restart_ask = !ask;
                 }
                 if ui.button(tx("Quit", "Выйти из игры")).clicked() {
                     action = Some(Action::Quit);
