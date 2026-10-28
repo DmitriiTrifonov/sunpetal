@@ -164,6 +164,12 @@ impl Menu {
                 ui.add_enabled(e.outline > 0.0, egui::Slider::new(&mut e.outline_width, 0.25..=2.0).text(tx("Outline width", "Толщина контура")));
                 ui.add(egui::Slider::new(&mut e.shadow, 0.0..=1.0).text(tx("Soft shadows", "Мягкие тени")));
                 ui.add_enabled(e.shadow > 0.0, egui::Slider::new(&mut e.shadow_radius, 0.5..=6.0).text(tx("Shadow reach", "Размер теней")));
+                let tf = |v: &str| if v == "bilinear" { tx("Bilinear", "Билинейная") } else { tx("Nearest (as the DS)", "Ближайший (как на DS)") };
+                egui::ComboBox::from_label(tx("Texture filtering", "Фильтрация текстур")).selected_text(tf(&e.texture_filter)).show_ui(ui, |ui| {
+                    for v in ["nearest", "bilinear"] {
+                        ui.selectable_value(&mut e.texture_filter, v.to_string(), tf(v));
+                    }
+                });
                 ui.checkbox(&mut e.fxaa, tx("Smooth edges (FXAA)", "Сглаживание краёв (FXAA)"));
                 if *e != before {
                     e.preset = "custom".into();

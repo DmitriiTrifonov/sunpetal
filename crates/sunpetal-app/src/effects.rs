@@ -37,11 +37,13 @@ pub struct Effects {
     pub shadow: f32,
     /// 0.5-6: how far the shading reaches, in DS pixels.
     pub shadow_radius: f32,
+    /// "nearest" (as the DS) or "bilinear": how the 3D reads its textures (`render3d`).
+    pub texture_filter: String,
 }
 
 impl Default for Effects {
     fn default() -> Effects {
-        Effects { preset: "none".into(), sharp: false, scanlines: 0.0, grid: 0.0, vignette: 0.0, saturation: 1.0, contrast: 1.0, brightness: 0.0, gamma: 1.0, bloom: 0.0, fxaa: false, outline: 0.0, outline_width: 0.5, shadow: 0.0, shadow_radius: 2.0 }
+        Effects { preset: "none".into(), sharp: false, scanlines: 0.0, grid: 0.0, vignette: 0.0, saturation: 1.0, contrast: 1.0, brightness: 0.0, gamma: 1.0, bloom: 0.0, fxaa: false, outline: 0.0, outline_width: 0.5, shadow: 0.0, shadow_radius: 2.0, texture_filter: "nearest".into() }
     }
 }
 
@@ -51,7 +53,7 @@ pub const PRESETS: [&str; 6] = ["none", "sharp", "lcd", "crt", "vivid", "glow"];
 impl Effects {
     /// What the 3D renderer is to add.
     pub fn extras(&self) -> sunpetal_runtime::nds::Extras {
-        sunpetal_runtime::nds::Extras { outline: self.outline, outline_width: self.outline_width, shadow: self.shadow, shadow_radius: self.shadow_radius }
+        sunpetal_runtime::nds::Extras { outline: self.outline, outline_width: self.outline_width, shadow: self.shadow, shadow_radius: self.shadow_radius, filter: sunpetal_runtime::nds::TexFilter::parse(&self.texture_filter) }
     }
 
     pub fn preset(id: &str) -> Effects {
@@ -85,6 +87,9 @@ impl Effects {
         self.outline_width = if self.outline_width.is_finite() { self.outline_width.clamp(0.25, 2.0) } else { 0.5 };
         self.shadow = if self.shadow.is_finite() { self.shadow.clamp(0.0, 1.0) } else { 0.0 };
         self.shadow_radius = if self.shadow_radius.is_finite() { self.shadow_radius.clamp(0.5, 6.0) } else { 2.0 };
+        if self.texture_filter != "bilinear" {
+            self.texture_filter = "nearest".into();
+        }
         self.bloom = if self.bloom.is_finite() { self.bloom.clamp(0.0, 1.0) } else { 0.0 };
         if !PRESETS.contains(&self.preset.as_str()) {
             self.preset = "custom".into();

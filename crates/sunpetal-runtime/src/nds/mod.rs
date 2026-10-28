@@ -498,11 +498,30 @@ pub struct Extras {
     pub shadow: f32,
     /// How far it reaches, in DS pixels (0.5-6).
     pub shadow_radius: f32,
+    /// How textures are read: the nearest texel (as the DS does) or four blended.
+    pub filter: TexFilter,
+}
+
+/// Texture filtering of the 3D.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum TexFilter {
+    #[default]
+    Nearest,
+    Bilinear,
+}
+
+impl TexFilter {
+    pub fn parse(s: &str) -> TexFilter {
+        match s {
+            "bilinear" | "linear" => TexFilter::Bilinear,
+            _ => TexFilter::Nearest,
+        }
+    }
 }
 
 impl Default for Extras {
     fn default() -> Extras {
-        Extras { outline: 0.0, outline_width: 0.5, shadow: 0.0, shadow_radius: 2.0 }
+        Extras { outline: 0.0, outline_width: 0.5, shadow: 0.0, shadow_radius: 2.0, filter: TexFilter::Nearest }
     }
 }
 
@@ -516,6 +535,7 @@ pub fn set_extras(e: Extras) {
             outline_width: c(e.outline_width, 0.25, 2.0, 0.5),
             shadow: c(e.shadow, 0.0, 1.0, 0.0),
             shadow_radius: c(e.shadow_radius, 0.5, 6.0, 2.0),
+            filter: e.filter,
         }
     });
 }

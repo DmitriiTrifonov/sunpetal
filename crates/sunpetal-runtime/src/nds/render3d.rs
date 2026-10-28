@@ -3,7 +3,7 @@
 //! DS started drawing it, to a 256x192 picture.
 //!
 //! Done: perspective-correct colours and texture coordinates, the depth buffer (z or w), less-than
-//! and "equal" depth tests, all seven texture formats (nearest filtering, repeat, flip, clamp),
+//! and "equal" depth tests, all seven texture formats (nearest or bilinear filtering, repeat, flip, clamp),
 //! modulation, decal, toon and highlight shading, polygon alpha with blending over what is there,
 //! alpha test, wireframe polygons, the clear colour, depth and polygon ID.
 //! Also: edge marking (a pixel next to a farther pixel of another polygon ID takes the edge
@@ -125,6 +125,31 @@ fn sample_image(img: &Image, tex: u32, s: f32, t: f32) -> (u32, u32, u32, u32) {
     let y = wrap((t / oh * img.h as f32).floor() as i32, img.h as i32, tex & 0x20000 != 0, tex & 0x80000 != 0);
     let p = &img.rgba[(y * img.w + x) * 4..(y * img.w + x) * 4 + 4];
     ((p[0] >> 2) as u32, (p[1] >> 2) as u32, (p[2] >> 2) as u32, (p[3] as u32 * 31 + 127) / 255)
+}
+
+/// Four texels blended by the fractional position, weighted by alpha so a transparent texel's
+/// colour never bleeds into its neighbours; `get` reads the texel at integer coordinates.
+fn bilinear(s: f32, t: f32, get: impl Fn(i32, i32) -> (u32, u32, u32, u32)) -> (u32, u32, u32, u32) {
+    let (s, t) = (s - 0.5, t - 0.5);
+    let (x0, y0) = (s.floor(), t.floor());
+    let (fx, fy) = (s - x0, t - y0);
+    let (x0, y0) = (x0 as i32, y0 as i32);
+    let ws = [(1.0 - fx) * (1.0 - fy), fx * (1.0 - fy), (1.0 - fx) * fy, fx * fy];
+    let (mut r, mut g, mut b, mut a, mut wa) = (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    for (i, w) in ws.iter().enumerate() {
+        let c = get(x0 + (i as i32 & 1), y0 + (i as i32 >> 1));
+        let k = *w * c.3 as f32;
+        r += k * c.0 as f32;
+        g += k * c.1 as f32;
+        b += k * c.2 as f32;
+        a += k;
+        wa += *w;
+    }
+    if a <= 0.0 {
+        return (0, 0, 0, 0);
+    }
+    let q = |v: f32| (v / a + 0.5).floor().min(63.0) as u32;
+    (q(r), q(g), q(b), ((a / wa + 0.5).floor() as u32).min(31))
 }
 
 /// What `render` leaves out, by bit of the mask it returns.
@@ -431,8 +456,16 @@ fn raster(job: &Job, verts: &[GxVertex], s: usize, ya: usize, yb: usize) -> Targ
             }
             let (mut or, mut og, mut ob, mut oa) = (r, g, b, va);
             if textured {
+                let lin = job.extras.filter == super::TexFilter::Bilinear;
                 let (tr, tg, tb, ta) = match replacement {
+                    Some(ref img) if lin => {
+                        let (ow, oh) = ((8u32 << ((p.tex >> 20) & 7)) as f32, (8u32 << ((p.tex >> 23) & 7)) as f32);
+                        // image texels, then back to the original's units for the wrapping
+                        let (kx, ky) = (ow / img.w as f32, oh / img.h as f32);
+                        bilinear(s / kx, tt / ky, |x, y| sample_image(img, p.tex, (x as f32 + 0.5) * kx, (y as f32 + 0.5) * ky))
+                    }
                     Some(ref img) => sample_image(img, p.tex, s, tt),
+                    None if lin => bilinear(s, tt, |x, y| sample(&mem, p.tex, p.pal, x as f32, y as f32)),
                     None => sample(&mem, p.tex, p.pal, s, tt),
                 };
                 if mode == 1 {

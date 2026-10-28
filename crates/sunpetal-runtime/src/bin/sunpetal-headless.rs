@@ -3,7 +3,7 @@
 //! the same ROM must be linked in (docs/ABI.md).
 //!
 //!     sunpetal-headless ROM.nds [--vblanks N] [--trace] [--out DIR] [--save FILE]
-//!                              [--save-size BYTES] [--dump-textures DIR] [--dump-bg DIR] [--texture-pack DIR] [--shots V,V,...] [--shot-every N] [--input SCRIPT] [--wav FILE] [--scale N] [--wide PIXELS_EACH_SIDE] [--outline 0-1] [--outline-width 0.25-2] [--shadow 0-1] [--shadow-radius 0.5-6]
+//!                              [--save-size BYTES] [--dump-textures DIR] [--dump-bg DIR] [--texture-pack DIR] [--shots V,V,...] [--shot-every N] [--input SCRIPT] [--wav FILE] [--scale N] [--wide PIXELS_EACH_SIDE] [--texture-filter nearest|bilinear] [--outline 0-1] [--outline-width 0.25-2] [--shadow 0-1] [--shadow-radius 0.5-6]
 //!
 //! Both screens are written as PNGs (DIR/v<N>.png) at the VBlanks asked for; --wav writes the sound
 //! (16-bit stereo, 32 728 Hz); --draw-all draws every frame (for timing).
@@ -17,7 +17,7 @@ fn main() -> ExitCode {
     let mut rest = Vec::new();
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--vblanks" | "--out" | "--save" | "--save-size" | "--dump-textures" | "--dump-bg" | "--texture-pack" | "--overlay" | "--data" | "--lang" | "--shots" | "--shot-every" | "--input" | "--wav" | "--scale" | "--outline" | "--outline-width" | "--shadow" | "--shadow-radius" | "--wide" => rest.push((a, args.next().unwrap_or_default())),
+            "--vblanks" | "--out" | "--save" | "--save-size" | "--dump-textures" | "--dump-bg" | "--texture-pack" | "--overlay" | "--data" | "--lang" | "--shots" | "--shot-every" | "--input" | "--wav" | "--scale" | "--outline" | "--outline-width" | "--shadow" | "--shadow-radius" | "--texture-filter" | "--wide" => rest.push((a, args.next().unwrap_or_default())),
             "--trace" | "--draw-all" => rest.push((a, String::new())),
             _ if cfg.is_none() => cfg = Some(Config::new(a)),
             _ => {
@@ -53,6 +53,7 @@ fn main() -> ExitCode {
             "--outline" => extras.outline = v.parse().unwrap_or(0.0),
             "--outline-width" => extras.outline_width = v.parse().unwrap_or(0.5),
             "--shadow" => extras.shadow = v.parse().unwrap_or(0.0),
+            "--texture-filter" => extras.filter = nds::TexFilter::parse(&v),
             "--shadow-radius" => extras.shadow_radius = v.parse().unwrap_or(2.0),
             "--wav" => wav = Some(v),
             "--wide" => wide = v.parse().unwrap_or(0),
