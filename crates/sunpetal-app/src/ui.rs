@@ -182,6 +182,13 @@ impl Menu {
                         ui.selectable_value(&mut e.texture_filter, v.to_string(), tf(v));
                     }
                 });
+                egui::ComboBox::from_label(tx("3D edge anti-aliasing", "Сглаживание краёв 3D"))
+                    .selected_text(match e.msaa { 2 => "2x2", 4 => "4x4", _ => tx("off", "выкл") })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut e.msaa, 0, tx("off", "выкл"));
+                        ui.selectable_value(&mut e.msaa, 2, "2x2");
+                        ui.selectable_value(&mut e.msaa, 4, "4x4");
+                    });
                 ui.checkbox(&mut e.fxaa, tx("Smooth edges (FXAA)", "Сглаживание краёв (FXAA)"));
                 let sl = |v: &str| match v {
                     "smooth" => tx("Smooth", "Гладкое"),

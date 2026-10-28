@@ -500,6 +500,8 @@ pub struct Extras {
     pub shadow_radius: f32,
     /// How textures are read: the nearest texel (as the DS does) or four blended.
     pub filter: TexFilter,
+    /// Anti-aliasing of polygon edges: 0 off, 2 (2x2 samples per pixel), 4 (4x4); supersampling.
+    pub msaa: u8,
 }
 
 /// Texture filtering of the 3D.
@@ -521,7 +523,7 @@ impl TexFilter {
 
 impl Default for Extras {
     fn default() -> Extras {
-        Extras { outline: 0.0, outline_width: 0.5, shadow: 0.0, shadow_radius: 2.0, filter: TexFilter::Nearest }
+        Extras { outline: 0.0, outline_width: 0.5, shadow: 0.0, shadow_radius: 2.0, filter: TexFilter::Nearest, msaa: 0 }
     }
 }
 
@@ -549,6 +551,7 @@ pub fn set_extras(e: Extras) {
             shadow: c(e.shadow, 0.0, 1.0, 0.0),
             shadow_radius: c(e.shadow_radius, 0.5, 6.0, 2.0),
             filter: e.filter,
+            msaa: match e.msaa { 0..=1 => 0, 2..=3 => 2, _ => 4 },
         }
     });
 }

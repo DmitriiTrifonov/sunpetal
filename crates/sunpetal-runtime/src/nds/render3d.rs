@@ -796,10 +796,75 @@ fn extend_sides(t: &mut Target, job: &Job, w: usize, h: usize, e: usize) {
     }
 }
 
-/// Draws a frame. Returns the picture and the mask of what it left out (`NOTE`).
+/// Draws a frame. Returns the picture and the mask of what it left out (`NOTE`). With
+/// `extras.msaa` = k the frame is drawn k times as large each way (every pass, the outline, the
+/// shading and the widened view's `extend_sides` included) and the samples of each pixel are
+/// averaged (`resolve`): supersampling, so polygon edges, silhouettes against the 2D layers and
+/// the outline come out smooth.
 pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
-    let mut notes = 0u32;
     let s = scale.max(1);
+    // at most 16x the DS's size each way, and 8192 wide: more would not fit in memory
+    let mut k = job.extras.msaa as usize;
+    while k > 1 && (s * k > 16 || job.width * s * k > 8192) {
+        k /= 2;
+    }
+    if k < 2 {
+        return render_at(job, s);
+    }
+    let (big, notes) = render_at(job, s * k);
+    (resolve(&big, job.width * s, 192 * s, k), notes & !(1 << 1))
+}
+
+/// Averages the picture's k x k samples per pixel: colour weighted by alpha (a sample with no 3D
+/// has none), alpha as the share covered, the outline and shade levels over the covered samples.
+fn resolve(big: &[u32], w: usize, h: usize, k: usize) -> Vec<u32> {
+    let mut out = vec![0u32; w * h];
+    let bands = threads().min(h / 32).max(1);
+    let per = (h + bands - 1) / bands;
+    std::thread::scope(|sc| {
+        for (b, chunk) in out.chunks_mut(per * w).enumerate() {
+            sc.spawn(move || {
+                let bw = w * k;
+                for (ry, row) in chunk.chunks_mut(w).enumerate() {
+                    let y0 = (b * per + ry) * k;
+                    for (x, o) in row.iter_mut().enumerate() {
+                        // sums: alpha, then colour channels, outline and shade weighted by alpha
+                        let (mut sa, mut sr, mut sg, mut sb, mut sl, mut sh) = (0u32, 0u32, 0u32, 0u32, 0u32, 0u32);
+                        for dy in 0..k {
+                            for dx in 0..k {
+                                let p = big[(y0 + dy) * bw + x * k + dx];
+                                let a = p >> 18 & 31;
+                                if a == 0 {
+                                    continue;
+                                }
+                                sa += a;
+                                sr += (p & 63) * a;
+                                sg += (p >> 6 & 63) * a;
+                                sb += (p >> 12 & 63) * a;
+                                sl += (p >> 24 & 15) * a;
+                                sh += (p >> 28 & 15) * a;
+                            }
+                        }
+                        if sa == 0 {
+                            continue;
+                        }
+                        let n = (k * k) as u32;
+                        let alpha = (sa + n / 2) / n;
+                        if alpha == 0 {
+                            continue;
+                        }
+                        let avg = |v: u32| (v + sa / 2) / sa;
+                        *o = avg(sr) | avg(sg) << 6 | avg(sb) << 12 | alpha << 18 | avg(sl) << 24 | avg(sh) << 28;
+                    }
+                }
+            });
+        }
+    });
+    out
+}
+
+fn render_at(job: &Job, s: usize) -> (Vec<u32>, u32) {
+    let mut notes = 0u32;
     let (w, h) = (job.width * s, 192 * s);
     let n = w * h;
     let sc = s as f32;
@@ -910,6 +975,34 @@ mod tests {
 
     const BLUE: u16 = 0x7C00;
     const RED: u16 = 0x001F;
+
+    #[test]
+    fn supersampling_gives_an_edge_pixel_its_share_of_coverage_and_leaves_the_inside_alone() {
+        let v = |sx: f32, sy: f32| GxVertex { sx, sy, z: 0, w: 0x1000, r: 31.0, g: 31.0, b: 31.0, ..GxVertex::default() };
+        let mut j = empty_job();
+        j.clear_color = 0; // no clear plane: nothing under the triangle
+        j.verts = vec![v(0.0, 0.0), v(8.6, 0.0), v(0.0, 8.6)];
+        j.polys = vec![GxPoly { first: 0, n: 3, attr: 31 << 16, tex: 0, pal: 0, translucent: false, sortkey: 0 }];
+        let alpha = |p: u32| p >> 18 & 31;
+        // off: the pixel (5, 3) spans x + y = 8..10 over the line at 8.6; its centre (9) is outside
+        let (plain, _) = render(&j, 1);
+        assert_eq!(alpha(plain[3 * 256 + 5]), 0);
+        // 2x2: of the four samples only one lies under the line
+        j.extras.msaa = 2;
+        let (aa, _) = render(&j, 1);
+        assert_eq!(alpha(aa[3 * 256 + 5]), 8, "1/4 of 31");
+        assert_eq!(aa[3 * 256 + 5] & 0x3FFFF, 63 | 63 << 6 | 63 << 12, "the colour stays whole");
+        assert_eq!(aa[3 * 256 + 3], plain[3 * 256 + 3], "inside is untouched");
+        assert_eq!(alpha(aa[3 * 256 + 6]), 0, "outside stays empty");
+        // 4x4: 3/16
+        j.extras.msaa = 4;
+        assert_eq!(alpha(render(&j, 1).0[3 * 256 + 5]), 6);
+        // scale 2 and a widened view keep the picture's size
+        j.extras.msaa = 2;
+        assert_eq!(render(&j, 2).0.len(), 512 * 384);
+        j.width = 320;
+        assert_eq!(render(&j, 1).0.len(), 320 * 192);
+    }
 
     #[test]
     fn the_outline_marks_the_near_side_of_a_depth_jump_and_leaves_a_slope_alone() {

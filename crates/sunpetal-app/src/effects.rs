@@ -43,11 +43,13 @@ pub struct Effects {
     pub smooth_2d: String,
     /// 0-1: how much of the rebuilt picture is mixed in.
     pub smooth_strength: f32,
+    /// Polygon-edge anti-aliasing in the 3D renderer: 0 off, 2 or 4 (samples per side).
+    pub msaa: u8,
 }
 
 impl Default for Effects {
     fn default() -> Effects {
-        Effects { preset: "none".into(), sharp: false, scanlines: 0.0, grid: 0.0, vignette: 0.0, saturation: 1.0, contrast: 1.0, brightness: 0.0, gamma: 1.0, bloom: 0.0, fxaa: false, outline: 0.25, outline_width: 0.5, shadow: 0.0, shadow_radius: 2.0, texture_filter: "nearest".into(), smooth_2d: "off".into(), smooth_strength: 1.0 }
+        Effects { preset: "none".into(), sharp: false, scanlines: 0.0, grid: 0.0, vignette: 0.0, saturation: 1.0, contrast: 1.0, brightness: 0.0, gamma: 1.0, bloom: 0.0, fxaa: false, outline: 0.25, outline_width: 0.5, shadow: 0.0, shadow_radius: 2.0, texture_filter: "nearest".into(), smooth_2d: "off".into(), smooth_strength: 1.0, msaa: 0 }
     }
 }
 
@@ -57,7 +59,7 @@ pub const PRESETS: [&str; 6] = ["none", "sharp", "lcd", "crt", "vivid", "glow"];
 impl Effects {
     /// What the 3D renderer is to add.
     pub fn extras(&self) -> sunpetal_runtime::nds::Extras {
-        sunpetal_runtime::nds::Extras { outline: self.outline, outline_width: self.outline_width, shadow: self.shadow, shadow_radius: self.shadow_radius, filter: sunpetal_runtime::nds::TexFilter::parse(&self.texture_filter) }
+        sunpetal_runtime::nds::Extras { outline: self.outline, outline_width: self.outline_width, shadow: self.shadow, shadow_radius: self.shadow_radius, filter: sunpetal_runtime::nds::TexFilter::parse(&self.texture_filter), msaa: self.msaa }
     }
 
     /// The shader's mode: 0 off, 1 smooth, 2 soft.
@@ -107,6 +109,7 @@ impl Effects {
             self.smooth_2d = "off".into();
         }
         self.smooth_strength = if self.smooth_strength.is_finite() { self.smooth_strength.clamp(0.0, 1.0) } else { 1.0 };
+        self.msaa = match self.msaa { 0..=1 => 0, 2..=3 => 2, _ => 4 };
         self.bloom = if self.bloom.is_finite() { self.bloom.clamp(0.0, 1.0) } else { 0.0 };
         if !PRESETS.contains(&self.preset.as_str()) {
             self.preset = "custom".into();

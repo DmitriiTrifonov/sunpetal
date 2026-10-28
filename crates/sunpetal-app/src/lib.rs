@@ -5,7 +5,7 @@
 //!                          [--dump-textures DIR] [--texture-pack DIR]
 //!
 //! F1 or Esc: the settings menu (video, sound, keys, profiles). Hotkeys: F2 changes the layout, F8 the game's menu in the single layout while the screen follows the game (START and the lower screen, B and back), else the screen shown (or the panel of the overlay layout), F3
-//! the filter, P or F10 writes the picture and its parts to `artifacts/shots` (for bug reports), F4 and F5 the 3D's internal resolution (1-8 times the DS's), F11 full screen, Tab
+//! the filter, / (the key beside the right Shift), P or F10 writes the picture and its parts to `artifacts/shots` (for bug reports), F4 and F5 the 3D's internal resolution (1-8 times the DS's), F11 full screen, Tab
 //! (held) runs without waiting for the clock. The keys of the DS's buttons are set in the menu
 //! (default: arrows = D-pad, Z = A, X = B, S = X, A = Y, Q = L, W = R, Enter = START, Backspace =
 //! SELECT). A pad: the D-pad or left stick, the face buttons as the DS's (east A, south B, north
@@ -521,7 +521,7 @@ impl ApplicationHandler for App {
                     KeyCode::F2 => self.cycle_layout(),
                     KeyCode::F8 => self.swap_screen(),
                     KeyCode::F3 => self.settings.video.linear = !self.settings.video.linear,
-                    KeyCode::F10 | KeyCode::KeyP => self.dump_shot(),
+                    KeyCode::F10 | KeyCode::KeyP | KeyCode::Slash => self.dump_shot(),
                     KeyCode::F7 => {
                         self.shared.toggle_skip();
                     }
