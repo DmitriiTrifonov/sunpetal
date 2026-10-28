@@ -1,0 +1,2 @@
+# DS textures whose PS2 picture was checked by eye and is the same picture (the best candidate is taken whatever the thresholds)
+128x64_5_13db3264a3aecae5_9d22fcea0c822557.png  # the far ridges of the parking, PS2 darker and more contrasty (mae 12.8)

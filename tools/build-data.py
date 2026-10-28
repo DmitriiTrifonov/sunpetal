@@ -84,8 +84,12 @@ def main():
     ap.add_argument('--cache')
     ap.add_argument('--max-mae', type=float, default=12.0)
     ap.add_argument('--max-block', type=float, default=30.0, help='worst 4x4 block error')
+    ap.add_argument('--allow', help='file of DS texture names (as in the report) taken whatever the thresholds say, checked by eye; # comments')
     ap.add_argument('--max-edges', type=float, default=0.65, help='edge difference over edge strength')
     a = ap.parse_args()
+    allow = set()
+    if a.allow:
+        allow = {l.split('#')[0].strip() for l in open(a.allow) if l.split('#')[0].strip()}
     t0 = time.time()
     log = lambda s: print(f'[{time.time() - t0:6.0f}s] {s}', file=sys.stderr, flush=True)
 
@@ -137,7 +141,7 @@ def main():
             pw, ph, prgba = pictures[(fl, e, i)]
             small = mkpack.shrink(pw, ph, prgba, f)
             err, block, edges = mkpack.compare(rgba, small, w, h)
-            ok = err <= a.max_mae and block <= a.max_block and edges <= a.max_edges
+            ok = err <= a.max_mae and block <= a.max_block and edges <= a.max_edges or spdata.file_name(k) in allow
             # the best that passes; else the best of what does not (for the report)
             rank = (0 if ok else 1, err)
             if best is None or rank < best[7]:
