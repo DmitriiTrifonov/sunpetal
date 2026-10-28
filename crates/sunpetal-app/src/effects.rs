@@ -43,7 +43,7 @@ pub struct Effects {
 
 impl Default for Effects {
     fn default() -> Effects {
-        Effects { preset: "none".into(), sharp: false, scanlines: 0.0, grid: 0.0, vignette: 0.0, saturation: 1.0, contrast: 1.0, brightness: 0.0, gamma: 1.0, bloom: 0.0, fxaa: false, outline: 0.0, outline_width: 0.5, shadow: 0.0, shadow_radius: 2.0, texture_filter: "nearest".into() }
+        Effects { preset: "none".into(), sharp: false, scanlines: 0.0, grid: 0.0, vignette: 0.0, saturation: 1.0, contrast: 1.0, brightness: 0.0, gamma: 1.0, bloom: 0.0, fxaa: false, outline: 0.25, outline_width: 0.5, shadow: 0.0, shadow_radius: 2.0, texture_filter: "nearest".into() }
     }
 }
 

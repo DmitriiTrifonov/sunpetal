@@ -24,6 +24,8 @@ Methods:
     ffmpeg-lanczos  ffmpeg scale=flags=lanczos
     xbr             ffmpeg xbr (pixel-art; 2, 3, 4 only)
     hqx             ffmpeg hqx (pixel-art; 2, 3, 4 only)
+    upscayl         neural (an installed Upscayl: model upscayl-standard-4x; colour only, the alpha stays Lanczos)
+    upscayl-remacri the same with the remacri model
 
 `--dry-run` estimates the sizes: old PNG size x area ratio x a measured constant (0.65 for palette
 results, 0.85 for true colour). A guide, not a promise.
@@ -107,6 +109,19 @@ def _ffmpeg(flt):
     return go
 
 
+def _upscayl(model):
+    """The neural upscaler of an installed Upscayl (its command line, called with an argument list; the
+    pictures stay on the machine). `SUNPETAL_UPSCAYL` names the folder holding `bin/upscayl-bin` and
+    `models/` (default the app's resources). The models are 4x; a smaller factor is the scaled result."""
+    def go(mg, src, dst, w, h, f):
+        root = os.environ.get('SUNPETAL_UPSCAYL', '/Applications/Upscayl.app/Contents/Resources')
+        exe = os.path.join(root, 'bin', 'upscayl-bin')
+        if not os.path.exists(exe):
+            raise RuntimeError(f'upscayl-bin not found at {exe} (install Upscayl or set SUNPETAL_UPSCAYL)')
+        run([exe, '-i', src, '-o', dst, '-m', os.path.join(root, 'models'), '-n', model, '-z', '4', '-s', str(f)])
+    return go
+
+
 METHODS = collections.OrderedDict([
     ('lanczos', _resize('Lanczos')),
     ('lanczos-sharp', _resize('Lanczos', SHARP)),
@@ -117,6 +132,8 @@ METHODS = collections.OrderedDict([
     ('ffmpeg-lanczos', _ffmpeg('lanczos')),
     ('xbr', _ffmpeg('xbr')),
     ('hqx', _ffmpeg('hqx')),
+    ('upscayl', _upscayl('upscayl-standard-4x')),
+    ('upscayl-remacri', _upscayl('remacri-4x')),
 ])
 
 
