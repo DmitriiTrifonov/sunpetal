@@ -75,6 +75,12 @@ def dedupe(idx):
     return out
 
 
+def hollow(rgba):
+    """The share of pixels that are mostly see-through (alpha under 128) in an RGBA picture."""
+    n = len(rgba) // 4
+    return sum(1 for o in range(3, len(rgba), 4) if rgba[o] < 128) / n if n else 0.0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument('rom')
@@ -142,6 +148,9 @@ def main():
             small = mkpack.shrink(pw, ph, prgba, f)
             err, block, edges = mkpack.compare(rgba, small, w, h)
             ok = err <= a.max_mae and block <= a.max_block and edges <= a.max_edges or spdata.file_name(k) in allow
+            # a texture with see-through parts (a glow, a cut-out) must not get a solid picture: it would be a square
+            if ok and hollow(rgba) > 0.05 and hollow(prgba) < 0.01:
+                ok = False
             # the best that passes; else the best of what does not (for the report)
             rank = (0 if ok else 1, err)
             if best is None or rank < best[7]:
