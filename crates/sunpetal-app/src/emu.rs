@@ -74,6 +74,8 @@ pub struct Shared {
     pub scale: AtomicUsize,
     /// The 3D's outline and shading.
     pub extras: Mutex<nds::Extras>,
+    /// A texture pack to swap in before the next frame (`Some(None)`: none); the window sets it, the emulation takes it.
+    pub pack_swap: Mutex<Option<Option<PathBuf>>>,
     /// A click (a tap) came while the logos were on: run on, without waiting or sound, until they end.
     pub logo_click: AtomicBool,
     pub quit: AtomicBool,
@@ -124,6 +126,7 @@ impl Shared {
             frame: Mutex::new(None),
             scale: AtomicUsize::new(2),
             extras: Mutex::new(nds::Extras::default()),
+            pack_swap: Mutex::new(None),
             logo_click: AtomicBool::new(false),
             quit: AtomicBool::new(false),
             vblank: AtomicU64::new(0),
@@ -204,6 +207,11 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         }
         nds::set_scale(if skipping_now { 1 } else { shared.scale.load(Ordering::Relaxed) });
         nds::set_extras(*shared.extras.lock().unwrap());
+        if let Some(pack) = shared.pack_swap.lock().unwrap().take() {
+            if let Err(e) = nds::set_texture_pack(pack.as_deref()) {
+                eprintln!("texture set: {}", e);
+            }
+        }
         nds::set_draw(draw);
         let t0 = Instant::now();
         if !nds::run_frame() {

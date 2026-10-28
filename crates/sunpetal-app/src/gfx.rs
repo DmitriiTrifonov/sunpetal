@@ -20,6 +20,7 @@ struct Quad {
     color: vec4<f32>,  // saturation, contrast, brightness, gamma
     dims: vec4<f32>,   // the texture's width and height, the window's pixels per DS pixel
     uvr: vec4<f32>,    // the part of the texture shown: u0, v0, u1, v1
+    sm: vec4<f32>,     // 2D smoothing: mode (0 off, 1 smooth, 2 soft), strength, texels per DS pixel
 };
 @group(0) @binding(0) var<uniform> q: Quad;
 @group(0) @binding(1) var tex: texture_2d<f32>;
@@ -36,6 +37,93 @@ fn vs(@builtin(vertex_index) i: u32) -> Out {
     o.uv = mix(q.uvr.xy, q.uvr.zw, c);
     o.loc = c;
     return o;
+}
+
+// A DS pixel's colour (the 2D layers are repeated per pixel at higher scales).
+fn ds_px(i: vec2<i32>, cells: vec2<i32>, s: i32) -> vec3<f32> {
+    let c = clamp(i, vec2<i32>(0), cells - vec2<i32>(1));
+    return textureLoad(tex, c * s + vec2<i32>(s / 2), 0).rgb;
+}
+
+fn cr4(p: vec4<f32>, x: f32) -> f32 {
+    return 0.5 * (2.0 * p.y + (p.z - p.x) * x + (2.0 * p.x - 5.0 * p.y + 4.0 * p.z - p.w) * x * x + (3.0 * p.y - p.x - 3.0 * p.z + p.w) * x * x * x);
+}
+
+fn cr_t(t: array<vec4<f32>, 4>, f: vec2<f32>) -> f32 {
+    return clamp(cr4(vec4<f32>(cr4(t[0], f.x), cr4(t[1], f.x), cr4(t[2], f.x), cr4(t[3], f.x)), f.y), 0.0, 1.0);
+}
+
+// Text and interface made smooth: where the 4x4 DS pixels round are (nearly) two colours with a strong
+// contrast, the edge between them is rebuilt from a Catmull-Rom blend of "how much of the one colour"
+// and cut with an edge about one (smooth) or 2.5 (soft) window pixels wide. Elsewhere `plain` is kept.
+fn smooth2d(uv: vec2<f32>, plain: vec3<f32>) -> vec3<f32> {
+    let s = max(i32(q.sm.z + 0.5), 1);
+    let cells = vec2<i32>(textureDimensions(tex)) / vec2<i32>(s);
+    let p = uv * vec2<f32>(cells);
+    let fw = max(max(fwidth(p.x), fwidth(p.y)), 0.0001);
+    let b = floor(p - vec2<f32>(0.5));
+    let f = p - vec2<f32>(0.5) - b;
+    let bi = vec2<i32>(b);
+    var n: array<vec3<f32>, 16>;
+    for (var j = 0; j < 4; j = j + 1) {
+        for (var i = 0; i < 4; i = i + 1) {
+            n[j * 4 + i] = ds_px(bi + vec2<i32>(i - 1, j - 1), cells, s);
+        }
+    }
+    if (s > 1) {
+        // the 3D is drawn at a finer grid than the DS pixels: leave any block that is not flat
+        for (var j = 1; j < 3; j = j + 1) {
+            for (var i = 1; i < 3; i = i + 1) {
+                let o = clamp(bi + vec2<i32>(i - 1, j - 1), vec2<i32>(0), cells - vec2<i32>(1)) * s;
+                let a = textureLoad(tex, o, 0).rgb;
+                let z = textureLoad(tex, o + vec2<i32>(s - 1), 0).rgb;
+                let d = max(abs(a - n[j * 4 + i]), abs(z - n[j * 4 + i]));
+                if (max(d.x, max(d.y, d.z)) > 0.004) {
+                    return plain;
+                }
+            }
+        }
+    }
+    var lo = n[0];
+    var hi = n[0];
+    for (var k = 1; k < 16; k = k + 1) {
+        let l = dot(n[k], vec3<f32>(0.299, 0.587, 0.114));
+        if (l < dot(lo, vec3<f32>(0.299, 0.587, 0.114))) { lo = n[k]; }
+        if (l > dot(hi, vec3<f32>(0.299, 0.587, 0.114))) { hi = n[k]; }
+    }
+    let ax = hi - lo;
+    let l2 = dot(ax, ax);
+    if (l2 < 0.0625) {
+        return plain;
+    }
+    var t: array<vec4<f32>, 4>;
+    var resid = 0.0;
+    var mid = 0.0;
+    for (var j = 0; j < 4; j = j + 1) {
+        var row = vec4<f32>(0.0);
+        for (var i = 0; i < 4; i = i + 1) {
+            let v = n[j * 4 + i] - lo;
+            let tt = clamp(dot(v, ax) / l2, 0.0, 1.0);
+            let r = v - ax * tt;
+            resid = max(resid, length(r));
+            mid = mid + min(tt, 1.0 - tt) * 2.0 / 16.0;
+            row[i] = tt;
+        }
+        t[j] = row;
+    }
+    // how text-like the neighbourhood is: one colour line, few in-between values
+    let m = (1.0 - smoothstep(0.12, 0.30, resid)) * (1.0 - smoothstep(0.35, 0.55, mid));
+    let w = q.sm.y * m;
+    if (w <= 0.0) {
+        return plain;
+    }
+    let tc = cr_t(t, f);
+    let e = 0.5 * fw;
+    let g = (abs(cr_t(t, f + vec2<f32>(e, 0.0)) - cr_t(t, f - vec2<f32>(e, 0.0))) + abs(cr_t(t, f + vec2<f32>(0.0, e)) - cr_t(t, f - vec2<f32>(0.0, e)))) / (2.0 * e);
+    let edge = select(1.0, 2.5, q.sm.x > 1.5);
+    let wd = max(g * fw * edge * 0.5, 0.001);
+    let a = smoothstep(0.5 - wd, 0.5 + wd, tc);
+    return mix(plain, mix(lo, hi, a), w);
 }
 
 @fragment
@@ -57,6 +145,9 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
         }
     }
     var c = textureSample(tex, samp, uv).rgb;
+    if (q.sm.x > 0.5) {
+        c = smooth2d(in.uv, c);
+    }
     // the DS's own pixels and lines, only where the window has room to show them
     let room = clamp(q.dims.z - 1.0, 0.0, 1.0);
     let fr = fract(in.uv * ts / (ts.y / 192.0));
@@ -82,6 +173,7 @@ struct Quad {
     color: [f32; 4],
     dims: [f32; 4],
     uvr: [f32; 4],
+    sm: [f32; 4],
 }
 
 /// The whole texture.
@@ -447,6 +539,7 @@ impl Gfx {
         };
         let (w, h) = self.window_size();
         let rects = layout.fit(self.size());
+        let smooth = [fx.smooth_mode(), fx.smooth_strength, self.scale as f32, 0.0];
         let wide = self.wide_screen.as_ref().filter(|_| self.wide_e > 0);
         let pick = |i: usize| -> &Screen { if i == 0 { wide.map_or(&self.screens[0], |w| &w.0) } else { &self.screens[1] } };
         let upper_w = 256.0 + 2.0 * if wide.is_some() { self.wide_e as f32 } else { 0.0 };
@@ -460,6 +553,7 @@ impl Gfx {
                     color: [fx.saturation, fx.contrast, fx.brightness, fx.gamma],
                     dims: [cols * self.scale as f32, 192.0 * self.scale as f32, r.w / cols, 0.0],
                     uvr: WHOLE,
+                    sm: smooth,
                 };
                 self.queue.write_buffer(&s.uniform, 0, bytemuck::bytes_of(&q));
             }
@@ -478,6 +572,7 @@ impl Gfx {
                     color: [fx.saturation, fx.contrast, fx.brightness, fx.gamma],
                     dims: [256.0 * self.scale as f32, 192.0 * self.scale as f32, 0.0, if p.round { 1.0 } else { 0.0 }],
                     uvr: [p.src.x / 256.0, p.src.y / 192.0, (p.src.x + p.src.w) / 256.0, (p.src.y + p.src.h) / 192.0],
+                    sm: smooth,
                 };
                 self.queue.write_buffer(&self.screens[p.screen].extras[i].uniform, 0, bytemuck::bytes_of(&q));
                 (p.screen, Extra2(i))
@@ -498,13 +593,14 @@ impl Gfx {
                 color: [fx.saturation, fx.contrast, fx.brightness, fx.gamma],
                 dims: [cols * self.scale as f32, 192.0 * self.scale as f32, 0.0, 0.0],
                 uvr: [-r.x / r.w, -r.y / r.h, (w - r.x) / r.w, (h - r.y) / r.h],
+                sm: [0.0; 4],
             };
             self.queue.write_buffer(&pick(i).extras[MAX_PATCHES].uniform, 0, bytemuck::bytes_of(&q));
         }
         // (two screens, or none lone: the glow, as in the glow mode)
         if (self.background || self.edge_bars) && self.bar_color.is_none() && edge.is_none() {
             // the whole window, dimmed, no screen effects
-            let q = Quad { rect: [-1.0, 1.0, 1.0, -1.0], fx: [0.0, 0.0, 0.55, 0.0], color: [1.1, 0.9, -0.2, 1.0], dims: [GLOW_W as f32, GLOW_H as f32, 0.0, 0.0], uvr: WHOLE };
+            let q = Quad { rect: [-1.0, 1.0, 1.0, -1.0], fx: [0.0, 0.0, 0.55, 0.0], color: [1.1, 0.9, -0.2, 1.0], dims: [GLOW_W as f32, GLOW_H as f32, 0.0, 0.0], uvr: WHOLE, sm: [0.0; 4] };
             self.queue.write_buffer(&self.glow.uniform, 0, bytemuck::bytes_of(&q));
         }
         let view = frame.texture.create_view(&Default::default());
@@ -601,5 +697,14 @@ impl Gfx {
             self.egui_renderer.free_texture(id);
         }
         self.queue.present(frame);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_screen_shader_is_valid_wgsl() {
+        let m = naga::front::wgsl::parse_str(super::SHADER).expect("parse");
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all()).validate(&m).expect("validate");
     }
 }

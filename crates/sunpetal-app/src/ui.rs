@@ -40,7 +40,7 @@ impl Menu {
         let tx = move |en: &'static str, ru: &'static str| if lang == Lang::Ru { ru } else { en };
         let mut action = None;
         let mut open = self.open;
-        egui::Window::new(tx("Sunpetal: settings", "Sunpetal: настройки")).open(&mut open).resizable(false).collapsible(false).show(ctx, |ui| {
+        egui::Window::new(tx("Sunpetal: settings", "Sunpetal: настройки")).open(&mut open).resizable(false).collapsible(false).vscroll(true).max_height((ctx.content_rect().height() - 48.0).max(120.0)).show(ctx, |ui| {
             egui::ComboBox::from_label("Language / Язык")
                 .selected_text(match s.interface.language.as_str() {
                     "en" => "English",
@@ -107,6 +107,18 @@ impl Menu {
                 ui.checkbox(&mut s.video.wide, tx("Widen the 3D view to the window (one screen)", "Расширять 3D под окно (один экран)"));
                 ui.checkbox(&mut s.video.bars_match, tx("Bars take the picture's edge colour (logos)", "Полосы цвета края картинки (логотипы)"));
                 ui.checkbox(&mut s.video.fullscreen, tx("Full screen (F11)", "Полный экран (F11)"));
+                // the texture sets beside the file in use (data files with pictures), switched at once
+                {
+                    let sets = pack_sets(&s.video.texture_pack);
+                    let name = |p: &str| std::path::Path::new(p).file_stem().map_or(String::new(), |n| n.to_string_lossy().into_owned());
+                    let shown = if s.video.texture_pack.is_empty() { tx("the game's own pictures", "оригинал (без подмены)").to_string() } else { name(&s.video.texture_pack) };
+                    egui::ComboBox::from_label(tx("Texture set (the text and the language stay with the start)", "Набор текстур (текст и язык меняются при запуске)")).selected_text(shown).show_ui(ui, |ui| {
+                        ui.selectable_value(&mut s.video.texture_pack, String::new(), tx("the game's own pictures", "оригинал (без подмены)"));
+                        for p in &sets {
+                            ui.selectable_value(&mut s.video.texture_pack, p.clone(), name(p));
+                        }
+                    });
+                }
                 ui.horizontal(|ui| {
                     ui.label(tx("Data file or texture folder:", "Файл данных или папка текстур:"));
                     ui.text_edit_singleline(&mut s.video.texture_pack);
@@ -171,6 +183,17 @@ impl Menu {
                     }
                 });
                 ui.checkbox(&mut e.fxaa, tx("Smooth edges (FXAA)", "Сглаживание краёв (FXAA)"));
+                let sl = |v: &str| match v {
+                    "smooth" => tx("Smooth", "Гладкое"),
+                    "soft" => tx("Soft", "Мягкое"),
+                    _ => tx("Off", "Выкл"),
+                };
+                egui::ComboBox::from_label(tx("2D smoothing", "Сглаживание 2D")).selected_text(sl(&e.smooth_2d)).show_ui(ui, |ui| {
+                    for v in ["off", "smooth", "soft"] {
+                        ui.selectable_value(&mut e.smooth_2d, v.to_string(), sl(v));
+                    }
+                });
+                ui.add_enabled(e.smooth_2d != "off", egui::Slider::new(&mut e.smooth_strength, 0.0..=1.0).text(tx("2D smoothing strength", "Сила сглаживания 2D")));
                 if *e != before {
                     e.preset = "custom".into();
                 }
@@ -313,5 +336,76 @@ pub fn layout_label(id: &str, lang: Lang) -> &str {
         ("upper only", Lang::Ru) => "только верхний",
         ("lower only", Lang::Ru) => "только нижний",
         (other, _) => other,
+    }
+}
+
+/// The data files in the folder of `current` that hold texture pictures (a `TEXS` section), by name; kept for two
+/// seconds so that the menu does not read the folder at every frame.
+fn pack_sets(current: &str) -> Vec<String> {
+    use std::cell::RefCell;
+    use std::path::{Path, PathBuf};
+    use std::time::{Duration, Instant};
+    thread_local! {
+        static CACHE: RefCell<Option<(PathBuf, Instant, Vec<String>)>> = const { RefCell::new(None) };
+    }
+    let Some(dir) = Path::new(current).parent().filter(|d| !d.as_os_str().is_empty()).map(Path::to_path_buf) else { return Vec::new() };
+    CACHE.with(|c| {
+        let mut c = c.borrow_mut();
+        if let Some((d, t, v)) = c.as_ref() {
+            if *d == dir && t.elapsed() < Duration::from_secs(2) {
+                return v.clone();
+            }
+        }
+        let mut found: Vec<String> = std::fs::read_dir(&dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "data" || x == "spdata") && has_textures(p))
+            .map(|p| p.display().to_string())
+            .collect();
+        found.sort();
+        *c = Some((dir, Instant::now(), found.clone()));
+        found
+    })
+}
+
+/// Whether a data file has a texture section: its header lists the sections (`tools/ps2/spdata.py`).
+fn has_textures(path: &std::path::Path) -> bool {
+    use std::io::Read;
+    let Ok(mut f) = std::fs::File::open(path) else { return false };
+    let mut head = [0u8; 12];
+    if f.read_exact(&mut head).is_err() || &head[..6] != b"SPDATA" {
+        return false;
+    }
+    let n = u32::from_le_bytes([head[8], head[9], head[10], head[11]]).min(64) as usize;
+    let mut table = vec![0u8; n * 20];
+    f.read_exact(&mut table).is_ok() && table.chunks_exact(20).any(|t| &t[..4] == b"TEXS")
+}
+
+#[cfg(test)]
+mod pack_tests {
+    use super::*;
+
+    fn data_file(tags: &[&[u8; 4]]) -> std::path::PathBuf {
+        let mut b = b"SPDATA\0\x01".to_vec();
+        b.extend((tags.len() as u32).to_le_bytes());
+        for t in tags {
+            b.extend(*t);
+            b.extend([0u8; 16]);
+        }
+        let p = std::env::temp_dir().join(format!("sunpetal-test-{}-{}.data", std::process::id(), tags.len() * 7 + tags[0][0] as usize));
+        std::fs::write(&p, b).unwrap();
+        p
+    }
+
+    #[test]
+    fn only_a_data_file_with_textures_is_a_texture_set() {
+        let with = data_file(&[b"META", b"TEXS", b"TRAN"]);
+        let without = data_file(&[b"META", b"TRAN"]);
+        assert!(has_textures(&with));
+        assert!(!has_textures(&without));
+        assert!(!has_textures(std::path::Path::new("/no/such/file.data")));
+        let _ = (std::fs::remove_file(with), std::fs::remove_file(without));
     }
 }

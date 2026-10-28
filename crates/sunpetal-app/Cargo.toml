@@ -34,3 +34,6 @@ winit = "0.30.13"
 winit = { version = "0.30.13", features = ["android-native-activity"] }
 libc = "0.2"
 android_log-sys = "0.3"
+
+[dev-dependencies]
+naga = { version = "30.0.1", default-features = false, features = ["wgsl-in"] }

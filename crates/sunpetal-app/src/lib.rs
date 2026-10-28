@@ -287,6 +287,11 @@ impl App {
         if s.video.res != a.video.res {
             self.shared.scale.store(s.video.res, Ordering::Relaxed);
         }
+        // another texture set chosen in the menu: swapped in before the next frame
+        if s.video.texture_pack != a.video.texture_pack {
+            let p = PathBuf::from(&s.video.texture_pack);
+            *self.shared.pack_swap.lock().unwrap() = Some(if s.video.texture_pack.is_empty() || !p.exists() { None } else { Some(p) });
+        }
         if s.effects.extras() != a.effects.extras() {
             *self.shared.extras.lock().unwrap() = s.effects.extras();
         }
@@ -867,6 +872,10 @@ pub fn run(o: Options, el: EventLoop<()>) {
             None
         }
     });
+    // the pack in use is the texture setting (the menu's list of sets starts from its folder)
+    if let Some(p) = cfg.texture_pack.as_ref().filter(|p| p.is_file()) {
+        settings.video.texture_pack = p.display().to_string();
+    }
     // the data file (`sunpetal.data`) is the texture setting's file; its translation is put in
     if cfg.texture_pack.as_ref().is_some_and(|p| p.is_file()) && !settings.game.language.is_empty() {
         cfg.data = cfg.texture_pack.clone();

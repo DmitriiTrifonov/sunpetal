@@ -2798,6 +2798,7 @@ dependencies = [
  "egui-winit",
  "gilrs",
  "libc",
+ "naga",
  "pollster",
  "serde",
  "sunpetal-data",

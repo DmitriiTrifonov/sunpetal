@@ -525,6 +525,19 @@ impl Default for Extras {
     }
 }
 
+/// Swaps the texture pack (a data file or a folder; `None`: the game's own pictures) between two frames. The
+/// pictures of the new pack are read as the game draws them; an error keeps the pack that was.
+pub fn set_texture_pack(path: Option<&std::path::Path>) -> Result<(), String> {
+    nds(|d| match path {
+        Some(p) => d.load_pack(p),
+        None => {
+            d.texpack.pack = std::sync::Arc::new(texpack::Pack::empty());
+            note("texture pack: none");
+            Ok(())
+        }
+    })
+}
+
 /// Sets the 3D's extras (out-of-range and non-numbers are brought in). Takes effect with the next
 /// frame drawn.
 pub fn set_extras(e: Extras) {
