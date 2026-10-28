@@ -132,7 +132,7 @@ Android проверен на Flip7: 60 кадров в секунду, выбо
 
 Разведка (`docs/RECON-WIDE.md`): матрицу читает `G3X_GetClipMtx` (`02004EAC`) из отрисовки моделей (`02038FAC`, Thumb-функция `0201F7xx`); аппаратных тестов видимости игра не использует; на `E = 170` мир за краем кадра есть (стена здания, постройки). Артефакты на парковке — от конечной плоскости гор и наших правил заполнения, а не от отсечения игрой.
 
-Инструменты: F10 в приложении (кадр и слои, метаданные в `artifacts/shots`), `--wide on|off`, `sunpetal-debug shotwide|traceall|cliprep`, `artifacts/` (в `.gitignore`, список в `artifacts/README.md`).
+Инструменты: клавиша P или F10 в приложении (кадр и слои, картинка окна `window_N.png`, метаданные и эффекты в `artifacts/shots`), `--wide on|off`, `sunpetal-debug shotwide|traceall|cliprep`, `artifacts/` (в `.gitignore`, список в `artifacts/README.md`).
 
 ### Завтра продолжить
 

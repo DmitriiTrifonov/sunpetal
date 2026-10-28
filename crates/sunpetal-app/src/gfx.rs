@@ -224,6 +224,8 @@ pub struct Gfx {
     /// Behind a lone screen the window's bars carry its edge rows on (the texture drawn over the whole window, its
     /// edge pixels held), instead of the glow.
     pub edge_bars: bool,
+    /// A file to write the window's picture to after the next frame (F10).
+    pub capture: Option<std::path::PathBuf>,
     /// The colour the picture's edges all have (a logo on white): the bars take it, no glow.
     pub bar_color: Option<[f32; 3]>,
     /// The widened upper screen (3D with the view opened sideways), its scale and how many pixels
@@ -316,7 +318,8 @@ impl Gfx {
         // the picture's colours are already what the screen shows: a format that does not convert
         let format = caps.formats.iter().copied().find(|f| !f.is_srgb()).unwrap_or(caps.formats[0]);
         let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            // COPY_SRC where the surface allows it: F10 writes the window's picture
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | (caps.usages & wgpu::TextureUsages::COPY_SRC),
             format,
             width: size.width.max(1),
             height: size.height.max(1),
@@ -409,7 +412,7 @@ impl Gfx {
         );
         let egui_renderer = egui_wgpu::Renderer::new(&device, format, egui_wgpu::RendererOptions::default());
         let post_kit = post::Kit::new(&device, format);
-        Ok(Gfx { window: w, egui_ctx, egui_state, egui_renderer, bgl, nearest, linear_sampler: linear, scale: 1, surface, device, queue, config, pipeline, post_kit, post: None, screens, glow, glow_grid: vec![0.0; GLOW_W * GLOW_H * 3], background: true, edge_bars: false, bar_color: None, wide_screen: None, wide_e: 0, linear: true, reserve: 0.0 })
+        Ok(Gfx { window: w, egui_ctx, egui_state, egui_renderer, bgl, nearest, linear_sampler: linear, scale: 1, surface, device, queue, config, pipeline, post_kit, post: None, screens, glow, glow_grid: vec![0.0; GLOW_W * GLOW_H * 3], background: true, edge_bars: false, capture: None, bar_color: None, wide_screen: None, wide_e: 0, linear: true, reserve: 0.0 })
     }
 
     pub fn resize(&mut self, w: u32, h: u32) {
@@ -691,8 +694,49 @@ impl Gfx {
             }
             freed = out.textures_delta.free.iter().copied().collect();
         }
+        // the window's picture (what the menu and the effects made of it) read back, for F10
+        let grab = self.capture.take().filter(|_| self.config.usage.contains(wgpu::TextureUsages::COPY_SRC)).map(|path| {
+            let (w, h) = (self.config.width, self.config.height);
+            let row = (w * 4).div_ceil(256) * 256;
+            let buf = self.device.create_buffer(&wgpu::BufferDescriptor { label: Some("capture"), size: (row * h) as u64, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+            enc.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo { texture: &frame.texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                wgpu::TexelCopyBufferInfo { buffer: &buf, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(h) } },
+                wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            );
+            (path, buf, w, h, row)
+        });
         buffers.push(enc.finish());
         self.queue.submit(buffers);
+        if let Some((path, buf, w, h, row)) = grab {
+            let swap = matches!(self.config.format, wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb);
+            let slice = buf.slice(..);
+            slice.map_async(wgpu::MapMode::Read, |_| {});
+            let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+            let rgb = slice.get_mapped_range().ok().map(|data| {
+                let mut rgb = Vec::with_capacity((w * h * 3) as usize);
+                for y in 0..h as usize {
+                    for px in data[y * row as usize..y * row as usize + w as usize * 4].chunks_exact(4) {
+                        rgb.extend(if swap { [px[2], px[1], px[0]] } else { [px[0], px[1], px[2]] });
+                    }
+                }
+                rgb
+            });
+            buf.unmap();
+            if let Some(d) = path.parent() {
+                let _ = std::fs::create_dir_all(d);
+            }
+            let written = rgb.ok_or("the buffer could not be read".to_string()).and_then(|rgb| {
+                let f = std::fs::File::create(&path).map_err(|e| e.to_string())?;
+                let mut enc = png::Encoder::new(std::io::BufWriter::new(f), w, h);
+                enc.set_color(png::ColorType::Rgb);
+                enc.set_depth(png::BitDepth::Eight);
+                enc.write_header().map_err(|e| e.to_string())?.write_image_data(&rgb).map_err(|e| e.to_string())
+            });
+            if let Err(e) = written {
+                eprintln!("window picture {}: {}", path.display(), e);
+            }
+        }
         for id in &freed {
             self.egui_renderer.free_texture(id);
         }

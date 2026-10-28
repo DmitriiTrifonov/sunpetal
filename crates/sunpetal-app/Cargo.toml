@@ -22,6 +22,7 @@ egui-wgpu = "0.37.0"
 egui-winit = "0.37.0"
 gilrs = "0.11.2"
 pollster = "1.0.1"
+png = "0.17"
 serde = { version = "1.0.229", features = ["derive"] }
 sunpetal-runtime = { path = "../sunpetal-runtime", features = ["debug-tools"] }
 sunpetal-data = { path = "../sunpetal-data" }

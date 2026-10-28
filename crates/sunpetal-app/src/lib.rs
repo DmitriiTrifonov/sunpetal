@@ -5,7 +5,7 @@
 //!                          [--dump-textures DIR] [--texture-pack DIR]
 //!
 //! F1 or Esc: the settings menu (video, sound, keys, profiles). Hotkeys: F2 changes the layout, F8 the game's menu in the single layout while the screen follows the game (START and the lower screen, B and back), else the screen shown (or the panel of the overlay layout), F3
-//! the filter, F4 and F5 the 3D's internal resolution (1-8 times the DS's), F11 full screen, Tab
+//! the filter, P or F10 writes the picture and its parts to `artifacts/shots` (for bug reports), F4 and F5 the 3D's internal resolution (1-8 times the DS's), F11 full screen, Tab
 //! (held) runs without waiting for the clock. The keys of the DS's buttons are set in the menu
 //! (default: arrows = D-pad, Z = A, X = B, S = X, A = Y, Q = L, W = R, Enter = START, Backspace =
 //! SELECT). A pad: the D-pad or left stick, the face buttons as the DS's (east A, south B, north
@@ -141,6 +141,8 @@ struct App {
     /// The collection's list is on (`layout::collection_in`), and whether its card (the upper screen) is the one shown.
     coll_seen: bool,
     coll_card: std::cell::Cell<bool>,
+    /// F10 asks the next frame for the window's picture (the file to write it to).
+    pending_capture: std::cell::Cell<Option<PathBuf>>,
     /// The buttons last sent, to find the press of A or B; and a B that closed the card, held back from the game.
     keys_before: std::cell::Cell<u32>,
     swallow_b: std::cell::Cell<bool>,
@@ -206,6 +208,13 @@ impl App {
             self.settings.game.language,
             l.patches.len()
         );
+        let e = &self.settings.effects;
+        let window_png = format!("artifacts/shots/window_{}.png", self.shared.vblank.load(Ordering::Relaxed));
+        let meta = format!(
+            "{},\"window_png\":{:?},\"effects\":{{\"preset\":{:?},\"smooth_2d\":{:?},\"smooth_strength\":{},\"texture_filter\":{:?},\"outline\":{},\"shadow\":{},\"fxaa\":{},\"bloom\":{},\"sharp\":{}}},\"background\":{:?},\"texture_pack\":{:?}",
+            meta, window_png, e.preset, e.smooth_2d, e.smooth_strength, e.texture_filter, e.outline, e.shadow, e.fxaa, e.bloom, e.sharp, v.background, v.texture_pack
+        );
+        self.pending_capture.set(Some(std::path::PathBuf::from(window_png)));
         *self.shared.dump_meta.lock().unwrap() = meta;
         self.shared.dump.store(true, Ordering::Relaxed);
     }
@@ -512,7 +521,7 @@ impl ApplicationHandler for App {
                     KeyCode::F2 => self.cycle_layout(),
                     KeyCode::F8 => self.swap_screen(),
                     KeyCode::F3 => self.settings.video.linear = !self.settings.video.linear,
-                    KeyCode::F10 => self.dump_shot(),
+                    KeyCode::F10 | KeyCode::KeyP => self.dump_shot(),
                     KeyCode::F7 => {
                         self.shared.toggle_skip();
                     }
@@ -732,11 +741,14 @@ impl ApplicationHandler for App {
                 let fade = self.skip_fade;
                 let mut action = None;
                 {
-                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, hint_seen, puzzle_hold, puzzle_side, coll_seen, coll_card, edo_seen, prompt, bar_color, auto_lower, hold, wide_now, paper, scroll, .. } = self;
+                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, hint_seen, puzzle_hold, puzzle_side, coll_seen, coll_card, pending_capture, edo_seen, prompt, bar_color, auto_lower, hold, wide_now, paper, scroll, .. } = self;
                     let live = layout::Live { vblank: shared.vblank.load(Ordering::Relaxed), counter_seen: *counter_seen, hint_seen: *hint_seen, both: *puzzle_hold > 0, both_side: *puzzle_side, collection: coll_seen.then(|| coll_card.get()), lower: *auto_lower || hold.is_some(), edo: *edo_seen, prompt: *prompt, wide: *wide_now as f32, scroll: (*paper && *auto_lower).then_some(*scroll) };
                     if let Some(g) = gfx {
                         let layout = layout::find(layouts, &settings.video, &live);
                         g.bar_color = *bar_color;
+                        if let Some(p) = pending_capture.take() {
+                            g.capture = Some(p);
+                        }
                         // the 3D view is widened to the window's shape when the upper screen is alone
                         let base = layout::find(layouts, &settings.video, &layout::Live { wide: 0.0, ..live });
                         let upper_alone = base.screens[0].is_some() && (base.screens[1].is_none() || base.name == "overlay");
@@ -936,6 +948,7 @@ pub fn run(o: Options, el: EventLoop<()>) {
         puzzle_side: false,
         coll_seen: false,
         coll_card: std::cell::Cell::new(false),
+        pending_capture: std::cell::Cell::new(None),
         keys_before: std::cell::Cell::new(0),
         swallow_b: std::cell::Cell::new(false),
         edo_seen: false,
