@@ -138,6 +138,12 @@ struct App {
     puzzle_hold: u32,
     /// For this puzzle the panel would cover the LED digits: both screens side by side (`layout::led_under_panel`).
     puzzle_side: bool,
+    /// The collection's list is on (`layout::collection_in`), and whether its card (the upper screen) is the one shown.
+    coll_seen: bool,
+    coll_card: std::cell::Cell<bool>,
+    /// The buttons last sent, to find the press of A or B; and a B that closed the card, held back from the game.
+    keys_before: std::cell::Cell<u32>,
+    swallow_b: std::cell::Cell<bool>,
     /// The upper screen is Edo's (`layout::edo_in`).
     edo_seen: bool,
     /// The title's "Press START" box (`layout::prompt_box`).
@@ -166,7 +172,7 @@ impl App {
     }
 
     fn live(&self) -> layout::Live {
-        layout::Live { vblank: self.shared.vblank.load(Ordering::Relaxed), counter_seen: self.counter_seen, hint_seen: self.hint_seen, both: self.puzzle_hold > 0, both_side: self.puzzle_side, lower: self.auto_lower || self.hold.is_some(), edo: self.edo_seen, prompt: self.prompt, wide: self.wide_now as f32, scroll: (self.paper && self.auto_lower).then_some(self.scroll) }
+        layout::Live { vblank: self.shared.vblank.load(Ordering::Relaxed), counter_seen: self.counter_seen, hint_seen: self.hint_seen, both: self.puzzle_hold > 0, both_side: self.puzzle_side, collection: self.coll_seen.then(|| self.coll_card.get()), lower: self.auto_lower || self.hold.is_some(), edo: self.edo_seen, prompt: self.prompt, wide: self.wide_now as f32, scroll: (self.paper && self.auto_lower).then_some(self.scroll) }
     }
 
     /// F10: the emulation writes the picture and its parts to `artifacts/shots`; this is what the window knows, for the
@@ -225,7 +231,26 @@ impl App {
 
     fn send_keys(&self) {
         let touch = self.touch_held.iter().fold(0, |a, n| a | bit(n));
-        self.shared.input.lock().unwrap().keys = self.kb | self.pad | touch | self.tap.0;
+        let raw = self.kb | self.pad | touch | self.tap.0;
+        let pressed = raw & !self.keys_before.replace(raw);
+        let mut keys = raw;
+        // the collection on one screen: A takes the item on the list to its card (the upper screen), B closes the card
+        // back to the list and is not the game's (it would leave the collection)
+        if self.coll_seen && self.settings.video.auto && self.settings.video.layout == "single" {
+            if pressed & bit("A") != 0 && !self.coll_card.get() {
+                self.coll_card.set(true);
+            } else if pressed & bit("B") != 0 && self.coll_card.get() {
+                self.coll_card.set(false);
+                self.swallow_b.set(true);
+            }
+            if self.swallow_b.get() {
+                keys &= !bit("B");
+                if raw & bit("B") == 0 {
+                    self.swallow_b.set(false);
+                }
+            }
+        }
+        self.shared.input.lock().unwrap().keys = keys;
     }
 
     /// The game's menu on one screen: from the scene, START (which brings up the game's menu button on
@@ -645,6 +670,12 @@ impl ApplicationHandler for App {
                     self.puzzle_side = self.puzzle_hold > 0 && (self.puzzle_side || layout::led_under_panel(*scale, rgba));
                     self.counter_seen = layout::counter_in(*scale, rgba);
                     self.hint_seen = layout::hint_in(*scale, rgba);
+                    let coll = layout::collection_in(*scale, rgba);
+                    if coll != self.coll_seen {
+                        // on the list again when the collection is entered or left
+                        self.coll_card.set(false);
+                        self.coll_seen = coll;
+                    }
                     self.edo_seen = layout::edo_in(*scale, rgba) && !layout::edo_title_in_hint(*scale, rgba);
                     self.prompt = layout::prompt_box(*scale, rgba);
                     let paper = layout::paper_in(*scale, rgba);
@@ -696,8 +727,8 @@ impl ApplicationHandler for App {
                 let fade = self.skip_fade;
                 let mut action = None;
                 {
-                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, hint_seen, puzzle_hold, puzzle_side, edo_seen, prompt, bar_color, auto_lower, hold, wide_now, paper, scroll, .. } = self;
-                    let live = layout::Live { vblank: shared.vblank.load(Ordering::Relaxed), counter_seen: *counter_seen, hint_seen: *hint_seen, both: *puzzle_hold > 0, both_side: *puzzle_side, lower: *auto_lower || hold.is_some(), edo: *edo_seen, prompt: *prompt, wide: *wide_now as f32, scroll: (*paper && *auto_lower).then_some(*scroll) };
+                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, hint_seen, puzzle_hold, puzzle_side, coll_seen, coll_card, edo_seen, prompt, bar_color, auto_lower, hold, wide_now, paper, scroll, .. } = self;
+                    let live = layout::Live { vblank: shared.vblank.load(Ordering::Relaxed), counter_seen: *counter_seen, hint_seen: *hint_seen, both: *puzzle_hold > 0, both_side: *puzzle_side, collection: coll_seen.then(|| coll_card.get()), lower: *auto_lower || hold.is_some(), edo: *edo_seen, prompt: *prompt, wide: *wide_now as f32, scroll: (*paper && *auto_lower).then_some(*scroll) };
                     if let Some(g) = gfx {
                         let layout = layout::find(layouts, &settings.video, &live);
                         g.bar_color = *bar_color;
@@ -894,6 +925,10 @@ pub fn run(o: Options, el: EventLoop<()>) {
         hint_seen: false,
         puzzle_hold: 0,
         puzzle_side: false,
+        coll_seen: false,
+        coll_card: std::cell::Cell::new(false),
+        keys_before: std::cell::Cell::new(0),
+        swallow_b: std::cell::Cell::new(false),
         edo_seen: false,
         paper: false,
         bar_ask: (None, 0),

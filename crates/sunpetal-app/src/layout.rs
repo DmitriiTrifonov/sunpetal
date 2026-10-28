@@ -88,12 +88,14 @@ pub fn logo_screen(vblank: u64) -> Option<bool> {
 
 /// Whether the lower screen's picture has the counter where it is cut from: a dark box with bright
 /// digits (`rgba`: both screens, the upper first, `scale` times 256x192 each). A black corner (the
-/// title) or a plain one (a menu) has none, and nothing is cut from it.
+/// title) or a plain one (a menu) has none, and nothing is cut from it. The box has a lit rim (two
+/// rows lit across it): the header band of a list (dark, light letters) has none and is no counter.
 pub fn counter_in(scale: usize, rgba: &[u8]) -> bool {
     let s = counter_patch().src;
     let (w, top) = (256 * scale, 192 * scale);
-    let (mut n, mut dark, mut bright) = (0usize, 0usize, 0usize);
+    let (mut n, mut dark, mut bright, mut rim) = (0usize, 0usize, 0usize, 0usize);
     for y in (s.y as usize * scale..(s.y + s.h) as usize * scale).step_by(scale.max(1)) {
+        let mut row = 0usize;
         for x in (s.x as usize * scale..(s.x + s.w) as usize * scale).step_by(scale.max(1)) {
             let o = ((top + y) * w + x) * 4;
             let Some(p) = rgba.get(o..o + 3) else { return false };
@@ -101,9 +103,11 @@ pub fn counter_in(scale: usize, rgba: &[u8]) -> bool {
             n += 1;
             dark += (sum < 150) as usize;
             bright += (sum > 600) as usize;
+            row += (sum > 600) as usize;
         }
+        rim += (row * 10 >= s.w as usize * 7) as usize;
     }
-    n > 0 && dark * 10 >= n * 5 && bright * 100 >= n * 8
+    n > 0 && dark * 10 >= n * 5 && bright * 100 >= n * 8 && rim >= 2
 }
 
 /// The counter in the lower screen's top left corner (the map's number) and where it goes on the
@@ -133,6 +137,32 @@ pub fn hint_in(scale: usize, rgba: &[u8]) -> bool {
         }
     }
     n > 0 && red * 100 >= n * 8
+}
+
+/// Whether the picture is the collection's list: a black header band on the upper screen (the card above) and the list's
+/// yellow squares down the lower screen's left side (56 rows lit on the game's frames, none on any other screen).
+pub fn collection_in(scale: usize, rgba: &[u8]) -> bool {
+    let (w, top) = (256 * scale, 192 * scale);
+    if rgba.len() < w * top * 2 * 4 {
+        return false;
+    }
+    let (mut n, mut dark) = (0usize, 0usize);
+    for y in 0..10 {
+        for x in (0..256).step_by(2) {
+            let o = (y * scale * w + x * scale) * 4;
+            n += 1;
+            dark += ((rgba[o] as u32 + rgba[o + 1] as u32 + rgba[o + 2] as u32) < 90) as usize;
+        }
+    }
+    let rows = (80..190)
+        .filter(|&y| {
+            (8..18).filter(|&x| {
+                let o = ((top + y * scale) * w + x * scale) * 4;
+                rgba[o] > 200 && rgba[o + 1] > 170 && rgba[o + 2] < 110
+            }).count() >= 3
+        })
+        .count();
+    dark * 2 >= n && rows >= 20
 }
 
 fn r(x: f32, y: f32) -> Rect {
@@ -330,6 +360,8 @@ pub struct Live {
     pub both: bool,
     /// ... and its LED digits are where the panel would be (`led_under_panel`), so both go side by side.
     pub both_side: bool,
+    /// The collection's list is on: `Some(true)` with its card (the upper screen) opened, `Some(false)` on the list.
+    pub collection: Option<bool>,
     /// The lower screen is the one to show (`lower_wanted`, settled).
     pub lower: bool,
     /// The upper screen is Edo's (`edo_in`).
@@ -417,6 +449,10 @@ fn pick(layouts: &[Layout], v: &crate::config::Video, live: &Live) -> Layout {
     }
     if let (Some(sc), "single", true) = (live.scroll, v.layout.as_str(), v.auto) {
         return scrolled(sc);
+    }
+    // the collection on one screen: the list, then the card of the item taken (A), back to the list (B)
+    if let (Some(card), "single", true) = (live.collection, v.layout.as_str(), v.auto) {
+        return single(!card);
     }
     // a puzzle read on the upper screen and worked on the lower one: both (the PS2's way, the lower as a panel, or side by side)
     if live.both && v.auto && matches!(v.layout.as_str(), "single" | "overlay") {
@@ -547,7 +583,7 @@ mod tests {
     }
 
     fn live(vblank: u64, counter_seen: bool) -> Live {
-        Live { vblank, counter_seen, hint_seen: false, both: false, both_side: false, lower: false, edo: false, prompt: None, wide: 0.0, scroll: None }
+        Live { vblank, counter_seen, hint_seen: false, both: false, both_side: false, collection: None, lower: false, edo: false, prompt: None, wide: 0.0, scroll: None }
     }
 
     #[test]
@@ -597,9 +633,12 @@ mod tests {
     #[test]
     fn the_counter_is_found_by_its_dark_box_and_bright_digits() {
         for scale in [1, 2] {
-            // a dark box with digits (every third column bright), as the map's
-            let counter = frame(scale, |x, y| if (4..64).contains(&x) && (7..20).contains(&y) && x % 3 == 0 { [255, 255, 255] } else { [10, 20, 30] });
+            // a dark box with a lit rim above and below and digits (every third column bright), as the map's
+            let counter = frame(scale, |x, y| if (4..64).contains(&x) && (7..20).contains(&y) && (x % 3 == 0 || y == 7 || y == 19) { [255, 255, 255] } else { [10, 20, 30] });
             assert!(counter_in(scale, &counter));
+            // a list's header band: dark, light letters (as many as 8% of the box), no rim: not the counter
+            let header = frame(scale, |x, y| if (4..64).contains(&x) && (9..16).contains(&y) && x % 3 == 0 { [255, 255, 255] } else { [10, 20, 30] });
+            assert!(!counter_in(scale, &header));
             // black (the title), light (a menu), a dark box with no digits
             assert!(!counter_in(scale, &frame(scale, |_, _| [0, 0, 0])));
             assert!(!counter_in(scale, &frame(scale, |_, _| [200, 120, 40])));
@@ -611,9 +650,9 @@ mod tests {
     #[test]
     fn the_lower_screen_is_wanted_for_a_menu_and_not_for_the_map_or_black() {
         for scale in [1, 2] {
-            let counter = frame(scale, |x, y| match ((4..64).contains(&x) && (7..20).contains(&y), x % 3) {
-                (true, 0) => [255, 255, 255],
-                (true, _) => [10, 20, 30],
+            let counter = frame(scale, |x, y| match ((4..64).contains(&x) && (7..20).contains(&y), x % 3 == 0 || y == 7 || y == 19) {
+                (true, true) => [255, 255, 255],
+                (true, false) => [10, 20, 30],
                 _ => [10, 90, 120],
             });
             // the map with its counter: the upper screen
@@ -813,6 +852,42 @@ mod tests {
                 f[o + k * 4..o + k * 4 + 3].copy_from_slice(&[230, 20, 40]);
             }
             assert!(led_under_panel(scale, &f));
+        }
+    }
+
+    #[test]
+    fn the_collection_is_one_screen_at_a_time_list_then_card() {
+        let all = all();
+        let v = crate::config::Video { layout: "single".into(), auto: true, ..Default::default() };
+        let mut lv = live(0, false);
+        lv.collection = Some(false);
+        let l = find(&all, &v, &lv);
+        assert!(l.screens[0].is_none() && l.screens[1].is_some(), "the list: the lower screen");
+        lv.collection = Some(true);
+        let l = find(&all, &v, &lv);
+        assert!(l.screens[0].is_some() && l.screens[1].is_none(), "the card: the upper screen");
+        // not with the screen chosen by hand
+        let manual = crate::config::Video { auto: false, ..v.clone() };
+        assert!(find(&all, &manual, &lv).screens[0].is_some());
+    }
+
+    #[test]
+    fn the_collection_is_found_by_its_yellow_squares_and_black_band() {
+        for scale in [1usize, 2] {
+            let w = 256 * scale;
+            let mut f = vec![0u8; w * 192 * scale * 4 * 2];
+            assert!(!collection_in(scale, &f));
+            for y in (80..180).step_by(12) {
+                for dy in 0..8 {
+                    for x in 9..17 {
+                        let o = ((192 * scale + (y + dy) * scale) * w + x * scale) * 4;
+                        f[o..o + 3].copy_from_slice(&[255, 220, 60]);
+                    }
+                }
+            }
+            assert!(collection_in(scale, &f));
+            f[..w * 10 * scale * 4].fill(200); // a lit header band: not the collection
+            assert!(!collection_in(scale, &f));
         }
     }
 
