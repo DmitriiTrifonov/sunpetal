@@ -443,13 +443,16 @@ impl Gx {
             // it is a band across most of the screen (a panel), not a narrow strip (it would veil the sides)
             let untextured = (self.tex_param >> 26) & 7 == 0;
             let wide_enough = v[..n].iter().map(|x| x.p[0]).max() > v[..n].iter().map(|x| x.p[0] + v[0].p[3]).min();
-            let stretch = flat && untextured && (left || right) && ((attr >> 16) & 31 == 31 || wide_enough);
+            // ... or a strip that is not tall (the glitch bands of the title's FSR screen start at the edge, however short)
+            let tall = {
+                let (lo, hi) = (v[..n].iter().map(|x| x.p[1]).min().unwrap_or(0), v[..n].iter().map(|x| x.p[1]).max().unwrap_or(0));
+                (hi - lo) as i64 * 100 >= v[0].p[3] as i64 * 2 * 90
+            };
+            let stretch = flat && untextured && (left || right) && ((attr >> 16) & 31 == 31 || wide_enough || !tall);
             // a band across most of the screen goes to both edges, even if it starts a little inside
             // (the dialogue panel starts beside the portrait)
             let (min_x, max_x) = (v[..n].iter().map(|x| x.p[0]).min().unwrap_or(0), v[..n].iter().map(|x| x.p[0]).max().unwrap_or(0));
-            let (min_y, max_y) = (v[..n].iter().map(|x| x.p[1]).min().unwrap_or(0), v[..n].iter().map(|x| x.p[1]).max().unwrap_or(0));
             let w0 = v[0].p[3];
-            let tall = (max_y - min_y) as i64 * 100 >= w0 as i64 * 2 * 90;
             let (on_left, on_right) = (max_x as i64 * 10 <= -(w0 as i64) * 2, min_x as i64 * 10 >= w0 as i64 * 2);
             let alpha_here = (attr >> 16) & 31;
             let edge_strip = flat && untextured && !stretch && tall && (on_left != on_right) && alpha_here > 0 && alpha_here < 31;

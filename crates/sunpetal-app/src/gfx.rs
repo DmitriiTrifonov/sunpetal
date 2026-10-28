@@ -129,6 +129,9 @@ pub struct Gfx {
     glow_grid: Vec<f32>,
     /// Draw the glow behind the screens (else black).
     pub background: bool,
+    /// Behind a lone screen the window's bars carry its edge rows on (the texture drawn over the whole window, its
+    /// edge pixels held), instead of the glow.
+    pub edge_bars: bool,
     /// The colour the picture's edges all have (a logo on white): the bars take it, no glow.
     pub bar_color: Option<[f32; 3]>,
     /// The widened upper screen (3D with the view opened sideways), its scale and how many pixels
@@ -195,7 +198,7 @@ fn make_texture(
         })
     };
     let uniform = buffer();
-    let extras = (0..MAX_PATCHES)
+    let extras = (0..MAX_PATCHES + 1)
         .map(|_| {
             let u = buffer();
             Extra { bind_nearest: bind(&u, nearest), bind_linear: bind(&u, linear), uniform: u }
@@ -314,7 +317,7 @@ impl Gfx {
         );
         let egui_renderer = egui_wgpu::Renderer::new(&device, format, egui_wgpu::RendererOptions::default());
         let post_kit = post::Kit::new(&device, format);
-        Ok(Gfx { window: w, egui_ctx, egui_state, egui_renderer, bgl, nearest, linear_sampler: linear, scale: 1, surface, device, queue, config, pipeline, post_kit, post: None, screens, glow, glow_grid: vec![0.0; GLOW_W * GLOW_H * 3], background: true, bar_color: None, wide_screen: None, wide_e: 0, linear: true, reserve: 0.0 })
+        Ok(Gfx { window: w, egui_ctx, egui_state, egui_renderer, bgl, nearest, linear_sampler: linear, scale: 1, surface, device, queue, config, pipeline, post_kit, post: None, screens, glow, glow_grid: vec![0.0; GLOW_W * GLOW_H * 3], background: true, edge_bars: false, bar_color: None, wide_screen: None, wide_e: 0, linear: true, reserve: 0.0 })
     }
 
     pub fn resize(&mut self, w: u32, h: u32) {
@@ -480,7 +483,25 @@ impl Gfx {
                 (p.screen, Extra2(i))
             })
             .collect();
-        if self.background && self.bar_color.is_none() {
+        // a lone screen with bars about it: its own picture over the whole window, the edge pixels held
+        let lone = match (&rects[0], &rects[1]) {
+            (Some(r), None) => Some((0, *r)),
+            (None, Some(r)) => Some((1, *r)),
+            _ => None,
+        };
+        let edge = lone.filter(|(_, r)| self.edge_bars && self.bar_color.is_none() && (r.w < w - 0.5 || r.h < h - 0.5));
+        if let Some((i, r)) = edge {
+            let cols = if i == 0 { upper_w } else { 256.0 };
+            let q = Quad {
+                rect: [-1.0, 1.0, 1.0, -1.0],
+                fx: [0.0, 0.0, 0.0, if fx.sharp { 1.0 } else { 0.0 }],
+                color: [fx.saturation, fx.contrast, fx.brightness, fx.gamma],
+                dims: [cols * self.scale as f32, 192.0 * self.scale as f32, 0.0, 0.0],
+                uvr: [-r.x / r.w, -r.y / r.h, (w - r.x) / r.w, (h - r.y) / r.h],
+            };
+            self.queue.write_buffer(&pick(i).extras[MAX_PATCHES].uniform, 0, bytemuck::bytes_of(&q));
+        }
+        if self.background && self.bar_color.is_none() && edge.is_none() {
             // the whole window, dimmed, no screen effects
             let q = Quad { rect: [-1.0, 1.0, 1.0, -1.0], fx: [0.0, 0.0, 0.55, 0.0], color: [1.1, 0.9, -0.2, 1.0], dims: [GLOW_W as f32, GLOW_H as f32, 0.0, 0.0], uvr: WHOLE };
             self.queue.write_buffer(&self.glow.uniform, 0, bytemuck::bytes_of(&q));
@@ -512,7 +533,11 @@ impl Gfx {
                 multiview_mask: None,
             });
             pass.set_pipeline(&self.pipeline);
-            if self.background && self.bar_color.is_none() {
+            if let Some((i, _)) = edge {
+                let e = &pick(i).extras[MAX_PATCHES];
+                pass.set_bind_group(0, if self.linear { &e.bind_linear } else { &e.bind_nearest }, &[]);
+                pass.draw(0..4, 0..1);
+            } else if self.background && self.bar_color.is_none() {
                 pass.set_bind_group(0, &self.glow.bind_linear, &[]);
                 pass.draw(0..4, 0..1);
             }

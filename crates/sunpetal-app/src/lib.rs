@@ -268,6 +268,7 @@ impl App {
         if let Some(g) = &mut self.gfx {
             g.linear = s.video.linear;
             g.background = s.video.background == "glow";
+            g.edge_bars = s.video.background == "edge";
         }
         if s.video.fullscreen != a.video.fullscreen {
             if let Some(w) = &self.window {
@@ -653,7 +654,7 @@ impl ApplicationHandler for App {
                     self.paper = paper;
                     // the bars of the window: the picture's edge colour if that is one
                     let layout = self.layout();
-                    let ask = if self.settings.video.bars_match && self.settings.video.background == "glow" { layout::edge_color(&layout, *scale, rgba) } else { None };
+                    let ask = if self.settings.video.bars_match && matches!(self.settings.video.background.as_str(), "glow" | "edge") { layout::edge_color(&layout, *scale, rgba) } else { None };
                     let same = match (ask, self.bar_ask.0) {
                         (Some(a), Some(b)) => (0..3).all(|c| (a[c] - b[c]).abs() < 0.04),
                         (None, None) => true,
@@ -662,6 +663,11 @@ impl ApplicationHandler for App {
                     self.bar_ask = if same { (self.bar_ask.0, self.bar_ask.1 + 1) } else { (ask, 0) };
                     if self.bar_ask.1 >= BAR_FRAMES {
                         self.bar_color = self.bar_ask.0;
+                    }
+                    // a flat edge that only changes its shade (a logo fading in or out) is followed at once: waiting for
+                    // it to hold leaves the old colour round a picture gone dark
+                    if let (Some(a), Some(_)) = (ask, self.bar_color) {
+                        self.bar_color = Some(a);
                     }
                     // a change of screen waits until the picture has held for a moment (a fade, a
                     // flash between scenes would flicker it)

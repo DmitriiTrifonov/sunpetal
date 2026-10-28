@@ -97,8 +97,10 @@ impl Menu {
                 }
                 egui::ComboBox::from_label(tx("Background", "Подложка")).selected_text(match s.video.background.as_str() {
                     "black" => tx("black", "чёрная"),
-                    _ => tx("glow of the picture", "свечение картинки"),
+                    "glow" => tx("glow of the picture", "свечение картинки"),
+                    _ => tx("the picture's edge rows run on", "строки края картинки"),
                 }).show_ui(ui, |ui| {
+                    ui.selectable_value(&mut s.video.background, "edge".to_string(), tx("the picture's edge rows run on", "строки края картинки"));
                     ui.selectable_value(&mut s.video.background, "glow".to_string(), tx("glow of the picture", "свечение картинки"));
                     ui.selectable_value(&mut s.video.background, "black".to_string(), tx("black", "чёрная"));
                 });
