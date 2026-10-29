@@ -44,9 +44,9 @@ fn software_parity_on_real_frames() {
     }
 }
 
-/// Этап 3 acceptance (`docs/GPU-BACKEND.md`): the opaque scenes within the tolerances — mean |d|
-/// per channel at most 1/63, fewer than 0.5% of pixels off by more than 2 steps, and the
-/// difference map empty along the polygon edges.
+/// Этап 4 acceptance (`docs/GPU-BACKEND.md`): the full picture (opaque, translucent and shadow
+/// polygons) within the tolerances — mean |d| per channel at most 1/63, fewer than 0.5% of pixels
+/// off by more than 2 steps, and the difference map empty along the polygon edges.
 #[cfg(feature = "gpu")]
 #[test]
 fn gpu_parity_on_real_frames() {
@@ -108,7 +108,7 @@ fn gpu_parity_on_real_frames() {
             w.write_image_data(&gp.diff).unwrap();
             println!("  diff map: {}", path.display());
         }
-        // the acceptance of этап 3
+        // the acceptance of этап 4
         for c in rep.mean_abs {
             assert!(c <= 1.0 / 63.0, "{}: mean |d| {c} > 1/63", rep.path);
         }
