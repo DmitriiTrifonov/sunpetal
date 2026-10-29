@@ -37,6 +37,8 @@ struct Ctx {
     bgl_rear: wgpu::BindGroupLayout,
     fog_pipeline: wgpu::RenderPipeline,
     bgl_fog: wgpu::BindGroupLayout,
+    outline_pipeline: wgpu::RenderPipeline,
+    bgl_outline: wgpu::BindGroupLayout,
     blend_pipeline: wgpu::RenderPipeline,
     bgl_blend: wgpu::BindGroupLayout,
     mask_pipeline: wgpu::RenderPipeline,
@@ -101,7 +103,7 @@ fn make_ctx() -> Result<Ctx, String> {
         label: Some("render3d_gpu rear"),
         entries: &[uniform(0), tex(3, wgpu::TextureSampleType::Uint)],
     });
-    // the fog pass: uniforms and the finished picture's word, fog flag and depth
+    // the fog pass: uniforms, the finished picture's word, fog flag, depth and the outline level
     let bgl_fog = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("render3d_gpu fog"),
         entries: &[
@@ -109,6 +111,19 @@ fn make_ctx() -> Result<Ctx, String> {
             tex(4, wgpu::TextureSampleType::Uint),
             tex(5, wgpu::TextureSampleType::Uint),
             tex(6, wgpu::TextureSampleType::Float { filterable: false }),
+            tex(14, wgpu::TextureSampleType::Uint),
+        ],
+    });
+    // the outline pass (этап 7.1): uniforms and the finished picture's word, depth, ID, cover, trans
+    let bgl_outline = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("render3d_gpu outline"),
+        entries: &[
+            uniform(0),
+            tex(4, wgpu::TextureSampleType::Uint),
+            tex(6, wgpu::TextureSampleType::Float { filterable: false }),
+            tex(11, wgpu::TextureSampleType::Uint),
+            tex(12, wgpu::TextureSampleType::Uint),
+            tex(13, wgpu::TextureSampleType::Uint),
         ],
     });
     // the translucent pass: uniforms, the triangles, the atlas and the accumulated picture
@@ -241,6 +256,34 @@ fn make_ctx() -> Result<Ctx, String> {
         multiview_mask: None,
         cache: None,
     });
+    // the outline (этап 7.1): a full-screen pass computing the line level (0-15) per pixel, one
+    // R32Uint target the fog pass packs into the word's bits 24-27
+    let layout_outline = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("render3d_gpu outline"),
+        bind_group_layouts: &[Some(&bgl_outline)],
+        immediate_size: 0,
+    });
+    let outline_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("render3d_gpu outline"),
+        layout: Some(&layout_outline),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_full"),
+            compilation_options: Default::default(),
+            buffers: &[Some(vbuf.clone())],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_outline"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::TextureFormat::R32Uint.into())],
+        }),
+        primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    });
     let layout_blend = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("render3d_gpu blend"),
         bind_group_layouts: &[Some(&bgl_blend)],
@@ -293,7 +336,7 @@ fn make_ctx() -> Result<Ctx, String> {
         multiview_mask: None,
         cache: None,
     });
-    Ok(Ctx { device, queue, pipeline, bgl, rear_pipeline, bgl_rear, fog_pipeline, bgl_fog, blend_pipeline, bgl_blend, mask_pipeline, bgl_mask })
+    Ok(Ctx { device, queue, pipeline, bgl, rear_pipeline, bgl_rear, fog_pipeline, bgl_fog, outline_pipeline, bgl_outline, blend_pipeline, bgl_blend, mask_pipeline, bgl_mask })
 }
 
 /// Where a texture's picture sits in the frame's atlas, and how its coordinates map onto it.
@@ -395,6 +438,15 @@ pub(super) fn stage4_job(job: &Job) -> Job {
         keys: job.keys.clone(),
         pack: job.pack.clone(),
     }
+}
+
+/// The job for stage 7.1: `stage4_job` with the outline extras on (a representative strength and
+/// width), so the outline bits (24-27) are part of the comparison.
+pub(super) fn stage7_job(job: &Job) -> Job {
+    let mut j = stage4_job(job);
+    j.extras.outline = 0.5;
+    j.extras.outline_width = 0.5;
+    j
 }
 
 /// The screen-space edge function, as in the software renderer (positive: the point left of the
@@ -675,11 +727,12 @@ fn render_all(job: &Job, scale: usize) -> Result<Rendered, String> {
         job.fog_offset as u32,
         (job.clear_color >> 24) & 63,
         (job.disp3dcnt & 8 != 0) as u32,
+        job.extras.outline.to_bits(),
+        job.extras.outline_width.to_bits(),
     ] {
         uni.extend_from_slice(&u.to_le_bytes());
     }
-    // pad the scalars to the vec4 arrays' alignment
-    uni.extend_from_slice(&[0u8; 8]);
+    // 20 scalars end on the vec4 arrays' alignment: no padding
     for t in job.toon {
         uni.extend_from_slice(&(t as u32).to_le_bytes());
     }
@@ -985,12 +1038,54 @@ fn render_all(job: &Job, scale: usize) -> Result<Rendered, String> {
         }
         cur = next;
     }
+    // the outline (этап 7.1): the software engine's `outline_pass` over the finished picture, a
+    // line level (0-15) per pixel, before the fog changes the alpha
+    let outline_tex = attach(device, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
+    {
+        let ov = outline_tex.create_view(&Default::default());
+        let wv = word[cur].create_view(&Default::default());
+        let dv = depth[cur].create_view(&Default::default());
+        let oiv = oid[cur].create_view(&Default::default());
+        let cov = cover[cur].create_view(&Default::default());
+        let trv = trans[cur].create_view(&Default::default());
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("3d outline"),
+            layout: &c.bgl_outline,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&wv) },
+                wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&dv) },
+                wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&oiv) },
+                wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(&cov) },
+                wgpu::BindGroupEntry { binding: 13, resource: wgpu::BindingResource::TextureView(&trv) },
+            ],
+        });
+        let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("3d outline"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &ov,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        rp.set_pipeline(&c.outline_pipeline);
+        rp.set_bind_group(0, &bind, &[]);
+        rp.set_vertex_buffer(0, quad.slice(..));
+        rp.set_viewport(0.0, 0.0, w as f32, h as f32, 0.0, 1.0);
+        rp.draw(0..3, 0..1);
+    }
     // the fog over the finished picture
     {
         let fv = fin.create_view(&Default::default());
         let wv = word[cur].create_view(&Default::default());
         let fgv = fog.create_view(&Default::default());
         let dv = depth[cur].create_view(&Default::default());
+        let ov = outline_tex.create_view(&Default::default());
         let fog_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("3d fog"),
             layout: &c.bgl_fog,
@@ -999,6 +1094,7 @@ fn render_all(job: &Job, scale: usize) -> Result<Rendered, String> {
                 wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&wv) },
                 wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&fgv) },
                 wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&dv) },
+                wgpu::BindGroupEntry { binding: 14, resource: wgpu::BindingResource::TextureView(&ov) },
             ],
         });
         let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1167,6 +1263,9 @@ struct Globals {
   // (DISP3DCNT bit 3: without it a translucent polygon draws opaque)
   clear_id: u32,
   blend_on: u32,
+  // our outline (этап 7.1): its strength (0-1) and width in DS pixels (0.25-2)
+  outline: f32,
+  outline_width: f32,
   // the toon table, four 15-bit colours per vec4 (uniform arrays need a stride of 16)
   toon: array<vec4u, 8>,
   // the fog table, four u8 densities per vec4
@@ -1191,6 +1290,8 @@ struct Globals {
 @group(0) @binding(11) var oid_cur: texture_2d<u32>;
 @group(0) @binding(12) var cover_cur: texture_2d<u32>;
 @group(0) @binding(13) var trans_cur: texture_2d<u32>;
+// the outline's line level (этап 7.1), the fog pass packs it into the word's bits 24-27
+@group(0) @binding(14) var outline_tex: texture_2d<u32>;
 
 // One fan triangle: the exact vertex positions (the software engine's), its area, the ownership
 // of its edges (bits 0-2), the mode, the interpolation data of its three vertices, and its
@@ -1677,10 +1778,99 @@ fn fs_rear(in: VFull) -> FOut {
 
 // the fog over the finished picture (a full-screen quad): a pixel that takes the fog moves
 // towards the fog colour (unless the mode is alpha-only) and its alpha by the density at its
-// depth; an alpha-0 pixel is no pixel at all (the 2D layers under it show)
+// depth; an alpha-0 pixel is no pixel at all (the 2D layers under it show). The outline's line
+// level goes into the word's bits 24-27.
 struct FFog {
   @location(0) word: vec4u,
 };
+
+// the outline's constants (этап 7.1), the software engine's: a jump in depth this big is a line,
+// the interface at the near plane gets none, this much translucent cover hides the line, the
+// silhouette against the 2D layers is this strong
+const OUTLINE_STEP: f32 = 0.002;
+const INTERFACE_DEPTH: f32 = 0.05;
+const HIDING_ALPHA: u32 = 12u;
+const SILHOUETTE: f32 = 0.5;
+
+// a neighbour at `q` takes the pair out of the outline (a translucent-depth or an interface pixel)
+fn outline_pair_skip(q: vec2u) -> bool {
+  return textureLoad(trans_cur, q, 0u).x != 0u || textureLoad(depth_tex, q, 0u).x < INTERFACE_DEPTH;
+}
+
+// the outline's line level (0-15) at a pixel, exactly the software engine's `outline_pass`: the
+// near side of a jump in depth or of another (last opaque) polygon's ID gets a line, the border
+// with the empty 2D a lighter one; the translucent cover weakens it, none from HIDING_ALPHA
+fn outline_level(p: vec2u) -> u32 {
+  let k = max(u32(round(g.outline_width * f32(g.scale))), 1u);
+  if (p.x < k || p.y < k || p.x >= g.w - k || p.y >= g.h - k) {
+    return 0u;
+  }
+  let alpha = (textureLoad(color, p, 0u).x >> 18u) & 31u;
+  let d = textureLoad(depth_tex, p, 0u).x;
+  if (alpha < 31u || textureLoad(trans_cur, p, 0u).x != 0u || d < INTERFACE_DEPTH) {
+    return 0u;
+  }
+  let id = textureLoad(oid_cur, p, 0u).x;
+  let cover = textureLoad(cover_cur, p, 0u).x;
+  var edge = false;
+  var silhouette = false;
+  // the horizontal pair
+  let al = vec2u(p.x - k, p.y);
+  let ar = vec2u(p.x + k, p.y);
+  if (!(outline_pair_skip(al) || outline_pair_skip(ar))) {
+    let aal = (textureLoad(color, al, 0u).x >> 18u) & 31u;
+    let aar = (textureLoad(color, ar, 0u).x >> 18u) & 31u;
+    if (aal == 0u || aar == 0u) {
+      silhouette = true;
+    } else {
+      let dal = textureLoad(depth_tex, al, 0u).x;
+      let dar = textureLoad(depth_tex, ar, 0u).x;
+      let ial = textureLoad(oid_cur, al, 0u).x;
+      let iar = textureLoad(oid_cur, ar, 0u).x;
+      if (dal + dar - 2.0 * d > OUTLINE_STEP * 2.0 || (ial != id && dal > d) || (iar != id && dar > d)) {
+        edge = true;
+      }
+    }
+  }
+  // the vertical pair
+  let au = vec2u(p.x, p.y - k);
+  let ad = vec2u(p.x, p.y + k);
+  if (!(outline_pair_skip(au) || outline_pair_skip(ad))) {
+    let aau = (textureLoad(color, au, 0u).x >> 18u) & 31u;
+    let aad = (textureLoad(color, ad, 0u).x >> 18u) & 31u;
+    if (aau == 0u || aad == 0u) {
+      silhouette = true;
+    } else {
+      let dau = textureLoad(depth_tex, au, 0u).x;
+      let dad = textureLoad(depth_tex, ad, 0u).x;
+      let iau = textureLoad(oid_cur, au, 0u).x;
+      let iad = textureLoad(oid_cur, ad, 0u).x;
+      if (dau + dad - 2.0 * d > OUTLINE_STEP * 2.0 || (iau != id && dau > d) || (iad != id && dad > d)) {
+        edge = true;
+      }
+    }
+  }
+  if (!(edge || silhouette)) {
+    return 0u;
+  }
+  // the line: hidden by the translucent cover from HIDING_ALPHA, the rest scaled by the strength
+  if (cover >= HIDING_ALPHA) {
+    return 0u;
+  }
+  let f = select(SILHOUETTE, 1.0, edge);
+  return u32(round(min(g.outline * f, 1.0) * f32(31u - cover) / 31.0 * 15.0));
+}
+
+struct FOutline {
+  @location(0) line: vec4u,
+};
+
+@fragment
+fn fs_outline(in: VFull) -> FOutline {
+  var o: FOutline;
+  o.line = vec4u(outline_level(vec2u(u32(floor(in.clip.x)), u32(floor(in.clip.y)))), 0u, 0u, 0u);
+  return o;
+}
 
 @fragment
 fn fs_fog(in: VFull) -> FFog {
@@ -1709,7 +1899,8 @@ fn fs_fog(in: VFull) -> FFog {
   if (ca == 0u) {
     o.word = vec4u(0u, 0u, 0u, 0u);
   } else {
-    o.word = vec4u(cr | cg << 6u | cb << 12u | ca << 18u, 0u, 0u, 0u);
+    let line = textureLoad(outline_tex, p, 0u).x & 15u;
+    o.word = vec4u(cr | cg << 6u | cb << 12u | ca << 18u | line << 24u, 0u, 0u, 0u);
   }
   return o;
 }
@@ -2445,5 +2636,44 @@ mod tests {
             both(&j, 1);
             both_maps(&j, 1);
         }
+    }
+
+    #[test]
+    fn the_outline_matches_the_software_on_jumps_silhouettes_and_cover() {
+        // a transparent clear (the 3D's border is a silhouette), a far square (id 3), a nearer
+        // square (id 5: a jump in depth and a change of ID → a line on its near side), and a
+        // translucent panel (id 9, alpha 15) over part of it: the cover from HIDING_ALPHA hides
+        // the line under the panel
+        let mut j = empty_job();
+        j.clear_color = 0;
+        j.disp3dcnt |= 8;
+        j.extras.outline = 1.0;
+        j.extras.outline_width = 0.5;
+        j.verts = vec![
+            vert(20.0, 20.0, 0x0800, 0x1000, 31.0, 0.0, 0.0),
+            vert(150.0, 20.0, 0x0800, 0x1000, 31.0, 0.0, 0.0),
+            vert(150.0, 150.0, 0x0800, 0x1000, 31.0, 0.0, 0.0),
+            vert(20.0, 150.0, 0x0800, 0x1000, 31.0, 0.0, 0.0),
+            vert(60.0, 40.0, -0x0800, 0x1000, 0.0, 31.0, 0.0),
+            vert(120.0, 40.0, -0x0800, 0x1000, 0.0, 31.0, 0.0),
+            vert(120.0, 120.0, -0x0800, 0x1000, 0.0, 31.0, 0.0),
+            vert(60.0, 120.0, -0x0800, 0x1000, 0.0, 31.0, 0.0),
+            vert(70.0, 50.0, -0x0C00, 0x1000, 31.0, 0.0, 31.0),
+            vert(110.0, 50.0, -0x0C00, 0x1000, 31.0, 0.0, 31.0),
+            vert(110.0, 110.0, -0x0C00, 0x1000, 31.0, 0.0, 31.0),
+            vert(70.0, 110.0, -0x0C00, 0x1000, 31.0, 0.0, 31.0),
+        ];
+        j.polys = vec![
+            GxPoly { first: 0, n: 4, attr: 31 << 16 | 3 << 24, tex: 0, pal: 0, translucent: false, sortkey: 0 },
+            GxPoly { first: 4, n: 4, attr: 31 << 16 | 5 << 24, tex: 0, pal: 0, translucent: false, sortkey: 0 },
+            GxPoly { first: 8, n: 4, attr: 15 << 16 | 9 << 24, tex: 0, pal: 0, translucent: true, sortkey: 0 },
+        ];
+        // the reference draws lines: the near square's border against the farther square and the
+        // squares' borders against the transparent clear — but not under the hiding panel
+        let (want, _, _) = super::super::render3d::render_maps(&j, 1);
+        let lines = want.iter().filter(|w| *w >> 24 & 15 != 0).count();
+        assert!(lines > 0, "the reference frame has no outline at all");
+        both_maps(&j, 1);
+        both_maps(&j, 2);
     }
 }

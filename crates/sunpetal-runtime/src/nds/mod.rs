@@ -812,6 +812,69 @@ pub fn gpu_aux_check(path: &std::path::Path) -> Result<AuxParity, String> {
     Ok(rep)
 }
 
+/// The GPU backend's outline (этап 7.1 of `docs/GPU-BACKEND.md`) against the software engine's on a
+/// dump: the job is filtered to `stage7_job` (the outline extras on) and the words — including the
+/// outline bits (24-27) — compared. The acceptance: the outline bits match on ≥ 95 % of the pixels.
+#[cfg(feature = "gpu")]
+#[derive(Clone, Debug)]
+pub struct OutlineParity {
+    pub path: String,
+    pub w: usize,
+    pub h: usize,
+    pub pixels: usize,
+    /// Pixels whose whole word matches.
+    pub exact: usize,
+    /// Pixels whose outline bits match.
+    pub outline_exact: usize,
+    /// Pixels with the outline bits on in the reference.
+    pub outline_on: usize,
+    /// The first differing pixel: (index, GPU, software).
+    pub first: Option<(usize, u32, u32)>,
+    /// The difference map, RGBA: red where the words differ.
+    pub diff: Vec<u8>,
+}
+
+#[cfg(feature = "gpu")]
+pub fn gpu_outline_check(path: &std::path::Path) -> Result<OutlineParity, String> {
+    let d = jobdump::read(path)?;
+    let job = render3d_gpu::stage7_job(&d.job);
+    let (w, h) = (job.width * d.scale, 192 * d.scale);
+    let (ref_px, ref_notes) = render3d::render(&job, d.scale);
+    let (px, notes) = render3d_gpu::render(&job, d.scale)?;
+    if notes != ref_notes {
+        eprintln!("{}: notes differ (gpu {:#x} soft {:#x})", path.display(), notes, ref_notes);
+    }
+    let mut rep = OutlineParity {
+        path: path.display().to_string(),
+        w,
+        h,
+        pixels: ref_px.len(),
+        exact: 0,
+        outline_exact: 0,
+        outline_on: 0,
+        first: None,
+        diff: vec![0; ref_px.len() * 4],
+    };
+    for (i, (a, b)) in px.iter().zip(ref_px.iter()).enumerate() {
+        if a >> 24 & 15 == b >> 24 & 15 {
+            rep.outline_exact += 1;
+        }
+        if b >> 24 & 15 != 0 {
+            rep.outline_on += 1;
+        }
+        if a == b {
+            rep.exact += 1;
+            continue;
+        }
+        if rep.first.is_none() {
+            rep.first = Some((i, *a, *b));
+        }
+        rep.diff[i * 4] = 255;
+        rep.diff[i * 4 + 3] = 255;
+    }
+    Ok(rep)
+}
+
 impl TexFilter {
     pub fn parse(s: &str) -> TexFilter {
         match s {

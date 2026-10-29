@@ -202,3 +202,74 @@ fn gpu_aux_on_real_frames() {
         println!("no GPU device: the auxiliary-map test did not run");
     }
 }
+
+/// Этап 7.1 acceptance (`docs/GPU-BACKEND.md`): the outline bits (24-27) match the software
+/// engine's on ≥ 95 % of the pixels of every dump.
+#[cfg(feature = "gpu")]
+#[test]
+fn gpu_outline_on_real_frames() {
+    use sunpetal_runtime::nds::gpu_outline_check;
+    let Some(dir) = std::env::var_os("SUNPETAL_JOB_DUMPS").map(PathBuf::from) else {
+        println!("SUNPETAL_JOB_DUMPS is not set: no dumps to check");
+        return;
+    };
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .expect("dump dir")
+        .filter_map(|e| {
+            let p = e.unwrap().path();
+            (p.extension()?.to_str()? == "spjob").then_some(p)
+        })
+        .collect();
+    files.sort();
+    assert!(!files.is_empty(), "no .spjob files in {}", dir.display());
+    let mut any = false;
+    for f in files {
+        let gp = match gpu_outline_check(&f) {
+            Err(e) if e.contains("no GPU") => {
+                println!("{}: skipped ({e})", f.display());
+                continue;
+            }
+            Err(e) => panic!("{}: {e}", f.display()),
+            Ok(gp) => gp,
+        };
+        any = true;
+        println!(
+            "{}: outline bits {}/{} ({:.4}%), on {} pixels, words exact {}/{}",
+            gp.path,
+            gp.outline_exact,
+            gp.pixels,
+            100.0 * gp.outline_exact as f64 / gp.pixels.max(1) as f64,
+            gp.outline_on,
+            gp.exact,
+            gp.pixels
+        );
+        if let Some((i, g, s)) = gp.first {
+            println!("  first word mismatch at pixel {i}: gpu {g:08x} soft {s:08x}");
+        }
+        if let Some(dir) = std::env::var_os("SUNPETAL_JOB_DIFFS") {
+            let name = f.file_stem().unwrap().to_string_lossy();
+            let dir = PathBuf::from(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join(format!("{name}.outline.png"));
+            let file = std::fs::File::create(&path).unwrap();
+            let mut enc = png::Encoder::new(std::io::BufWriter::new(file), gp.w as u32, gp.h as u32);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            let mut w = enc.write_header().unwrap();
+            w.write_image_data(&gp.diff).unwrap();
+            println!("  outline diff map: {}", path.display());
+        }
+        assert!(
+            gp.outline_exact * 100 >= gp.pixels * 95,
+            "{}: outline bits match on {} of {} pixels",
+            gp.path,
+            gp.outline_exact,
+            gp.pixels
+        );
+    }
+    if any {
+        println!("outline bits matched on all the dumps");
+    } else {
+        println!("no GPU device: the outline test did not run");
+    }
+}
