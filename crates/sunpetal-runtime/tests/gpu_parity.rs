@@ -122,3 +122,53 @@ fn gpu_parity_on_real_frames() {
         println!("no GPU device: the GPU parity test did not run");
     }
 }
+
+/// Этап 7.0 acceptance (`docs/GPU-BACKEND.md`): the auxiliary maps (`oid`, `cover`, `trans`) the
+/// outline and the shading read match the software engine's byte-exact on every dump.
+#[cfg(feature = "gpu")]
+#[test]
+fn gpu_aux_on_real_frames() {
+    use sunpetal_runtime::nds::gpu_aux_check;
+    let Some(dir) = std::env::var_os("SUNPETAL_JOB_DUMPS").map(PathBuf::from) else {
+        println!("SUNPETAL_JOB_DUMPS is not set: no dumps to check");
+        return;
+    };
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .expect("dump dir")
+        .filter_map(|e| {
+            let p = e.unwrap().path();
+            (p.extension()?.to_str()? == "spjob").then_some(p)
+        })
+        .collect();
+    files.sort();
+    assert!(!files.is_empty(), "no .spjob files in {}", dir.display());
+    let mut any = false;
+    for f in files {
+        let gp = match gpu_aux_check(&f) {
+            Err(e) if e.contains("no GPU") => {
+                println!("{}: skipped ({e})", f.display());
+                continue;
+            }
+            Err(e) => panic!("{}: {e}", f.display()),
+            Ok(gp) => gp,
+        };
+        any = true;
+        println!(
+            "{}: oid {}/{} cover {}/{} trans {}/{}",
+            gp.path, gp.oid_exact, gp.pixels, gp.cover_exact, gp.pixels, gp.trans_exact, gp.pixels
+        );
+        for (name, first) in [("oid", gp.oid_first), ("cover", gp.cover_first), ("trans", gp.trans_first)] {
+            if let Some((i, g, s)) = first {
+                println!("  first {name} mismatch at pixel {i}: gpu {g} soft {s}");
+            }
+        }
+        assert_eq!(gp.oid_exact, gp.pixels, "{}: oid map differs", gp.path);
+        assert_eq!(gp.cover_exact, gp.pixels, "{}: cover map differs", gp.path);
+        assert_eq!(gp.trans_exact, gp.pixels, "{}: trans map differs", gp.path);
+    }
+    if any {
+        println!("auxiliary maps matched on all the dumps");
+    } else {
+        println!("no GPU device: the auxiliary-map test did not run");
+    }
+}

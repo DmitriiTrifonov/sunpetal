@@ -666,6 +666,68 @@ pub fn gpu_parity_check(path: &std::path::Path) -> Result<GpuParity, String> {
     Ok(GpuParity { report: rep, diff, w, h, edge_diffs })
 }
 
+/// The GPU backend's auxiliary maps (`oid`, `cover`, `trans`) against the software engine's on a
+/// dump (этап 7.0 of `docs/GPU-BACKEND.md`): the job is filtered to `stage4_job` and the two
+/// engines' maps compared pixel by pixel. `oid` is the last opaque polygon's ID (0-63), `cover` how
+/// much the translucent polygons hide the pixel (0-31), `trans` whether a translucent polygon wrote
+/// the depth (0 or 1).
+#[cfg(feature = "gpu")]
+#[derive(Clone, Debug)]
+pub struct AuxParity {
+    pub path: String,
+    pub pixels: usize,
+    pub oid_exact: usize,
+    pub cover_exact: usize,
+    pub trans_exact: usize,
+    /// The first mismatch of each map: (pixel index, GPU, software).
+    pub oid_first: Option<(usize, u8, u8)>,
+    pub cover_first: Option<(usize, u8, u8)>,
+    pub trans_first: Option<(usize, u8, u8)>,
+}
+
+#[cfg(feature = "gpu")]
+pub fn gpu_aux_check(path: &std::path::Path) -> Result<AuxParity, String> {
+    let d = jobdump::read(path)?;
+    let job = render3d_gpu::stage4_job(&d.job);
+    let (_ref_px, ref_aux, ref_notes) = render3d::render_maps(&job, d.scale);
+    let (px, oid, cover, trans, notes) = render3d_gpu::render_maps(&job, d.scale)?;
+    if notes != ref_notes {
+        eprintln!("{}: notes differ (gpu {:#x} soft {:#x})", path.display(), notes, ref_notes);
+    }
+    let mut rep = AuxParity {
+        path: path.display().to_string(),
+        pixels: px.len(),
+        oid_exact: 0,
+        cover_exact: 0,
+        trans_exact: 0,
+        oid_first: None,
+        cover_first: None,
+        trans_first: None,
+    };
+    for (i, (a, b)) in oid.iter().zip(ref_aux.oid.iter()).enumerate() {
+        if a == b {
+            rep.oid_exact += 1;
+        } else if rep.oid_first.is_none() {
+            rep.oid_first = Some((i, *a, *b));
+        }
+    }
+    for (i, (a, b)) in cover.iter().zip(ref_aux.cover.iter()).enumerate() {
+        if a == b {
+            rep.cover_exact += 1;
+        } else if rep.cover_first.is_none() {
+            rep.cover_first = Some((i, *a, *b));
+        }
+    }
+    for (i, (a, b)) in trans.iter().zip(ref_aux.trans.iter()).enumerate() {
+        if a == b {
+            rep.trans_exact += 1;
+        } else if rep.trans_first.is_none() {
+            rep.trans_first = Some((i, *a, *b));
+        }
+    }
+    Ok(rep)
+}
+
 impl TexFilter {
     pub fn parse(s: &str) -> TexFilter {
         match s {

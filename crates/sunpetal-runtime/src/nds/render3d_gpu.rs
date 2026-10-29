@@ -122,6 +122,9 @@ fn make_ctx() -> Result<Ctx, String> {
             tex(8, wgpu::TextureSampleType::Uint),
             tex(9, wgpu::TextureSampleType::Uint),
             tex(10, wgpu::TextureSampleType::Float { filterable: false }),
+            tex(11, wgpu::TextureSampleType::Uint),
+            tex(12, wgpu::TextureSampleType::Uint),
+            tex(13, wgpu::TextureSampleType::Uint),
         ],
     });
     // the shadow mask: uniforms, the triangles and the accumulated depth
@@ -138,12 +141,15 @@ fn make_ctx() -> Result<Ctx, String> {
             shader_location: 0,
         }],
     };
-    let color_targets: [Option<wgpu::ColorTargetState>; 5] = [
-        Some(wgpu::TextureFormat::R32Uint.into()),
-        Some(wgpu::TextureFormat::R32Uint.into()),
-        Some(wgpu::TextureFormat::R32Float.into()),
-        Some(wgpu::TextureFormat::R32Uint.into()),
-        Some(wgpu::TextureFormat::R32Uint.into()),
+    let color_targets: [Option<wgpu::ColorTargetState>; 8] = [
+        Some(wgpu::TextureFormat::R32Uint.into()),  // 0 word
+        Some(wgpu::TextureFormat::R32Uint.into()),  // 1 fog
+        Some(wgpu::TextureFormat::R32Float.into()), // 2 depth
+        Some(wgpu::TextureFormat::R32Uint.into()),  // 3 id
+        Some(wgpu::TextureFormat::R32Uint.into()),  // 4 stencil
+        Some(wgpu::TextureFormat::R32Uint.into()),  // 5 oid
+        Some(wgpu::TextureFormat::R32Uint.into()),  // 6 cover
+        Some(wgpu::TextureFormat::R32Uint.into()),  // 7 trans
     ];
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("render3d_gpu"),
@@ -531,6 +537,16 @@ fn build(job: &Job, s: usize, regions: &HashMap<(u32, u32), TexInfo>) -> Built {
     Built { opaque_verts, opaque_tris, serial }
 }
 
+/// A frame the GPU drew, with the picture and the auxiliary maps the outline and the shading read
+/// (этап 7.0 of `docs/GPU-BACKEND.md`).
+struct Rendered {
+    words: Vec<u32>,
+    oid: Vec<u8>,
+    cover: Vec<u8>,
+    trans: Vec<u8>,
+    notes: u32,
+}
+
 /// Draws a job as stage 4 can and reads the picture back as the same words the software renderer
 /// returns, with its `notes` mask. The frame is drawn as: the clear and the rear plane, then the
 /// opaque polygons in one pass (hardware depth test), then each translucent (or shadow) polygon in
@@ -538,6 +554,17 @@ fn build(job: &Job, s: usize, regions: &HashMap<(u32, u32), TexInfo>) -> Built {
 /// the shadow mask's mark, then the DS blend `(src*(a+1) + dst*(31-a))/32` over what is there —
 /// then the fog over the finished picture, which also drops the alpha-0 pixels.
 pub(super) fn render(job: &Job, scale: usize) -> Result<(Vec<u32>, u32), String> {
+    let r = render_all(job, scale)?;
+    Ok((r.words, r.notes))
+}
+
+/// Draws a job and reads the auxiliary maps back too (этап 7.0 of `docs/GPU-BACKEND.md`).
+pub(super) fn render_maps(job: &Job, scale: usize) -> Result<(Vec<u32>, Vec<u8>, Vec<u8>, Vec<u8>, u32), String> {
+    let r = render_all(job, scale)?;
+    Ok((r.words, r.oid, r.cover, r.trans, r.notes))
+}
+
+fn render_all(job: &Job, scale: usize) -> Result<Rendered, String> {
     let c = ctx()?;
     let s = scale.max(1);
     let (w, h) = (job.width * s, 192 * s);
@@ -686,6 +713,9 @@ pub(super) fn render(job: &Job, scale: usize) -> Result<(Vec<u32>, u32), String>
     let id = pair(wgpu::TextureFormat::R32Uint);
     let stencil = pair(wgpu::TextureFormat::R32Uint);
     let depth = pair(wgpu::TextureFormat::R32Float);
+    let oid = pair(wgpu::TextureFormat::R32Uint);
+    let cover = pair(wgpu::TextureFormat::R32Uint);
+    let trans = pair(wgpu::TextureFormat::R32Uint);
     let fog = attach(device, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
     let depth_stencil = attach(device, w, h, wgpu::TextureFormat::Depth32Float, wgpu::TextureUsages::RENDER_ATTACHMENT);
     let fin = attach(device, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC);
@@ -727,6 +757,9 @@ pub(super) fn render(job: &Job, scale: usize) -> Result<(Vec<u32>, u32), String>
         let sv = stencil[0].create_view(&Default::default());
         let fv = fog.create_view(&Default::default());
         let dv = depth[0].create_view(&Default::default());
+        let ov = oid[0].create_view(&Default::default());
+        let cov = cover[0].create_view(&Default::default());
+        let trv = trans[0].create_view(&Default::default());
         let dsv = depth_stencil.create_view(&Default::default());
         let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("3d geometry"),
@@ -757,6 +790,24 @@ pub(super) fn render(job: &Job, scale: usize) -> Result<(Vec<u32>, u32), String>
                 }),
                 Some(wgpu::RenderPassColorAttachment {
                     view: &sv,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store },
+                }),
+                Some(wgpu::RenderPassColorAttachment {
+                    view: &ov,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: ((job.clear_color >> 24) & 63) as f64, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store },
+                }),
+                Some(wgpu::RenderPassColorAttachment {
+                    view: &cov,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store },
+                }),
+                Some(wgpu::RenderPassColorAttachment {
+                    view: &trv,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store },
@@ -825,6 +876,9 @@ pub(super) fn render(job: &Job, scale: usize) -> Result<(Vec<u32>, u32), String>
             (&id[cur], &id[next]),
             (&stencil[cur], &stencil[next]),
             (&depth[cur], &depth[next]),
+            (&oid[cur], &oid[next]),
+            (&cover[cur], &cover[next]),
+            (&trans[cur], &trans[next]),
         ] {
             enc.copy_texture_to_texture(
                 wgpu::TexelCopyTextureInfo { texture: a, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
@@ -878,10 +932,16 @@ pub(super) fn render(job: &Job, scale: usize) -> Result<(Vec<u32>, u32), String>
             let sv = stencil[next].create_view(&Default::default());
             let fv = fog.create_view(&Default::default());
             let dv = depth[next].create_view(&Default::default());
+            let ov = oid[next].create_view(&Default::default());
+            let cov = cover[next].create_view(&Default::default());
+            let trv = trans[next].create_view(&Default::default());
             let wc = word[cur].create_view(&Default::default());
             let ic = id[cur].create_view(&Default::default());
             let sc = stencil[cur].create_view(&Default::default());
             let dc = depth[cur].create_view(&Default::default());
+            let oc = oid[cur].create_view(&Default::default());
+            let coc = cover[cur].create_view(&Default::default());
+            let trc = trans[cur].create_view(&Default::default());
             let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("3d blend"),
                 layout: &c.bgl_blend,
@@ -893,6 +953,9 @@ pub(super) fn render(job: &Job, scale: usize) -> Result<(Vec<u32>, u32), String>
                     wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(&ic) },
                     wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&sc) },
                     wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&dc) },
+                    wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&oc) },
+                    wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(&coc) },
+                    wgpu::BindGroupEntry { binding: 13, resource: wgpu::BindingResource::TextureView(&trc) },
                 ],
             });
             let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -903,6 +966,9 @@ pub(super) fn render(job: &Job, scale: usize) -> Result<(Vec<u32>, u32), String>
                     Some(wgpu::RenderPassColorAttachment { view: &dv, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } }),
                     Some(wgpu::RenderPassColorAttachment { view: &iv, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } }),
                     Some(wgpu::RenderPassColorAttachment { view: &sv, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } }),
+                    Some(wgpu::RenderPassColorAttachment { view: &ov, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } }),
+                    Some(wgpu::RenderPassColorAttachment { view: &cov, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } }),
+                    Some(wgpu::RenderPassColorAttachment { view: &trv, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } }),
                 ],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
@@ -952,40 +1018,17 @@ pub(super) fn render(job: &Job, scale: usize) -> Result<(Vec<u32>, u32), String>
         rp.set_viewport(0.0, 0.0, w as f32, h as f32, 0.0, 1.0);
         rp.draw(0..3, 0..1);
     }
-    // the picture back: copy to a mappable buffer and read the rows
-    let row = ((w as u32 * 4).div_ceil(256) * 256) as u64;
-    let buf = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("3d readback"),
-        size: row * h as u64,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    enc.copy_texture_to_buffer(
-        wgpu::TexelCopyTextureInfo { texture: &fin, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-        wgpu::TexelCopyBufferInfo {
-            buffer: &buf,
-            layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row as u32), rows_per_image: Some(h as u32) },
-        },
-        wgpu::Extent3d { width: w as u32, height: h as u32, depth_or_array_layers: 1 },
-    );
+    // the picture back: copy each attachment to a mappable buffer, then read the rows
+    let buf_word = readback_buf(device, &mut enc, &fin, w as u32, h as u32);
+    let buf_oid = readback_buf(device, &mut enc, &oid[cur], w as u32, h as u32);
+    let buf_cover = readback_buf(device, &mut enc, &cover[cur], w as u32, h as u32);
+    let buf_trans = readback_buf(device, &mut enc, &trans[cur], w as u32, h as u32);
     c.queue.submit([enc.finish()]);
-    let slice = buf.slice(..);
-    slice.map_async(wgpu::MapMode::Read, |_| {});
-    let _ = c.device.poll(wgpu::PollType::wait_indefinitely());
-    let mut words = Vec::with_capacity(w * h);
-    if let Ok(map) = slice.get_mapped_range() {
-        for y in 0..h {
-            let base = y * row as usize;
-            for x in 0..w {
-                let p = base + x * 4;
-                words.push(u32::from_le_bytes([map[p], map[p + 1], map[p + 2], map[p + 3]]));
-            }
-        }
-    } else {
-        return Err("the 3D picture could not be read back".into());
-    }
-    buf.unmap();
-    Ok((words, notes))
+    let words = readback_words(&c.device, &buf_word, w, h)?;
+    let oid_px = readback_bytes(&c.device, &buf_oid, w, h)?;
+    let cover_px = readback_bytes(&c.device, &buf_cover, w, h)?;
+    let trans_px = readback_bytes(&c.device, &buf_trans, w, h)?;
+    Ok(Rendered { words, oid: oid_px, cover: cover_px, trans: trans_px, notes })
 }
 
 /// A 2D texture of the picture's size for one of the passes' attachments.
@@ -1000,6 +1043,66 @@ fn attach(device: &wgpu::Device, w: usize, h: usize, format: wgpu::TextureFormat
         usage,
         view_formats: &[],
     })
+}
+
+/// A mappable buffer a picture-sized attachment is copied into (rows padded to 256 bytes), to be
+/// read back by `readback_words`/`readback_bytes` after the submit.
+fn readback_buf(device: &wgpu::Device, enc: &mut wgpu::CommandEncoder, tex: &wgpu::Texture, w: u32, h: u32) -> wgpu::Buffer {
+    let row = ((w * 4).div_ceil(256) * 256) as u64;
+    let buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("3d readback"),
+        size: row * h as u64,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    enc.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo { texture: tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buf,
+            layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row as u32), rows_per_image: Some(h) },
+        },
+        wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+    );
+    buf
+}
+
+/// Reads a mapped readback buffer's words (`w` words a row, rows padded to 256 bytes).
+fn readback_words(device: &wgpu::Device, buf: &wgpu::Buffer, w: usize, h: usize) -> Result<Vec<u32>, String> {
+    let row = ((w as u32 * 4).div_ceil(256) * 256) as usize;
+    let slice = buf.slice(..);
+    slice.map_async(wgpu::MapMode::Read, |_| {});
+    let _ = device.poll(wgpu::PollType::wait_indefinitely());
+    let map = slice.get_mapped_range().map_err(|_| "the 3D picture could not be read back")?;
+    let mut v = Vec::with_capacity(w * h);
+    for y in 0..h {
+        let base = y * row;
+        for x in 0..w {
+            let p = base + x * 4;
+            v.push(u32::from_le_bytes([map[p], map[p + 1], map[p + 2], map[p + 3]]));
+        }
+    }
+    drop(map);
+    buf.unmap();
+    Ok(v)
+}
+
+/// Reads a mapped readback buffer one byte a pixel (the 0-63-valued attachments).
+fn readback_bytes(device: &wgpu::Device, buf: &wgpu::Buffer, w: usize, h: usize) -> Result<Vec<u8>, String> {
+    let row = ((w as u32 * 4).div_ceil(256) * 256) as usize;
+    let slice = buf.slice(..);
+    slice.map_async(wgpu::MapMode::Read, |_| {});
+    let _ = device.poll(wgpu::PollType::wait_indefinitely());
+    let map = slice.get_mapped_range().map_err(|_| "the 3D picture could not be read back")?;
+    let mut v = Vec::with_capacity(w * h);
+    for y in 0..h {
+        let base = y * row;
+        for x in 0..w {
+            v.push(map[base + x * 4]);
+        }
+    }
+    drop(map);
+    buf.unmap();
+    Ok(v)
 }
 
 /// The rear plane's bitmap as a 256x256 `Rgba32Uint` texture: each texel is the colour word
@@ -1074,6 +1177,11 @@ struct Globals {
 @group(0) @binding(8) var id_cur: texture_2d<u32>;
 @group(0) @binding(9) var stencil_cur: texture_2d<u32>;
 @group(0) @binding(10) var depth_cur: texture_2d<f32>;
+// the accumulated auxiliary maps (этап 7.0): the last opaque polygon's ID, how much the
+// translucent polygons over it hide the picture, and whether the depth is a translucent polygon's
+@group(0) @binding(11) var oid_cur: texture_2d<u32>;
+@group(0) @binding(12) var cover_cur: texture_2d<u32>;
+@group(0) @binding(13) var trans_cur: texture_2d<u32>;
 
 // One fan triangle: the exact vertex positions (the software engine's), its area, the ownership
 // of its edges (bits 0-2), the mode, the interpolation data of its three vertices, and its
@@ -1126,16 +1234,22 @@ struct FOut {
   @location(2) depth_out: vec4f,
   @location(3) id: vec4u,
   @location(4) stencil: vec4u,
+  @location(5) oid: vec4u,
+  @location(6) cover: vec4u,
+  @location(7) trans: vec4u,
   @builtin(frag_depth) depth: f32,
 };
 
-// the translucent pass's output: the same five attachments, the depth test done in the shader
+// the translucent pass's output: the same eight attachments, the depth test done in the shader
 struct FTrans {
   @location(0) word: vec4u,
   @location(1) fog: vec4u,
   @location(2) depth_out: vec4f,
   @location(3) id: vec4u,
   @location(4) stencil: vec4u,
+  @location(5) oid: vec4u,
+  @location(6) cover: vec4u,
+  @location(7) trans: vec4u,
 };
 
 // the shadow mask's output: just the mask, one pixel set where it lies behind something
@@ -1375,6 +1489,9 @@ fn fs(in: VOut) -> FOut {
   o.depth_out = vec4f(depth, 0.0, 0.0, 0.0);
   o.id = vec4u(t.pid, 0u, 0u, 0u);
   o.stencil = vec4u(0u, 0u, 0u, 0u);
+  o.oid = vec4u(t.pid, 0u, 0u, 0u);
+  o.cover = vec4u(0u, 0u, 0u, 0u);
+  o.trans = vec4u(0u, 0u, 0u, 0u);
   o.depth = depth;
   return o;
 }
@@ -1393,6 +1510,9 @@ fn fs_trans(in: VOut) -> FTrans {
   let old_id = textureLoad(id_cur, pix, 0u).x;
   let stencil = textureLoad(stencil_cur, pix, 0u).x;
   let old_depth = textureLoad(depth_cur, pix, 0u).x;
+  let old_oid = textureLoad(oid_cur, pix, 0u).x;
+  let old_cover = textureLoad(cover_cur, pix, 0u).x;
+  let old_trans = textureLoad(trans_cur, pix, 0u).x;
   let old_alpha = (old >> 18u) & 31u;
   // the depth test (the software engine's tolerance for the equal test)
   let tol = 0x200.0 / 16777215.0;
@@ -1416,6 +1536,9 @@ fn fs_trans(in: VOut) -> FTrans {
     o.depth_out = vec4f(depth, 0.0, 0.0, 0.0);
     o.id = vec4u(t.pid, 0u, 0u, 0u);
     o.stencil = vec4u(0u, 0u, 0u, 0u);
+    o.oid = vec4u(t.pid, 0u, 0u, 0u);
+    o.cover = vec4u(0u, 0u, 0u, 0u);
+    o.trans = vec4u(0u, 0u, 0u, 0u);
     return o;
   }
   // a translucent polygon does not draw over its own ID
@@ -1438,6 +1561,11 @@ fn fs_trans(in: VOut) -> FTrans {
   o.depth_out = vec4f(select(old_depth, depth, t.write_trans != 0u), 0.0, 0.0, 0.0);
   o.id = vec4u(t.pid, 0u, 0u, 0u);
   o.stencil = vec4u(0u, 0u, 0u, 0u);
+  // a translucent polygon leaves the last opaque ID; it hides the picture by its alpha over what
+  // is already hidden, and marks the depth as translucent when it writes it (bit 11)
+  o.oid = vec4u(old_oid, 0u, 0u, 0u);
+  o.cover = vec4u(select(old_cover, max(old_cover, oa), old_alpha > 0u), 0u, 0u, 0u);
+  o.trans = vec4u(old_trans | t.write_trans, 0u, 0u, 0u);
   return o;
 }
 
@@ -1531,6 +1659,9 @@ fn fs_rear(in: VFull) -> FOut {
   o.depth_out = vec4f(d, 0.0, 0.0, 0.0);
   o.id = vec4u(g.clear_id, 0u, 0u, 0u);
   o.stencil = vec4u(0u, 0u, 0u, 0u);
+  o.oid = vec4u(g.clear_id, 0u, 0u, 0u);
+  o.cover = vec4u(0u, 0u, 0u, 0u);
+  o.trans = vec4u(0u, 0u, 0u, 0u);
   o.depth = d;
   return o;
 }
@@ -1677,6 +1808,24 @@ mod tests {
             panic!("{msg}");
         }
         Some(want)
+    }
+
+    /// Both engines draw the job and their words, notes and auxiliary maps must all match.
+    fn both_maps(job: &Job, scale: usize) -> Option<()> {
+        let (want, want_aux, wnotes) = super::super::render3d::render_maps(job, scale);
+        let (got, oid, cover, trans, notes) = match render_maps(job, scale) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("GPU test skipped: {e}");
+                return None;
+            }
+        };
+        assert_eq!(notes, wnotes, "notes differ");
+        assert_eq!(got, want, "words differ");
+        assert_eq!(oid, want_aux.oid, "oid map differs");
+        assert_eq!(cover, want_aux.cover, "cover map differs");
+        assert_eq!(trans, want_aux.trans, "trans map differs");
+        Some(())
     }
 
     #[test]
@@ -2179,5 +2328,36 @@ mod tests {
         ];
         j.polys = vec![GxPoly { first: 0, n: 4, attr: 15 << 16 | 0x800 | 0x8000, tex: 0, pal: 0, translucent: true, sortkey: 0 }];
         both(&j, 1);
+    }
+
+    #[test]
+    fn the_auxiliary_maps_follow_the_opaque_and_translucent_polygons() {
+        // an opaque square (id 5), a translucent square (id 7, alpha 15) over its right half, and a
+        // translucent square (id 9, alpha 20, depth write) over part of both: `oid` stays the opaque
+        // polygon's 5, `cover` takes the translucents' alphas, `trans` turns on where the depth is
+        // written
+        let mut j = empty_job();
+        j.disp3dcnt |= 8;
+        j.verts = vec![
+            vert(10.0, 10.0, 0, 0x1000, 31.0, 0.0, 0.0),
+            vert(150.0, 10.0, 0, 0x1000, 31.0, 0.0, 0.0),
+            vert(150.0, 150.0, 0, 0x1000, 31.0, 0.0, 0.0),
+            vert(10.0, 150.0, 0, 0x1000, 31.0, 0.0, 0.0),
+            vert(80.0, 20.0, 0, 0x1000, 0.0, 0.0, 31.0),
+            vert(170.0, 20.0, 0, 0x1000, 0.0, 0.0, 31.0),
+            vert(170.0, 170.0, 0, 0x1000, 0.0, 0.0, 31.0),
+            vert(80.0, 170.0, 0, 0x1000, 0.0, 0.0, 31.0),
+            vert(90.0, 40.0, 0, 0x1000, 0.0, 31.0, 0.0),
+            vert(180.0, 40.0, 0, 0x1000, 0.0, 31.0, 0.0),
+            vert(180.0, 180.0, 0, 0x1000, 0.0, 31.0, 0.0),
+            vert(90.0, 180.0, 0, 0x1000, 0.0, 31.0, 0.0),
+        ];
+        j.polys = vec![
+            GxPoly { first: 0, n: 4, attr: 31 << 16 | 5 << 24, tex: 0, pal: 0, translucent: false, sortkey: 0 },
+            GxPoly { first: 4, n: 4, attr: 15 << 16 | 7 << 24, tex: 0, pal: 0, translucent: true, sortkey: 0 },
+            GxPoly { first: 8, n: 4, attr: 20 << 16 | 9 << 24 | 0x800, tex: 0, pal: 0, translucent: true, sortkey: 0 },
+        ];
+        both_maps(&j, 1);
+        both_maps(&j, 2);
     }
 }

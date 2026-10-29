@@ -295,6 +295,17 @@ struct Target {
     cover: Vec<u8>,
 }
 
+/// The per-pixel data the outline and the shading read, returned alongside the picture for the GPU
+/// backend's parity (этап 7.0 of `docs/GPU-BACKEND.md`): the ID of the last opaque polygon, how much
+/// the translucent polygons over it hide the picture (0-31), and whether a translucent polygon wrote
+/// the depth.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct Aux {
+    pub oid: Vec<u8>,
+    pub cover: Vec<u8>,
+    pub trans: Vec<u8>,
+}
+
 fn edge(a: (f32, f32), b: (f32, f32), p: (f32, f32)) -> f32 {
     (b.0 - a.0) * (p.1 - a.1) - (b.1 - a.1) * (p.0 - a.0)
 }
@@ -811,10 +822,17 @@ pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
         k /= 2;
     }
     if k < 2 {
-        return render_at(job, s);
+        let (px, _, notes) = render_at(job, s);
+        return (px, notes);
     }
-    let (big, notes) = render_at(job, s * k);
+    let (big, _, notes) = render_at(job, s * k);
     (resolve(&big, job.width * s, 192 * s, k), notes & !(1 << 1))
+}
+
+/// Draws the frame and also returns the auxiliary maps (`Aux`) the outline and the shading read,
+/// single-scale (the parity harness's job has no MSAA). Этап 7.0 of `docs/GPU-BACKEND.md`.
+pub(super) fn render_maps(job: &Job, scale: usize) -> (Vec<u32>, Aux, u32) {
+    render_at(job, scale)
 }
 
 /// Averages the picture's k x k samples per pixel: colour weighted by alpha (a sample with no 3D
@@ -865,7 +883,7 @@ fn resolve(big: &[u32], w: usize, h: usize, k: usize) -> Vec<u32> {
     out
 }
 
-fn render_at(job: &Job, s: usize) -> (Vec<u32>, u32) {
+fn render_at(job: &Job, s: usize) -> (Vec<u32>, Aux, u32) {
     let mut notes = 0u32;
     let (w, h) = (job.width * s, 192 * s);
     let n = w * h;
@@ -903,6 +921,13 @@ fn render_at(job: &Job, s: usize) -> (Vec<u32>, u32) {
     if job.width > 256 && std::env::var_os("SUNPETAL_NO_EXTEND").is_none() {
         extend_sides(&mut t, job, w, h, (job.width - 256) / 2 * s);
     }
+    // the auxiliary maps are final here: the edge marking, the outline, the shading and the fog
+    // below leave them alone (этап 7.0 of the GPU backend compares the GPU's copies with these)
+    let aux = Aux {
+        oid: t.oid.clone(),
+        cover: t.cover.clone(),
+        trans: t.trans.iter().map(|&b| b as u8).collect(),
+    };
     if job.disp3dcnt & 0x20 != 0 {
         // edge marking: a pixel with a nearer-or-equal... no: a pixel beside a farther pixel of another
         // polygon ID (the clear plane's included) takes its ID's edge colour
@@ -934,7 +959,7 @@ fn render_at(job: &Job, s: usize) -> (Vec<u32>, u32) {
     }
     let extra = |i: usize| (lines.get(i).map_or(0, |&l| l as u32) << 24) | (shades.get(i).map_or(0, |&l| l as u32) << 28);
     let out = (0..n).map(|i| if t.alpha[i] == 0 { 0 } else { t.color[i] | (t.alpha[i] as u32) << 18 | extra(i) }).collect();
-    (out, notes)
+    (out, aux, notes)
 }
 
 #[cfg(test)]
