@@ -41,6 +41,12 @@ struct Ctx {
     bgl_outline: wgpu::BindGroupLayout,
     shade_pipeline: wgpu::RenderPipeline,
     bgl_shade: wgpu::BindGroupLayout,
+    rows_pipeline: wgpu::RenderPipeline,
+    bgl_rows: wgpu::BindGroupLayout,
+    skyrow_pipeline: wgpu::RenderPipeline,
+    bgl_skyrow: wgpu::BindGroupLayout,
+    extend_pipeline: wgpu::RenderPipeline,
+    bgl_extend: wgpu::BindGroupLayout,
     blend_pipeline: wgpu::RenderPipeline,
     bgl_blend: wgpu::BindGroupLayout,
     mask_pipeline: wgpu::RenderPipeline,
@@ -140,6 +146,32 @@ fn make_ctx() -> Result<Ctx, String> {
             tex(6, wgpu::TextureSampleType::Float { filterable: false }),
             tex(12, wgpu::TextureSampleType::Uint),
             tex(13, wgpu::TextureSampleType::Uint),
+        ],
+    });
+    // the widened view's row sources (этап 7.4): uniforms and the finished depth
+    let bgl_rows = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("render3d_gpu rows"),
+        entries: &[uniform(0), tex(6, wgpu::TextureSampleType::Float { filterable: false })],
+    });
+    // the nearest sky row (этап 7.4): uniforms and the row sources
+    let bgl_skyrow = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("render3d_gpu sky row"),
+        entries: &[uniform(0), tex(16, wgpu::TextureSampleType::Uint)],
+    });
+    // the widened view's fill (этап 7.4): uniforms and every field of the accumulated picture
+    // (the fog flag through a copy — it is not ping-ponged), plus the row sources
+    let bgl_extend = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("render3d_gpu wide"),
+        entries: &[
+            uniform(0),
+            tex(4, wgpu::TextureSampleType::Uint),
+            tex(5, wgpu::TextureSampleType::Uint),
+            tex(6, wgpu::TextureSampleType::Float { filterable: false }),
+            tex(8, wgpu::TextureSampleType::Uint),
+            tex(11, wgpu::TextureSampleType::Uint),
+            tex(12, wgpu::TextureSampleType::Uint),
+            tex(13, wgpu::TextureSampleType::Uint),
+            tex(16, wgpu::TextureSampleType::Uint),
         ],
     });
     // the translucent pass: uniforms, the triangles, the atlas and the accumulated picture
@@ -328,6 +360,97 @@ fn make_ctx() -> Result<Ctx, String> {
         multiview_mask: None,
         cache: None,
     });
+    // the widened view (этап 7.4), three passes: the source column per row and side (a 2-texel-wide
+    // picture), the nearest sky row, then the fill over the whole picture
+    let layout_rows = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("render3d_gpu rows"),
+        bind_group_layouts: &[Some(&bgl_rows)],
+        immediate_size: 0,
+    });
+    let rows_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("render3d_gpu rows"),
+        layout: Some(&layout_rows),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_rows"),
+            compilation_options: Default::default(),
+            buffers: &[Some(vbuf.clone())],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_rows"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::TextureFormat::Rgba32Uint.into())],
+        }),
+        primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    });
+    let layout_skyrow = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("render3d_gpu sky row"),
+        bind_group_layouts: &[Some(&bgl_skyrow)],
+        immediate_size: 0,
+    });
+    let skyrow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("render3d_gpu sky row"),
+        layout: Some(&layout_skyrow),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_rows"),
+            compilation_options: Default::default(),
+            buffers: &[Some(vbuf.clone())],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_skyrow"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::TextureFormat::Rgba32Uint.into())],
+        }),
+        primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    });
+    // the fill's targets: everything the passes after read, except the shadow mask (the engine
+    // leaves it alone)
+    let extend_targets: [Option<wgpu::ColorTargetState>; 7] = [
+        Some(wgpu::TextureFormat::R32Uint.into()),  // 0 word
+        Some(wgpu::TextureFormat::R32Uint.into()),  // 1 fog
+        Some(wgpu::TextureFormat::R32Float.into()), // 2 depth
+        Some(wgpu::TextureFormat::R32Uint.into()),  // 3 id
+        Some(wgpu::TextureFormat::R32Uint.into()),  // 4 oid
+        Some(wgpu::TextureFormat::R32Uint.into()),  // 5 cover
+        Some(wgpu::TextureFormat::R32Uint.into()),  // 6 trans
+    ];
+    let layout_extend = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("render3d_gpu wide"),
+        bind_group_layouts: &[Some(&bgl_extend)],
+        immediate_size: 0,
+    });
+    let extend_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("render3d_gpu wide"),
+        layout: Some(&layout_extend),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_full"),
+            compilation_options: Default::default(),
+            buffers: &[Some(vbuf.clone())],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_extend"),
+            compilation_options: Default::default(),
+            targets: &extend_targets,
+        }),
+        primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    });
     let layout_blend = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("render3d_gpu blend"),
         bind_group_layouts: &[Some(&bgl_blend)],
@@ -380,7 +503,7 @@ fn make_ctx() -> Result<Ctx, String> {
         multiview_mask: None,
         cache: None,
     });
-    Ok(Ctx { device, queue, pipeline, bgl, rear_pipeline, bgl_rear, fog_pipeline, bgl_fog, outline_pipeline, bgl_outline, shade_pipeline, bgl_shade, blend_pipeline, bgl_blend, mask_pipeline, bgl_mask })
+    Ok(Ctx { device, queue, pipeline, bgl, rear_pipeline, bgl_rear, fog_pipeline, bgl_fog, outline_pipeline, bgl_outline, shade_pipeline, bgl_shade, rows_pipeline, bgl_rows, skyrow_pipeline, bgl_skyrow, extend_pipeline, bgl_extend, blend_pipeline, bgl_blend, mask_pipeline, bgl_mask })
 }
 
 /// Where a texture's picture sits in the frame's atlas, and how its coordinates map onto it.
@@ -494,6 +617,14 @@ pub(super) fn stage7_job(job: &Job) -> Job {
     j.extras.shadow = 0.5;
     j.extras.shadow_radius = 2.0;
     j.disp3dcnt |= 0x20; // the edge marking (этап 7.3), masked off in `stage4_job`
+    j
+}
+
+/// The job for stage 7.4: `stage7_job` with the real width kept — the software engine's
+/// `extend_sides` fills the columns past the DS's 4:3 on both engines.
+pub(super) fn stage7w_job(job: &Job) -> Job {
+    let mut j = stage7_job(job);
+    j.width = job.width;
     j
 }
 
@@ -753,10 +884,11 @@ fn render_all(job: &Job, scale: usize) -> Result<Rendered, String> {
     let built = build(job, s, &regions);
     let rear = rear_data(job);
     // the uniforms: sizes, the clear word, the modes, the scale, the rear plane's origin, the fog,
-    // the clear ID, the blend flag, and the toon and fog tables
+    // the clear ID, the blend flag, the widened view's settings, and the toon and fog tables
     let fog_step = (0x400u32 >> ((job.disp3dcnt >> 8) & 15)).max(1);
     let rays = super::render3d::shade_rays();
-    let mut uni = Vec::with_capacity(100 * 4);
+    let clear_depth = render3d::clear_depth(job.clear_depth);
+    let mut uni = Vec::with_capacity(108 * 4);
     for u in [
         w as u32,
         h as u32,
@@ -791,10 +923,14 @@ fn render_all(job: &Job, scale: usize) -> Result<Rendered, String> {
         job.edge[2] as u32 | (job.edge[3] as u32) << 16,
         job.edge[4] as u32 | (job.edge[5] as u32) << 16,
         job.edge[6] as u32 | (job.edge[7] as u32) << 16,
+        (job.width > 256 && std::env::var_os("SUNPETAL_NO_EXTEND").is_none()) as u32,
+        ((job.width.saturating_sub(256)) / 2 * s) as u32,
+        (256 * s) as u32,
+        clear_depth.to_bits(),
     ] {
         uni.extend_from_slice(&u.to_le_bytes());
     }
-    // 33 scalars = 132 bytes: pad to the vec4 arrays' alignment (144)
+    // 37 scalars = 148 bytes: pad to the toon table's alignment (160)
     uni.extend_from_slice(&[0u8; 12]);
     for t in job.toon {
         uni.extend_from_slice(&(t as u32).to_le_bytes());
@@ -834,10 +970,9 @@ fn render_all(job: &Job, scale: usize) -> Result<Rendered, String> {
     let oid = pair(wgpu::TextureFormat::R32Uint);
     let cover = pair(wgpu::TextureFormat::R32Uint);
     let trans = pair(wgpu::TextureFormat::R32Uint);
-    let fog = attach(device, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
+    let fog = attach(device, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC);
     let depth_stencil = attach(device, w, h, wgpu::TextureFormat::Depth32Float, wgpu::TextureUsages::RENDER_ATTACHMENT);
     let fin = attach(device, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC);
-    let clear_depth = render3d::clear_depth(job.clear_depth);
     let mut cur = 0usize;
     let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     let rear_bind = rear.as_ref().map(|data| {
@@ -1098,6 +1233,138 @@ fn render_all(job: &Job, scale: usize) -> Result<Rendered, String> {
             rp.set_bind_group(0, &bind, &[]);
             rp.set_vertex_buffer(0, vb.slice(..));
             rp.draw(0..nvert, 0..1);
+        }
+        cur = next;
+    }
+    // the widened view (этап 7.4): the software engine's `extend_sides` — the side columns no
+    // polygon touched run on with the row's first sky column (else the nearest row's sky, else the
+    // row's first far column). Three passes: the source per row and side, the nearest sky rows,
+    // and the fill over the whole picture (the untouched pixels carry over).
+    if job.width > 256 && std::env::var_os("SUNPETAL_NO_EXTEND").is_none() {
+        let src0 = attach(device, 2, h, wgpu::TextureFormat::Rgba32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
+        let src1 = attach(device, 2, h, wgpu::TextureFormat::Rgba32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
+        // pass 1: per row and side the first sky column in from the inner edge, else the first far
+        {
+            let dv = depth[cur].create_view(&Default::default());
+            let s0v = src0.create_view(&Default::default());
+            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("3d wide rows"),
+                layout: &c.bgl_rows,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&dv) },
+                ],
+            });
+            let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("3d wide rows"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &s0v,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            rp.set_pipeline(&c.rows_pipeline);
+            rp.set_bind_group(0, &bind, &[]);
+            rp.set_vertex_buffer(0, quad.slice(..));
+            rp.set_viewport(0.0, 0.0, 2.0, h as f32, 0.0, 1.0);
+            rp.draw(0..3, 0..1);
+        }
+        // pass 2: per row and side the nearest row with a sky column, above first
+        {
+            let s0v = src0.create_view(&Default::default());
+            let s1v = src1.create_view(&Default::default());
+            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("3d wide sky rows"),
+                layout: &c.bgl_skyrow,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 16, resource: wgpu::BindingResource::TextureView(&s0v) },
+                ],
+            });
+            let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("3d wide sky rows"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &s1v,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            rp.set_pipeline(&c.skyrow_pipeline);
+            rp.set_bind_group(0, &bind, &[]);
+            rp.set_vertex_buffer(0, quad.slice(..));
+            rp.set_viewport(0.0, 0.0, 2.0, h as f32, 0.0, 1.0);
+            rp.draw(0..3, 0..1);
+        }
+        // pass 3: the fill into the other ping-pong buffer (the fog through a copy, it has no pair)
+        let next = 1 - cur;
+        let fog_src = attach(device, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING);
+        enc.copy_texture_to_texture(
+            wgpu::TexelCopyTextureInfo { texture: &fog, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            wgpu::TexelCopyTextureInfo { texture: &fog_src, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            wgpu::Extent3d { width: w as u32, height: h as u32, depth_or_array_layers: 1 },
+        );
+        {
+            let s1v = src1.create_view(&Default::default());
+            let wv = word[next].create_view(&Default::default());
+            let fv = fog.create_view(&Default::default());
+            let dv = depth[next].create_view(&Default::default());
+            let iv = id[next].create_view(&Default::default());
+            let ov = oid[next].create_view(&Default::default());
+            let cov = cover[next].create_view(&Default::default());
+            let trv = trans[next].create_view(&Default::default());
+            let wc = word[cur].create_view(&Default::default());
+            let fsc = fog_src.create_view(&Default::default());
+            let dc = depth[cur].create_view(&Default::default());
+            let ic = id[cur].create_view(&Default::default());
+            let oc = oid[cur].create_view(&Default::default());
+            let coc = cover[cur].create_view(&Default::default());
+            let trc = trans[cur].create_view(&Default::default());
+            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("3d wide"),
+                layout: &c.bgl_extend,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&wc) },
+                    wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&fsc) },
+                    wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&dc) },
+                    wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(&ic) },
+                    wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&oc) },
+                    wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(&coc) },
+                    wgpu::BindGroupEntry { binding: 13, resource: wgpu::BindingResource::TextureView(&trc) },
+                    wgpu::BindGroupEntry { binding: 16, resource: wgpu::BindingResource::TextureView(&s1v) },
+                ],
+            });
+            let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("3d wide"),
+                color_attachments: &[
+                    Some(wgpu::RenderPassColorAttachment { view: &wv, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store } }),
+                    Some(wgpu::RenderPassColorAttachment { view: &fv, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store } }),
+                    Some(wgpu::RenderPassColorAttachment { view: &dv, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store } }),
+                    Some(wgpu::RenderPassColorAttachment { view: &iv, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store } }),
+                    Some(wgpu::RenderPassColorAttachment { view: &ov, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store } }),
+                    Some(wgpu::RenderPassColorAttachment { view: &cov, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store } }),
+                    Some(wgpu::RenderPassColorAttachment { view: &trv, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store } }),
+                ],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            rp.set_pipeline(&c.extend_pipeline);
+            rp.set_bind_group(0, &bind, &[]);
+            rp.set_vertex_buffer(0, quad.slice(..));
+            rp.set_viewport(0.0, 0.0, w as f32, h as f32, 0.0, 1.0);
+            rp.draw(0..3, 0..1);
         }
         cur = next;
     }
@@ -1388,6 +1655,12 @@ struct Globals {
   edge1: u32,
   edge2: u32,
   edge3: u32,
+  // the widened view (этап 7.4): on (the width is past the DS's 4:3 and SUNPETAL_NO_EXTEND is
+  // absent), the side's extent in pixels, the central columns, and the clear depth
+  extend_on: u32,
+  e: u32,
+  inner: u32,
+  cd: f32,
   // the toon table, four 15-bit colours per vec4 (uniform arrays need a stride of 16)
   toon: array<vec4u, 8>,
   // the fog table, four u8 densities per vec4
@@ -1416,6 +1689,10 @@ struct Globals {
 @group(0) @binding(14) var outline_tex: texture_2d<u32>;
 // the shading's shade level (этап 7.2), the fog pass packs it into the word's bits 28-31
 @group(0) @binding(15) var shade_tex: texture_2d<u32>;
+// the widened view's row sources (этап 7.4), two texels a row (left, right): r/g the row's sky and
+// far columns (bit 15 set when found), b the nearest row with a sky column (bit 15 when found,
+// bits 0-11 the row), a that row's sky column
+@group(0) @binding(16) var srcinfo_tex: texture_2d<u32>;
 
 // One fan triangle: the exact vertex positions (the software engine's), its area, the ownership
 // of its edges (bits 0-2), the mode, the interpolation data of its three vertices, and its
@@ -2061,6 +2338,119 @@ fn fs_shade(in: VFull) -> FShade {
   return o;
 }
 
+// the widened view's thresholds (этап 7.4), the software engine's: a row's source column is the
+// first sky (depth >= SKY) in from the inner edge, else the first far (>= FAR)
+const FAR: f32 = 0.999;
+const SKY: f32 = 0.99996;
+
+// the row passes' vertex shader: the quad's x goes 0..2 (one texel per side), the y 0..h
+@vertex
+fn vs_rows(in: VIn) -> VFull {
+  var o: VFull;
+  o.clip = vec4f(in.pos.x - 1.0, 1.0 - in.pos.y / f32(g.h) * 2.0, 0.0, 1.0);
+  return o;
+}
+
+// the source column per row and side (этап 7.4, pass 1 of 3), two texels a row
+@fragment
+fn fs_rows(in: VFull) -> @location(0) vec4u {
+  let side = u32(floor(in.clip.x));
+  let y = u32(floor(in.clip.y));
+  var sky_found = 0u;
+  var sky_col = 0u;
+  for (var k = 0u; k < g.inner; k++) {
+    let x = select(g.e + k, g.w - g.e - 1u - k, side == 1u);
+    if (textureLoad(depth_tex, vec2u(x, y), 0u).x >= SKY) {
+      sky_found = 1u;
+      sky_col = x;
+      break;
+    }
+  }
+  var far_found = 0u;
+  var far_col = 0u;
+  if (sky_found == 0u) {
+    for (var k = 0u; k < g.inner; k++) {
+      let x = select(g.e + k, g.w - g.e - 1u - k, side == 1u);
+      if (textureLoad(depth_tex, vec2u(x, y), 0u).x >= FAR) {
+        far_found = 1u;
+        far_col = x;
+        break;
+      }
+    }
+  }
+  return vec4u(sky_col | sky_found << 15u, far_col | far_found << 15u, 0u, 0u);
+}
+
+// the nearest row with a sky column (этап 7.4, pass 2 of 3): the row itself, then up and down
+// alternately, above first — a row without its own sky fills with that row's sky column
+@fragment
+fn fs_skyrow(in: VFull) -> @location(0) vec4u {
+  let side = u32(floor(in.clip.x));
+  let y = u32(floor(in.clip.y));
+  var r = 0u;
+  var found = 0u;
+  for (var d = 0u; d < g.h; d++) {
+    if (y >= d) {
+      let q = y - d;
+      if (((textureLoad(srcinfo_tex, vec2u(side, q), 0u).r >> 15u) & 1u) != 0u) {
+        r = q;
+        found = 1u;
+        break;
+      }
+    }
+    if (y + d < g.h) {
+      let q = y + d;
+      if (((textureLoad(srcinfo_tex, vec2u(side, q), 0u).r >> 15u) & 1u) != 0u) {
+        r = q;
+        found = 1u;
+        break;
+      }
+    }
+  }
+  let own = textureLoad(srcinfo_tex, vec2u(side, y), 0u);
+  let sr_col = select(0u, textureLoad(srcinfo_tex, vec2u(side, r), 0u).r & 0x7FFFu, found != 0u);
+  return vec4u(own.r, own.g, r | found << 15u, sr_col);
+}
+
+// the widened view's fill (этап 7.4, pass 3 of 3): a clear side pixel takes the row's source —
+// its own sky column, else the nearest sky row's, else its own far column — the whole pixel,
+// every field the passes after read; the rest of the picture carries over unchanged
+struct FExtend {
+  @location(0) word: vec4u,
+  @location(1) fog: vec4u,
+  @location(2) depth_out: vec4f,
+  @location(3) id: vec4u,
+  @location(4) oid: vec4u,
+  @location(5) cover: vec4u,
+  @location(6) trans: vec4u,
+};
+
+@fragment
+fn fs_extend(in: VFull) -> FExtend {
+  let p = vec2u(u32(floor(in.clip.x)), u32(floor(in.clip.y)));
+  var src = p;
+  if (g.extend_on != 0u && (p.x < g.e || p.x >= g.w - g.e) && textureLoad(depth_tex, p, 0u).x >= g.cd) {
+    let side = select(0u, 1u, p.x >= g.w - g.e);
+    let info = textureLoad(srcinfo_tex, vec2u(side, p.y), 0u);
+    if (((info.r >> 15u) & 1u) != 0u) {
+      src = vec2u(info.r & 0x7FFFu, p.y);
+    } else if (((info.b >> 15u) & 1u) != 0u) {
+      src = vec2u(info.a & 0x7FFFu, info.b & 0xFFFu);
+    } else if (((info.g >> 15u) & 1u) != 0u) {
+      src = vec2u(info.g & 0x7FFFu, p.y);
+    }
+  }
+  var o: FExtend;
+  o.word = vec4u(textureLoad(color, src, 0u).x, 0u, 0u, 0u);
+  o.fog = vec4u(textureLoad(fogtex, src, 0u).x, 0u, 0u, 0u);
+  o.depth_out = vec4f(textureLoad(depth_tex, src, 0u).x, 0.0, 0.0, 0.0);
+  o.id = vec4u(textureLoad(id_cur, src, 0u).x, 0u, 0u, 0u);
+  o.oid = vec4u(textureLoad(oid_cur, src, 0u).x, 0u, 0u, 0u);
+  o.cover = vec4u(textureLoad(cover_cur, src, 0u).x, 0u, 0u, 0u);
+  o.trans = vec4u(textureLoad(trans_cur, src, 0u).x, 0u, 0u, 0u);
+  return o;
+}
+
 // a neighbour at `q` is of another polygon ID and not nearer: the pixel takes its edge colour
 fn edge_neighbour(q: vec2u, id: u32, d: f32) -> bool {
   return textureLoad(id_cur, q, 0u).x != id && textureLoad(depth_tex, q, 0u).x >= d;
@@ -2236,8 +2626,8 @@ mod tests {
                 msg.push_str(&format!(
                     "\n  pixel {} (x {}, y {}): {:#010x} vs {:#010x}",
                     i,
-                    i % (256 * scale),
-                    i / (256 * scale),
+                    i % (job.width * scale),
+                    i / (job.width * scale),
                     a,
                     b
                 ));
@@ -2975,6 +3365,70 @@ mod tests {
         // the edge colour (green: 63 in bits 6-11) appears along the border, the red stays inside
         assert!(want.iter().any(|w| *w & 0x3FFFF == 63 << 6), "the reference has no edge-marked pixels");
         assert!(want.iter().any(|w| *w & 0x3FFFF == 63), "the reference lost the polygon's own colour");
+        both_maps(&j, 1);
+        both_maps(&j, 2);
+    }
+
+    #[test]
+    fn the_widened_view_fills_the_sides_from_the_far_plane() {
+        // a wide frame (342 wide, the 4:3 is the middle 256): a far plane (depth 0.9995, between
+        // FAR and SKY) covers the central columns and every row; the 43 columns at each side are
+        // clear. The fill runs the far plane on: each clear side pixel takes the row's first far
+        // column (43 on the left, 298 on the right).
+        let mut j = empty_job();
+        j.width = 342;
+        j.verts = vec![
+            vert(43.0, 0.0, 0x7FF0, 0x8000, 31.0, 0.0, 0.0),
+            vert(299.0, 0.0, 0x7FF0, 0x8000, 31.0, 0.0, 0.0),
+            vert(299.0, 192.0, 0x7FF0, 0x8000, 31.0, 0.0, 0.0),
+            vert(43.0, 192.0, 0x7FF0, 0x8000, 31.0, 0.0, 0.0),
+        ];
+        j.polys = vec![GxPoly { first: 0, n: 4, attr: 31 << 16 | 3 << 24, tex: 0, pal: 0, translucent: false, sortkey: 0 }];
+        let (want, _, _) = super::super::render3d::render_maps(&j, 1);
+        for y in [0, 50, 191] {
+            assert_eq!(want[y * 342 + 10], want[y * 342 + 43], "the left side was not filled from the far column");
+            assert_eq!(want[y * 342 + 341], want[y * 342 + 298], "the right side was not filled from the far column");
+        }
+        // the side columns hold the far plane's red: the fill really happened
+        assert_eq!(want[50 * 342 + 10] & 0x3FFFF, 63);
+        both_maps(&j, 1);
+        both_maps(&j, 2);
+    }
+
+    #[test]
+    fn the_widened_view_fills_the_sides_from_the_nearest_sky_row() {
+        // a wide frame: a sky plane (depth 0.99997, at least SKY) covers the central columns in
+        // rows 0-79, a far ground (0.9995) below. The rows with the sky fill from their own sky
+        // column; the rows below fill from the nearest row above with one (row 79), never from the
+        // near ground.
+        let mut j = empty_job();
+        j.width = 342;
+        j.verts = vec![
+            // the sky (z == w: the engine's depth conversion tops out at ~0.99997, at least SKY)
+            vert(43.0, 0.0, 0x7FFF, 0x7FFF, 0.0, 31.0, 0.0),
+            vert(299.0, 0.0, 0x7FFF, 0x7FFF, 0.0, 31.0, 0.0),
+            vert(299.0, 80.0, 0x7FFF, 0x7FFF, 0.0, 31.0, 0.0),
+            vert(43.0, 80.0, 0x7FFF, 0x7FFF, 0.0, 31.0, 0.0),
+            vert(43.0, 80.0, 0x7FF0, 0x8000, 31.0, 0.0, 0.0),
+            vert(299.0, 80.0, 0x7FF0, 0x8000, 31.0, 0.0, 0.0),
+            vert(299.0, 192.0, 0x7FF0, 0x8000, 31.0, 0.0, 0.0),
+            vert(43.0, 192.0, 0x7FF0, 0x8000, 31.0, 0.0, 0.0),
+        ];
+        j.polys = vec![
+            GxPoly { first: 0, n: 4, attr: 31 << 16 | 5 << 24, tex: 0, pal: 0, translucent: false, sortkey: 0 },
+            GxPoly { first: 4, n: 4, attr: 31 << 16 | 7 << 24, tex: 0, pal: 0, translucent: false, sortkey: 0 },
+        ];
+        let (want, _, _) = super::super::render3d::render_maps(&j, 1);
+        for y in [0, 40, 79] {
+            assert_eq!(want[y * 342 + 10], want[y * 342 + 43], "a row with sky did not fill from its own sky column");
+            assert_eq!(want[y * 342 + 341], want[y * 342 + 298]);
+        }
+        for y in [80, 120, 191] {
+            assert_eq!(want[y * 342 + 10], want[79 * 342 + 43], "a row without sky did not fill from the nearest sky row");
+            assert_eq!(want[y * 342 + 341], want[79 * 342 + 298]);
+        }
+        // the sides under the sky's end hold the sky's green, not the ground's red
+        assert_eq!(want[120 * 342 + 10] & 0x3FFFF, 63 << 6);
         both_maps(&j, 1);
         both_maps(&j, 2);
     }

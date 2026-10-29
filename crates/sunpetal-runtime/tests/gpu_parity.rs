@@ -374,3 +374,66 @@ fn gpu_edge_on_real_frames() {
         println!("no GPU device: the edge test did not run");
     }
 }
+
+/// Этап 7.4 acceptance (`docs/GPU-BACKEND.md`): the widened view (the software engine's
+/// `extend_sides`) matches byte-exact on every dump — on the wide dumps the sides past the 4:3
+/// really have content, so the comparison is not vacuous.
+#[cfg(feature = "gpu")]
+#[test]
+fn gpu_wide_on_real_frames() {
+    use sunpetal_runtime::nds::gpu_wide_check;
+    let Some(dir) = std::env::var_os("SUNPETAL_JOB_DUMPS").map(PathBuf::from) else {
+        println!("SUNPETAL_JOB_DUMPS is not set: no dumps to check");
+        return;
+    };
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .expect("dump dir")
+        .filter_map(|e| {
+            let p = e.unwrap().path();
+            (p.extension()?.to_str()? == "spjob").then_some(p)
+        })
+        .collect();
+    files.sort();
+    assert!(!files.is_empty(), "no .spjob files in {}", dir.display());
+    let mut any = false;
+    for f in files {
+        let gp = match gpu_wide_check(&f) {
+            Err(e) if e.contains("no GPU") => {
+                println!("{}: skipped ({e})", f.display());
+                continue;
+            }
+            Err(e) => panic!("{}: {e}", f.display()),
+            Ok(gp) => gp,
+        };
+        any = true;
+        println!(
+            "{}: words exact {}/{} ({} side pixels with content, e {})",
+            gp.path, gp.exact, gp.pixels, gp.side_pixels, gp.e
+        );
+        if let Some((i, g, s)) = gp.first {
+            println!("  first word mismatch at pixel {i}: gpu {g:08x} soft {s:08x}");
+        }
+        if let Some(dir) = std::env::var_os("SUNPETAL_JOB_DIFFS") {
+            let name = f.file_stem().unwrap().to_string_lossy();
+            let dir = PathBuf::from(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join(format!("{name}.wide.png"));
+            let file = std::fs::File::create(&path).unwrap();
+            let mut enc = png::Encoder::new(std::io::BufWriter::new(file), gp.w as u32, gp.h as u32);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            let mut w = enc.write_header().unwrap();
+            w.write_image_data(&gp.diff).unwrap();
+            println!("  wide diff map: {}", path.display());
+        }
+        assert_eq!(gp.exact, gp.pixels, "{}: the widened view differs", gp.path);
+        if gp.e > 0 {
+            assert!(gp.side_pixels > 0, "{}: the wide frame's sides are empty, the comparison is vacuous", gp.path);
+        }
+    }
+    if any {
+        println!("the widened view matched on all the dumps");
+    } else {
+        println!("no GPU device: the wide test did not run");
+    }
+}

@@ -968,6 +968,72 @@ pub fn gpu_edge_check(path: &std::path::Path) -> Result<EdgeParity, String> {
     Ok(rep)
 }
 
+/// The GPU backend's widened view (этап 7.4 of `docs/GPU-BACKEND.md`) against the software
+/// engine's on a dump: the job keeps its real width (`stage7w_job`), so both engines' `extend_sides`
+/// fills the columns past the DS's 4:3. The acceptance is byte-exact words, like the stage before.
+#[cfg(feature = "gpu")]
+#[derive(Clone, Debug)]
+pub struct WideParity {
+    pub path: String,
+    pub w: usize,
+    pub h: usize,
+    /// The side's extent in pixels: 0 for a 4:3 frame (no widening).
+    pub e: usize,
+    pub pixels: usize,
+    /// Pixels whose whole word matches.
+    pub exact: usize,
+    /// Side pixels whose word is not the clear word in the reference: the game's own geometry past
+    /// the 4:3 and the fill.
+    pub side_pixels: usize,
+    /// The first differing pixel: (index, GPU, software).
+    pub first: Option<(usize, u32, u32)>,
+    /// The difference map, RGBA: red where the words differ.
+    pub diff: Vec<u8>,
+}
+
+#[cfg(feature = "gpu")]
+pub fn gpu_wide_check(path: &std::path::Path) -> Result<WideParity, String> {
+    let d = jobdump::read(path)?;
+    let job = render3d_gpu::stage7w_job(&d.job);
+    let (w, h) = (job.width * d.scale, 192 * d.scale);
+    let (ref_px, ref_notes) = render3d::render(&job, d.scale);
+    let (px, notes) = render3d_gpu::render(&job, d.scale)?;
+    if notes != ref_notes {
+        eprintln!("{}: notes differ (gpu {:#x} soft {:#x})", path.display(), notes, ref_notes);
+    }
+    let (cr, cg, cb) = render3d::rgb555((job.clear_color & 0x7FFF) as u16);
+    let calpha = (job.clear_color >> 16) & 31;
+    let clear_word = if calpha == 0 { 0 } else { cr | cg << 6 | cb << 12 | calpha << 18 };
+    let e = job.width.saturating_sub(256) / 2 * d.scale;
+    let mut rep = WideParity {
+        path: path.display().to_string(),
+        w,
+        h,
+        e,
+        pixels: ref_px.len(),
+        exact: 0,
+        side_pixels: 0,
+        first: None,
+        diff: vec![0; ref_px.len() * 4],
+    };
+    for (i, (a, b)) in px.iter().zip(ref_px.iter()).enumerate() {
+        if a == b {
+            rep.exact += 1;
+        } else {
+            if rep.first.is_none() {
+                rep.first = Some((i, *a, *b));
+            }
+            rep.diff[i * 4] = 255;
+            rep.diff[i * 4 + 3] = 255;
+        }
+        let x = i % w;
+        if (x < e || x >= w - e) && b & 0x3FFFF != clear_word & 0x3FFFF {
+            rep.side_pixels += 1;
+        }
+    }
+    Ok(rep)
+}
+
 impl TexFilter {
     pub fn parse(s: &str) -> TexFilter {
         match s {
