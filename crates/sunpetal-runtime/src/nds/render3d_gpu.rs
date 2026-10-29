@@ -1,20 +1,24 @@
 //! The 3D rendering engine on the GPU (wgpu): a second backend behind the same job stream the
-//! software renderer (`render3d`) draws, this one made for speed at large scales. Этап 2 of
-//! `docs/GPU-BACKEND.md`: opaque polygons with textures — the exact rasterizer rules of the
-//! software engine (fan triangulation, the top-left ownership of edges, perspective-correct
-//! colour and texture coordinates, z/w depth, the less-than depth test) in WGSL, the picture read
+//! software renderer (`render3d`) draws, this one made for speed at large scales. Этап 3 of
+//! `docs/GPU-BACKEND.md`: opaque polygons with textures, fog and the rear plane — the exact
+//! rasterizer rules of the software engine (fan triangulation, the top-left ownership of edges,
+//! perspective-correct colour and texture coordinates, z/w depth, the less-than depth test, the
+//! fog over the finished picture, the rear plane's bitmap as the base) in WGSL, the picture read
 //! back as the same words. The textures a frame uses are decoded on the CPU (by the same code the
 //! texture packs dump with) into a picture atlas (`Rgba8Uint`), and the shader samples it exactly
 //! as the software engine does: nearest, or the alpha-weighted bilinear (a transparent texel's
 //! colour never bleeds into its neighbours), wrapped by the texture's flags, blended by the
-//! polygon's mode (modulate/decal/toon-highlight). The parity harness (`gpu_parity_check`) scores
-//! it against the software renderer on the same filtered job (`stage2_job`).
+//! polygon's mode (modulate/decal/toon-highlight). The fog is a second pass over the finished
+//! picture (the pixel's depth and fog flag ride in two extra attachments); the rear plane is a
+//! full-screen quad over the clear that takes its colour, depth and fog from a 256x256 bitmap.
+//! The parity harness (`gpu_parity_check`) scores it against the software renderer on the same
+//! filtered job (`stage3_job`).
 //!
 //! The rules the software engine implements that the GPU one still does not: translucent polygons
 //! (and the texture formats only they use, A3I5 and A5I3), shadow polygons, wireframe polygons,
-//! fog, edge marking, the rear plane's bitmap, the widened view, the outline and the shading,
-//! MSAA. `stage2_job` takes those out of a job, so `render` need not decide per polygon; on a
-//! full job it would miss pixels, which stage 3+ will fix.
+//! edge marking, the widened view, the outline and the shading, MSAA. `stage3_job` takes those out
+//! of a job, so `render` need not decide per polygon; on a full job it would miss pixels, which
+//! stage 4+ will fix.
 
 use super::render3d::{self, GxVertex, Image, Job, Mem, TexKey};
 use std::collections::HashMap;
@@ -28,6 +32,10 @@ struct Ctx {
     queue: wgpu::Queue,
     pipeline: wgpu::RenderPipeline,
     bgl: wgpu::BindGroupLayout,
+    rear_pipeline: wgpu::RenderPipeline,
+    bgl_rear: wgpu::BindGroupLayout,
+    fog_pipeline: wgpu::RenderPipeline,
+    bgl_fog: wgpu::BindGroupLayout,
 }
 
 static CTX: OnceLock<Option<Ctx>> = OnceLock::new();
@@ -48,19 +56,31 @@ fn make_ctx() -> Result<Ctx, String> {
         label: Some("render3d_gpu"),
         source: wgpu::ShaderSource::Wgsl(SHADER.into()),
     });
+    let uniform = |binding: u32| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    };
+    let tex = |binding: u32, sample: wgpu::TextureSampleType| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Texture {
+            sample_type: sample,
+            view_dimension: wgpu::TextureViewDimension::D2,
+            multisampled: false,
+        },
+        count: None,
+    };
+    // the geometry pass: uniforms, the triangles, the texture atlas
     let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("render3d_gpu"),
         entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
+            uniform(0),
             wgpu::BindGroupLayoutEntry {
                 binding: 1,
                 visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
@@ -71,18 +91,38 @@ fn make_ctx() -> Result<Ctx, String> {
                 },
                 count: None,
             },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Uint,
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
-                },
-                count: None,
-            },
+            tex(2, wgpu::TextureSampleType::Uint),
         ],
     });
+    // the rear plane's bitmap: uniforms and its 256x256 texture
+    let bgl_rear = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("render3d_gpu rear"),
+        entries: &[uniform(0), tex(3, wgpu::TextureSampleType::Uint)],
+    });
+    // the fog pass: uniforms and the finished picture's word, fog flag and depth
+    let bgl_fog = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("render3d_gpu fog"),
+        entries: &[
+            uniform(0),
+            tex(4, wgpu::TextureSampleType::Uint),
+            tex(5, wgpu::TextureSampleType::Uint),
+            tex(6, wgpu::TextureSampleType::Float { filterable: false }),
+        ],
+    });
+    let vbuf = wgpu::VertexBufferLayout {
+        array_stride: 8,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &[wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x2,
+            offset: 0,
+            shader_location: 0,
+        }],
+    };
+    let color_targets: [Option<wgpu::ColorTargetState>; 3] = [
+        Some(wgpu::TextureFormat::R32Uint.into()),
+        Some(wgpu::TextureFormat::R32Uint.into()),
+        Some(wgpu::TextureFormat::R32Float.into()),
+    ];
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("render3d_gpu"),
         bind_group_layouts: &[Some(&bgl)],
@@ -95,21 +135,13 @@ fn make_ctx() -> Result<Ctx, String> {
             module: &shader,
             entry_point: Some("vs"),
             compilation_options: Default::default(),
-            buffers: &[Some(wgpu::VertexBufferLayout {
-                array_stride: 8,
-                step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &[wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x2,
-                    offset: 0,
-                    shader_location: 0,
-                }],
-            })],
+            buffers: &[Some(vbuf.clone())],
         },
         fragment: Some(wgpu::FragmentState {
             module: &shader,
             entry_point: Some("fs"),
             compilation_options: Default::default(),
-            targets: &[Some(wgpu::TextureFormat::R32Uint.into())],
+            targets: &color_targets,
         }),
         primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
         depth_stencil: Some(wgpu::DepthStencilState {
@@ -123,7 +155,65 @@ fn make_ctx() -> Result<Ctx, String> {
         multiview_mask: None,
         cache: None,
     });
-    Ok(Ctx { device, queue, pipeline, bgl })
+    let layout_rear = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("render3d_gpu rear"),
+        bind_group_layouts: &[Some(&bgl_rear)],
+        immediate_size: 0,
+    });
+    let rear_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("render3d_gpu rear"),
+        layout: Some(&layout_rear),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_full"),
+            compilation_options: Default::default(),
+            buffers: &[Some(vbuf.clone())],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_rear"),
+            compilation_options: Default::default(),
+            targets: &color_targets,
+        }),
+        primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: wgpu::TextureFormat::Depth32Float,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::Always),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    });
+    let layout_fog = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("render3d_gpu fog"),
+        bind_group_layouts: &[Some(&bgl_fog)],
+        immediate_size: 0,
+    });
+    let fog_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("render3d_gpu fog"),
+        layout: Some(&layout_fog),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_full"),
+            compilation_options: Default::default(),
+            buffers: &[Some(vbuf)],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_fog"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::TextureFormat::R32Uint.into())],
+        }),
+        primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    });
+    Ok(Ctx { device, queue, pipeline, bgl, rear_pipeline, bgl_rear, fog_pipeline, bgl_fog })
 }
 
 /// Where a texture's picture sits in the frame's atlas, and how its coordinates map onto it.
@@ -198,11 +288,11 @@ fn decoded(job: &Job, tex: u32, pal: u32) -> Arc<Image> {
     img
 }
 
-/// The job the stage-2 GPU renderer draws: the polygons it can (opaque, textured or not, not a
-/// shadow, not wireframe), and the frame-wide bits it does not do yet (edge marking, fog, the rear
-/// plane, the widened view, the extras) turned off. Rendered on the software and the GPU engine,
-/// the job gives the same picture to compare (`gpu_parity_check`).
-pub(super) fn stage2_job(job: &Job) -> Job {
+/// The job the stage-3 GPU renderer draws: the polygons it can (opaque, textured or not, not a
+/// shadow, not wireframe), and the frame-wide bits it does not do yet (edge marking, the widened
+/// view, the extras) turned off. Rendered on the software and the GPU engine, the job gives the
+/// same picture to compare (`gpu_parity_check`).
+pub(super) fn stage3_job(job: &Job) -> Job {
     let polys = job
         .polys
         .iter()
@@ -213,7 +303,7 @@ pub(super) fn stage2_job(job: &Job) -> Job {
         verts: job.verts.clone(),
         polys,
         wbuffer: job.wbuffer,
-        disp3dcnt: job.disp3dcnt & !(0x20 | 0x80 | 0x4000),
+        disp3dcnt: job.disp3dcnt & !(0x20),
         width: 256,
         clear_color: job.clear_color,
         clear_depth: job.clear_depth,
@@ -310,6 +400,8 @@ fn build(job: &Job, s: usize, regions: &HashMap<(u32, u32), TexInfo>) -> (Vec<u8
             push(&mut tris, ti.ow);
             push(&mut tris, ti.oh);
             tris.extend_from_slice(&ti.flags.to_le_bytes());
+            // the polygon's fog bit (POLYGON_ATTR bit 15)
+            tris.extend_from_slice(&((p.attr & 0x8000 != 0) as u32).to_le_bytes());
             // the rasterized triangle: each edge pushed 0.5 px outward (an exact superset of the
             // pixels the software engine keeps; the fragment shader tests the exact edges)
             let (ia, ib, ic) = (
@@ -346,9 +438,13 @@ fn build(job: &Job, s: usize, regions: &HashMap<(u32, u32), TexInfo>) -> (Vec<u8
     (vpos, tris, nvert)
 }
 
-/// Draws a job as stage 2 can and reads the picture back as the same words the software renderer
+/// Draws a job as stage 3 can and reads the picture back as the same words the software renderer
 /// returns, with its `notes` mask (only the AA bit can be set; the rest of the software engine's
-/// notes are about things the job has none of).
+/// notes are about things the job has none of). The frame is drawn in two passes: the geometry
+/// (the clear, then the rear plane's bitmap as a full-screen quad, then the polygons, into the
+/// word, the fog flag and the depth), then the fog over the finished picture (a full-screen quad
+/// that moves a fog-taking pixel towards the fog colour and its alpha by the density at its depth,
+/// and drops the alpha-0 pixels).
 pub(super) fn render(job: &Job, scale: usize) -> Result<(Vec<u32>, u32), String> {
     let c = ctx()?;
     let s = scale.max(1);
@@ -357,10 +453,12 @@ pub(super) fn render(job: &Job, scale: usize) -> Result<(Vec<u32>, u32), String>
     if job.disp3dcnt & 0x10 != 0 {
         notes |= 1 << 1;
     }
-    // the uniforms: sizes, the clear word, the modes, the toon table
+    // the clear word and the fog's colour as one word
     let (cr, cg, cb) = render3d::rgb555((job.clear_color & 0x7FFF) as u16);
     let calpha = (job.clear_color >> 16) & 31;
     let clear_word = if calpha == 0 { 0 } else { cr | cg << 6 | cb << 12 | calpha << 18 };
+    let (fr, fg, fb) = render3d::rgb555((job.fog_color & 0x7FFF) as u16);
+    let fog_color = fr | fg << 6 | fb << 12 | ((job.fog_color >> 16) & 31) << 18;
     // the frame's textures decoded into one atlas, and where each picture sits in it
     let texture_on = job.disp3dcnt & 1 != 0;
     let mut unique: Vec<(u32, u32)> = Vec::new();
@@ -432,11 +530,11 @@ pub(super) fn render(job: &Job, scale: usize) -> Result<(Vec<u32>, u32), String>
         );
     }
     let (vpos, tridata, nvert) = build(job, s, &regions);
-    if nvert == 0 {
-        // no triangles: the clear plane alone
-        return Ok((vec![clear_word; w * h], notes));
-    }
-    let mut uni = Vec::with_capacity(40 * 4);
+    let rear = rear_data(job);
+    // the uniforms: sizes, the clear word, the modes, the scale, the rear plane's origin, the fog
+    // and the toon and fog tables
+    let fog_step = (0x400u32 >> ((job.disp3dcnt >> 8) & 15)).max(1);
+    let mut uni = Vec::with_capacity(80 * 4);
     for u in [
         w as u32,
         h as u32,
@@ -446,76 +544,131 @@ pub(super) fn render(job: &Job, scale: usize) -> Result<(Vec<u32>, u32), String>
         job.alpha_ref as u32,
         (job.disp3dcnt & 2 != 0) as u32,
         matches!(job.extras.filter, super::TexFilter::Bilinear) as u32,
+        s as u32,
+        (job.clrimage_offset & 0xFF) as u32,
+        (job.clrimage_offset >> 8) as u32,
+        (job.disp3dcnt & 0x80 != 0) as u32,
+        (job.disp3dcnt & 0x40 != 0) as u32,
+        fog_color,
+        fog_step,
+        job.fog_offset as u32,
     ] {
         uni.extend_from_slice(&u.to_le_bytes());
     }
     for t in job.toon {
         uni.extend_from_slice(&(t as u32).to_le_bytes());
     }
-    let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("3d verts"),
-        contents: &vpos,
-        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-    });
-    let tb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("3d tris"),
-        contents: &tridata,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-    });
+    for f in job.fog_table {
+        uni.extend_from_slice(&(f as u32).to_le_bytes());
+    }
     let ub = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("3d uniforms"),
         contents: &uni,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
-    let av = atlas.create_view(&Default::default());
-    let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("3d"),
-        layout: &c.bgl,
-        entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: tb.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&av) },
-        ],
+    // a full-screen triangle (big enough to cover the viewport) for the rear plane and the fog
+    let mut qp = Vec::with_capacity(24);
+    for v in [(0.0f32, h as f32), (2.0 * w as f32, h as f32), (0.0f32, -(h as f32))] {
+        qp.extend_from_slice(&v.0.to_le_bytes());
+        qp.extend_from_slice(&v.1.to_le_bytes());
+    }
+    let quad = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("3d fullscreen"),
+        contents: &qp,
+        usage: wgpu::BufferUsages::VERTEX,
     });
-    let color = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("3d words"),
-        size: wgpu::Extent3d { width: w as u32, height: h as u32, depth_or_array_layers: 1 },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::R32Uint,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
-    let depth = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("3d depth"),
-        size: wgpu::Extent3d { width: w as u32, height: h as u32, depth_or_array_layers: 1 },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Depth32Float,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        view_formats: &[],
-    });
+    // the geometry pass's attachments: the word, the fog flag and the depth (all read by the fog
+    // pass), plus the hardware depth buffer the polygons test against
+    let word = attach(device, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
+    let fog = attach(device, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
+    let depth_out = attach(device, w, h, wgpu::TextureFormat::R32Float, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
+    let depth_stencil = attach(device, w, h, wgpu::TextureFormat::Depth32Float, wgpu::TextureUsages::RENDER_ATTACHMENT);
+    let fin = attach(device, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC);
+    let clear_depth = render3d::clear_depth(job.clear_depth);
     let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    let rear_bind = rear.as_ref().map(|data| {
+        let rt = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("3d rear bitmap"),
+            size: wgpu::Extent3d { width: 256, height: 256, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba32Uint,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        c.queue.write_texture(
+            wgpu::TexelCopyTextureInfo { texture: &rt, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            data,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(256 * 4 * 4), rows_per_image: None },
+            wgpu::Extent3d { width: 256, height: 256, depth_or_array_layers: 1 },
+        );
+        let rv = rt.create_view(&Default::default());
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("3d rear"),
+            layout: &c.bgl_rear,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&rv) },
+            ],
+        });
+        bind
+    });
+    let fog_bind = {
+        let wv = word.create_view(&Default::default());
+        let fv = fog.create_view(&Default::default());
+        let dv = depth_out.create_view(&Default::default());
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("3d fog"),
+            layout: &c.bgl_fog,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&wv) },
+                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&fv) },
+                wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&dv) },
+            ],
+        })
+    };
     {
-        let cv = color.create_view(&Default::default());
-        let dv = depth.create_view(&Default::default());
+        let wv = word.create_view(&Default::default());
+        let fv = fog.create_view(&Default::default());
+        let dov = depth_out.create_view(&Default::default());
+        let dsv = depth_stencil.create_view(&Default::default());
         let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("3d"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &cv,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color { r: clear_word as f64, g: 0.0, b: 0.0, a: 0.0 }),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
+            label: Some("3d geometry"),
+            color_attachments: &[
+                Some(wgpu::RenderPassColorAttachment {
+                    view: &wv,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color { r: clear_word as f64, g: 0.0, b: 0.0, a: 0.0 }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                }),
+                Some(wgpu::RenderPassColorAttachment {
+                    view: &fv,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color { r: (job.clear_color & 0x8000 != 0) as u32 as f64, g: 0.0, b: 0.0, a: 0.0 }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                }),
+                Some(wgpu::RenderPassColorAttachment {
+                    view: &dov,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color { r: clear_depth as f64, g: 0.0, b: 0.0, a: 0.0 }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                }),
+            ],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &dv,
+                view: &dsv,
                 depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(render3d::clear_depth(job.clear_depth) as f32),
+                    load: wgpu::LoadOp::Clear(clear_depth as f32),
                     store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
@@ -524,13 +677,63 @@ pub(super) fn render(job: &Job, scale: usize) -> Result<(Vec<u32>, u32), String>
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        rp.set_pipeline(&c.pipeline);
-        rp.set_bind_group(0, &bind, &[]);
-        rp.set_vertex_buffer(0, vb.slice(..));
         rp.set_viewport(0.0, 0.0, w as f32, h as f32, 0.0, 1.0);
+        if let Some(bind) = &rear_bind {
+            rp.set_pipeline(&c.rear_pipeline);
+            rp.set_bind_group(0, bind, &[]);
+            rp.set_vertex_buffer(0, quad.slice(..));
+            rp.draw(0..3, 0..1);
+        }
         if nvert > 0 {
+            let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("3d verts"),
+                contents: &vpos,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            });
+            let tb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("3d tris"),
+                contents: &tridata,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            });
+            let av = atlas.create_view(&Default::default());
+            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("3d"),
+                layout: &c.bgl,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: tb.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&av) },
+                ],
+            });
+            rp.set_pipeline(&c.pipeline);
+            rp.set_bind_group(0, &bind, &[]);
+            rp.set_vertex_buffer(0, vb.slice(..));
             rp.draw(0..nvert, 0..1);
         }
+    }
+    {
+        let fv = fin.create_view(&Default::default());
+        let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("3d fog"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &fv,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        rp.set_pipeline(&c.fog_pipeline);
+        rp.set_bind_group(0, &fog_bind, &[]);
+        rp.set_vertex_buffer(0, quad.slice(..));
+        rp.set_viewport(0.0, 0.0, w as f32, h as f32, 0.0, 1.0);
+        rp.draw(0..3, 0..1);
     }
     // the picture back: copy to a mappable buffer and read the rows
     let row = ((w as u32 * 4).div_ceil(256) * 256) as u64;
@@ -541,7 +744,7 @@ pub(super) fn render(job: &Job, scale: usize) -> Result<(Vec<u32>, u32), String>
         mapped_at_creation: false,
     });
     enc.copy_texture_to_buffer(
-        wgpu::TexelCopyTextureInfo { texture: &color, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+        wgpu::TexelCopyTextureInfo { texture: &fin, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
         wgpu::TexelCopyBufferInfo {
             buffer: &buf,
             layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row as u32), rows_per_image: Some(h as u32) },
@@ -568,6 +771,47 @@ pub(super) fn render(job: &Job, scale: usize) -> Result<(Vec<u32>, u32), String>
     Ok((words, notes))
 }
 
+/// A 2D texture of the picture's size for one of the passes' attachments.
+fn attach(device: &wgpu::Device, w: usize, h: usize, format: wgpu::TextureFormat, usage: wgpu::TextureUsages) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("3d attachment"),
+        size: wgpu::Extent3d { width: w as u32, height: h as u32, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage,
+        view_formats: &[],
+    })
+}
+
+/// The rear plane's bitmap as a 256x256 `Rgba32Uint` texture: each texel is the colour word
+/// (RGB666 + alpha, from texture slot 2), the fog flag and the depth (slot 3's 15 bits as the
+/// depth buffer holds them, bitcast to u32). `None` when the rear plane (DISP3DCNT bit 14) is off.
+fn rear_data(job: &Job) -> Option<Vec<u8>> {
+    if job.disp3dcnt & 0x4000 == 0 {
+        return None;
+    }
+    let rd = |base: usize, x: usize, y: usize| -> u16 {
+        let o = base + (y * 256 + x) * 2;
+        u16::from_le_bytes([job.tex.get(o).copied().unwrap_or(0), job.tex.get(o + 1).copied().unwrap_or(0)])
+    };
+    let mut data = Vec::with_capacity(256 * 256 * 16);
+    for y in 0..256 {
+        for x in 0..256 {
+            let c = rd(0x40000, x, y);
+            let d = rd(0x60000, x, y);
+            let (r, g, b) = render3d::rgb555(c & 0x7FFF);
+            let word = r | g << 6 | b << 12 | if c & 0x8000 != 0 { 31 } else { 0 } << 18;
+            data.extend_from_slice(&word.to_le_bytes());
+            data.extend_from_slice(&((d & 0x8000 != 0) as u32).to_le_bytes());
+            data.extend_from_slice(&render3d::clear_depth((d & 0x7FFF) as u16).to_bits().to_le_bytes());
+            data.extend_from_slice(&0u32.to_le_bytes());
+        }
+    }
+    Some(data)
+}
+
 const SHADER: &str = r#"
 struct Globals {
   w: u32,
@@ -578,13 +822,31 @@ struct Globals {
   alpha_ref: u32,
   highlight: u32,
   bilinear: u32,
+  // the scale (the picture is `scale` times the DS's size each way)
+  scale: u32,
+  // the rear plane's bitmap origin (CLRIMAGE_OFFSET: x, then y << 8)
+  rear_ox: u32,
+  rear_oy: u32,
+  // the fog: enabled (DISP3DCNT bit 7), alpha-only (bit 6), its colour and alpha as one word,
+  // the step (0x400 >> shift, at least 1) and the table's offset
+  fog_enable: u32,
+  fog_alpha_only: u32,
+  fog_color: u32,
+  fog_step: u32,
+  fog_offset: u32,
   // the toon table, four 15-bit colours per vec4 (uniform arrays need a stride of 16)
   toon: array<vec4u, 8>,
+  // the fog table, four u8 densities per vec4
+  fogt: array<vec4u, 8>,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
 @group(0) @binding(1) var<storage, read> tris: array<Tri>;
 @group(0) @binding(2) var atlas: texture_2d<u32>;
+@group(0) @binding(3) var rear: texture_2d<u32>;
+@group(0) @binding(4) var color: texture_2d<u32>;
+@group(0) @binding(5) var fog: texture_2d<u32>;
+@group(0) @binding(6) var depth_tex: texture_2d<f32>;
 
 // One fan triangle: the exact vertex positions (the software engine's), its area, the ownership
 // of its edges (bits 0-2), the mode, the interpolation data of its three vertices, and its
@@ -604,6 +866,8 @@ struct Tri {
   // picture (its coordinates scale)
   ow: f32, oh: f32,
   tflags: u32,
+  // the polygon's fog bit (POLYGON_ATTR bit 15)
+  fog: u32,
 };
 
 struct VIn {
@@ -625,6 +889,8 @@ fn vs(in: VIn, @builtin(vertex_index) vi: u32) -> VOut {
 
 struct FOut {
   @location(0) word: vec4u,
+  @location(1) fog: vec4u,
+  @location(2) depth_out: vec4f,
   @builtin(frag_depth) depth: f32,
 };
 
@@ -841,7 +1107,115 @@ fn fs(in: VOut) -> FOut {
   }
   var o: FOut;
   o.word = vec4u(r6 | g6 << 6u | b6 << 12u | 31u << 18u, 0u, 0u, 0u);
+  o.fog = vec4u(t.fog, 0u, 0u, 0u);
+  o.depth_out = vec4f(depth, 0.0, 0.0, 0.0);
   o.depth = depth;
+  return o;
+}
+
+// one density of the fog table (four u8 packed into each vec4 component)
+fn fogt_at(i: u32) -> u32 {
+  let v = g.fogt[i >> 2u];
+  return v[i & 3u];
+}
+
+// the fog density (0-128) at a 24-bit depth, as the software engine steps its table: the 32
+// entries sit at FOG_OFFSET + (0x400 >> shift) times 1 to 32, linear between, the edge entries
+// held past their ends (a density of 127 rounds up to 128)
+fn fog_density(depth24: u32) -> u32 {
+  let z = i32(depth24 >> 9u);
+  let step = i32(g.fog_step);
+  let pos = z - i32(g.fog_offset) - step;
+  var d: i32;
+  if (pos <= 0) {
+    d = i32(fogt_at(0u)) * 256;
+  } else {
+    let i = pos / step;
+    let f = pos % step;
+    if (i >= 31) {
+      d = i32(fogt_at(31u)) * 256;
+    } else {
+      let a = i32(fogt_at(u32(i)));
+      let b = i32(fogt_at(u32(i) + 1u));
+      d = a * 256 + (b - a) * 256 * f / step;
+    }
+  }
+  let dd = (u32(d) / 256u) & 127u;
+  return select(dd, 128u, dd >= 127u);
+}
+
+// a fog mix: `a` towards `b` by the density `d` (0-128)
+fn fmix(a: u32, b: u32, d: u32) -> u32 {
+  return (a * (128u - d) + b * d) >> 7u;
+}
+
+struct VFull {
+  @builtin(position) clip: vec4f,
+};
+
+@vertex
+fn vs_full(in: VIn) -> VFull {
+  var o: VFull;
+  o.clip = vec4f(in.pos.x / f32(g.w) * 2.0 - 1.0, 1.0 - in.pos.y / f32(g.h) * 2.0, 0.0, 1.0);
+  return o;
+}
+
+// the rear plane's bitmap (a full-screen quad drawn before the polygons, so it is the base the
+// polygons draw over): each texel of the 256x256 texture holds the colour word, the fog flag and
+// the depth (bitcast to u32) of the bitmap's pixel at CLRIMAGE_OFFSET + the picture's position,
+// wrapped
+@fragment
+fn fs_rear(in: VFull) -> FOut {
+  let x = u32(floor(in.clip.x));
+  let y = u32(floor(in.clip.y));
+  let sx = (x / g.scale + g.rear_ox) & 255u;
+  let sy = (y / g.scale + g.rear_oy) & 255u;
+  let e = textureLoad(rear, vec2u(sx, sy), 0u);
+  let d = bitcast<f32>(e.z);
+  var o: FOut;
+  o.word = vec4u(e.x, 0u, 0u, 0u);
+  o.fog = vec4u(e.y, 0u, 0u, 0u);
+  o.depth_out = vec4f(d, 0.0, 0.0, 0.0);
+  o.depth = d;
+  return o;
+}
+
+// the fog over the finished picture (a full-screen quad): a pixel that takes the fog moves
+// towards the fog colour (unless the mode is alpha-only) and its alpha by the density at its
+// depth; an alpha-0 pixel is no pixel at all (the 2D layers under it show)
+struct FFog {
+  @location(0) word: vec4u,
+};
+
+@fragment
+fn fs_fog(in: VFull) -> FFog {
+  let p = vec2u(u32(floor(in.clip.x)), u32(floor(in.clip.y)));
+  let word = textureLoad(color, p, 0u).x;
+  var cr = word & 63u;
+  var cg = (word >> 6u) & 63u;
+  var cb = (word >> 12u) & 63u;
+  var ca = (word >> 18u) & 31u;
+  if (g.fog_enable != 0u && textureLoad(fog, p, 0u).x != 0u) {
+    let depth = textureLoad(depth_tex, p, 0u).x;
+    let depth24 = u32(clamp(depth, 0.0, 1.0) * 16777215.0);
+    let d = fog_density(depth24);
+    let fr = g.fog_color & 63u;
+    let fg = (g.fog_color >> 6u) & 63u;
+    let fb = (g.fog_color >> 12u) & 63u;
+    let fa = (g.fog_color >> 18u) & 31u;
+    if (g.fog_alpha_only == 0u) {
+      cr = fmix(cr, fr, d);
+      cg = fmix(cg, fg, d);
+      cb = fmix(cb, fb, d);
+    }
+    ca = fmix(ca, fa, d);
+  }
+  var o: FFog;
+  if (ca == 0u) {
+    o.word = vec4u(0u, 0u, 0u, 0u);
+  } else {
+    o.word = vec4u(cr | cg << 6u | cb << 12u | ca << 18u, 0u, 0u, 0u);
+  }
   return o;
 }
 "#;
@@ -1235,6 +1609,100 @@ mod tests {
     #[test]
     fn the_clear_plane_alone_is_the_clear_word() {
         let j = empty_job();
+        both(&j, 1);
+    }
+
+    #[test]
+    fn fog_moves_the_clear_plane_to_the_fog_colour_and_back() {
+        const BLUE: u32 = 0x7C00;
+        const RED: u32 = 0x001F;
+        // full density: the clear plane (taking the fog) becomes the fog colour
+        let mut j = empty_job();
+        j.disp3dcnt = 0x80;
+        j.clear_color = BLUE | 0x8000 | 31 << 16;
+        j.fog_color = RED | 31 << 16;
+        j.fog_table = [127; 32];
+        both(&j, 1);
+        // half density: half way to the fog colour
+        j.fog_table = [64; 32];
+        both(&j, 1);
+        // alpha only to a fog alpha of 0: the colour stays, the pixel goes transparent
+        j.disp3dcnt = 0xC0;
+        j.fog_color = RED;
+        j.fog_table = [127; 32];
+        both(&j, 1);
+        // without the plane's fog bit nothing changes
+        j.disp3dcnt = 0x80;
+        j.clear_color = BLUE | 31 << 16;
+        j.fog_color = RED | 31 << 16;
+        both(&j, 1);
+    }
+
+    #[test]
+    fn a_polygon_takes_the_fog_by_its_own_bit_and_depth() {
+        const RED: u32 = 0x001F;
+        // a triangle whose depth varies across it (so the density steps the table), fog on
+        let mut j = job_with(
+            vec![
+                vert(10.0, 10.0, 0x0000, 0x1000, 31.0, 0.0, 0.0),
+                vert(200.0, 10.0, 0x1000, 0x1000, 0.0, 31.0, 0.0),
+                vert(100.0, 170.0, 0x0800, 0x1000, 0.0, 0.0, 31.0),
+            ],
+            3,
+            31 << 16 | 0x8000,
+        );
+        j.disp3dcnt = 0x80;
+        j.fog_color = RED | 31 << 16;
+        for i in 0..32 {
+            j.fog_table[i] = (i * 4) as u8;
+        }
+        both(&j, 1);
+        // the same frame with the fog shifted and the steps halved
+        j.fog_offset = 0x100;
+        j.disp3dcnt = 0x80 | 1 << 8;
+        both(&j, 1);
+    }
+
+    #[test]
+    fn the_rear_plane_bitmap_replaces_the_clear_colour_and_scrolls() {
+        const RED: u16 = 0x001F;
+        let mut j = empty_job();
+        j.disp3dcnt = 0x4000;
+        j.clear_color = 31 << 16;
+        // slot 2: pixel (1, 0) opaque red; slot 3: its depth 0 (nearest)
+        let put = |tex: &mut Vec<u8>, base: usize, x: usize, v: u16| {
+            tex[base + 2 * x..base + 2 * x + 2].copy_from_slice(&v.to_le_bytes());
+        };
+        put(&mut j.tex, 0x40000, 1, RED | 0x8000);
+        put(&mut j.tex, 0x60000, 1, 0);
+        both(&j, 1);
+        // scrolled by one, the red pixel is at x = 0
+        j.clrimage_offset = 1;
+        both(&j, 1);
+        // drawn at scale 2 the pixel is two wide
+        j.clrimage_offset = 0;
+        both(&j, 2);
+    }
+
+    #[test]
+    fn a_polygon_draws_over_the_rear_plane_by_its_depth() {
+        const GREEN: u16 = 0x03E0;
+        let mut j = empty_job();
+        j.disp3dcnt = 0x4000;
+        j.clear_color = 31 << 16;
+        // the whole bitmap: an opaque green pixel (the far depth) everywhere via slot 2
+        for x in 0..(256 * 256) {
+            j.tex[0x40000 + 2 * x..0x40000 + 2 * x + 2].copy_from_slice(&(GREEN | 0x8000).to_le_bytes());
+            j.tex[0x60000 + 2 * x..0x60000 + 2 * x + 2].copy_from_slice(&0x7FFFu16.to_le_bytes()); // far depth
+        }
+        // a nearer red square drawn over part of it
+        j.verts = vec![
+            vert(10.0, 10.0, 0, 0x1000, 31.0, 0.0, 0.0),
+            vert(100.0, 10.0, 0, 0x1000, 31.0, 0.0, 0.0),
+            vert(100.0, 100.0, 0, 0x1000, 31.0, 0.0, 0.0),
+            vert(10.0, 100.0, 0, 0x1000, 31.0, 0.0, 0.0),
+        ];
+        j.polys = vec![GxPoly { first: 0, n: 4, attr: 31 << 16, tex: 0, pal: 0, translucent: false, sortkey: 0 }];
         both(&j, 1);
     }
 }

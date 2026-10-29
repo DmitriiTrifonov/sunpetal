@@ -7,9 +7,11 @@
 //! modulation, decal, toon and highlight shading, polygon alpha with blending over what is there,
 //! alpha test, wireframe polygons, the clear colour, depth and polygon ID.
 //! Also: edge marking (a pixel next to a farther pixel of another polygon ID takes the edge
-//! colour of its ID) and shadow polygons (the mask polygon, ID 0, marks where it lies behind
-//! something; the others draw there).
-//! Not done (named in the log once each): fog, anti-aliasing, the rear plane's bitmap.
+//! colour of its ID), shadow polygons (the mask polygon, ID 0, marks where it lies behind
+//! something; the others draw there), fog (the pixel moves towards the fog colour and its alpha
+//! by the density at its depth) and the rear plane's bitmap (the clear colour, depth and fog
+//! taken from texture slots 2 and 3).
+//! Not done (named in the log once each): anti-aliasing.
 //!
 //! At `scale` the picture is `scale` times as large each way: the polygons are rasterised at
 //! that resolution, the texels and the DS's depth rules unchanged.

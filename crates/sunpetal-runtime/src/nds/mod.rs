@@ -589,7 +589,7 @@ pub fn parity_check(path: &std::path::Path) -> Result<ParityReport, String> {
 }
 
 /// The GPU backend's parity with the software renderer on a dump: the job is filtered to what the
-/// GPU draws so far (`render3d_gpu::stage2_job`, этап 2 of `docs/GPU-BACKEND.md`), rendered by both
+/// GPU draws so far (`render3d_gpu::stage3_job`, этап 3 of `docs/GPU-BACKEND.md`), rendered by both
 /// engines, compared. `diff` is the difference map (red where the words differ, black where they
 /// match), `edge_diffs` the differing pixels next to a colour change (a polygon's edge or its
 /// silhouette) — the acceptance wants that empty.
@@ -610,7 +610,7 @@ pub struct GpuParity {
 #[cfg(feature = "gpu")]
 pub fn gpu_parity_check(path: &std::path::Path) -> Result<GpuParity, String> {
     let d = jobdump::read(path)?;
-    let job = render3d_gpu::stage2_job(&d.job);
+    let job = render3d_gpu::stage3_job(&d.job);
     let (w, h) = (job.width * d.scale, 192 * d.scale);
     let (ref_px, ref_notes) = render3d::render(&job, d.scale);
     let (px, notes) = render3d_gpu::render(&job, d.scale)?;
