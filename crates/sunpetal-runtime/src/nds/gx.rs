@@ -1221,7 +1221,22 @@ impl Nds {
                 }
             }
         }
-        let (px, notes) = super::render3d::render(&job, self.scale);
+        let (px, notes) = match self.renderer {
+            #[cfg(feature = "gpu")]
+            super::Renderer::Gpu => match super::render3d_gpu::render(&job, self.scale) {
+                Ok(v) => v,
+                Err(e) => {
+                    // the software engine takes over, once per distinct failure
+                    let mut h = 0u32;
+                    for b in e.bytes() {
+                        h = h.wrapping_mul(31).wrapping_add(b as u32);
+                    }
+                    self.once("3d-gpu", h, || format!("GPU renderer failed: {e}; the software one takes over"));
+                    super::render3d::render(&job, self.scale)
+                }
+            },
+            _ => super::render3d::render(&job, self.scale),
+        };
         super::jobdump::maybe_dump(&job, self.scale, self.vblanks, &px, notes);
         self.frame3d_wide = (job.width - 256) / 2;
         self.frame3d_scale = self.scale;

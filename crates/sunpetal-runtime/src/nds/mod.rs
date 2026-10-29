@@ -187,6 +187,7 @@ pub struct Nds {
     /// each way (1-8).
     scale: usize,
     extras: Extras,
+    renderer: Renderer,
     script: Vec<input::Press>,
     cart: cart::Cart,
     spi: spi::Spi,
@@ -265,6 +266,7 @@ impl Nds {
             frame3d_scale: 1,
             scale: 1,
             extras: Extras::default(),
+            renderer: Renderer::Software,
             script: Vec::new(),
             cart: cart::Cart::new(),
             spi: spi::Spi::new(),
@@ -513,6 +515,15 @@ pub enum TexFilter {
     #[default]
     Nearest,
     Bilinear,
+}
+
+/// Which engine draws the 3D. The GPU one (the `gpu` feature) falls back to the software one if
+/// the device cannot be made (a note goes into the log).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Renderer {
+    #[default]
+    Software,
+    Gpu,
 }
 
 /// The comparison of a renderer's picture of a dump with the one stored in it (этап 0 of
@@ -843,6 +854,11 @@ pub fn set_extras(e: Extras) {
             msaa: match e.msaa { 0..=1 => 0, 2..=3 => 2, _ => 4 },
         }
     });
+}
+
+/// Chooses the engine that draws the 3D. Takes effect with the next frame drawn.
+pub fn set_renderer(r: Renderer) {
+    nds(|d| d.renderer = r);
 }
 
 /// Both screens as RGBA at the current scale, the upper first: 2 x (256 x n) x (192 x n) x 4 bytes.

@@ -3,7 +3,7 @@
 //! the same ROM must be linked in (docs/ABI.md).
 //!
 //!     sunpetal-headless ROM.nds [--vblanks N] [--trace] [--out DIR] [--save FILE]
-//!                              [--save-size BYTES] [--dump-textures DIR] [--dump-bg DIR] [--texture-pack DIR] [--shots V,V,...] [--shot-every N] [--input SCRIPT] [--wav FILE] [--scale N] [--wide PIXELS_EACH_SIDE] [--texture-filter nearest|bilinear] [--msaa 0|2|4] [--outline 0-1] [--outline-width 0.25-2] [--shadow 0-1] [--shadow-radius 0.5-6]
+//!                              [--save-size BYTES] [--dump-textures DIR] [--dump-bg DIR] [--texture-pack DIR] [--shots V,V,...] [--shot-every N] [--input SCRIPT] [--wav FILE] [--scale N] [--wide PIXELS_EACH_SIDE] [--texture-filter nearest|bilinear] [--msaa 0|2|4] [--outline 0-1] [--outline-width 0.25-2] [--shadow 0-1] [--shadow-radius 0.5-6] [--renderer software|gpu]
 //!
 //! Both screens are written as PNGs (DIR/v<N>.png) at the VBlanks asked for; --wav writes the sound
 //! (16-bit stereo, 32 728 Hz); --draw-all draws every frame (for timing).
@@ -17,7 +17,7 @@ fn main() -> ExitCode {
     let mut rest = Vec::new();
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--vblanks" | "--out" | "--save" | "--save-size" | "--dump-textures" | "--dump-bg" | "--texture-pack" | "--overlay" | "--data" | "--lang" | "--shots" | "--shot-every" | "--input" | "--wav" | "--scale" | "--outline" | "--outline-width" | "--shadow" | "--shadow-radius" | "--texture-filter" | "--wide" | "--msaa" => rest.push((a, args.next().unwrap_or_default())),
+            "--vblanks" | "--out" | "--save" | "--save-size" | "--dump-textures" | "--dump-bg" | "--texture-pack" | "--overlay" | "--data" | "--lang" | "--shots" | "--shot-every" | "--input" | "--wav" | "--scale" | "--outline" | "--outline-width" | "--shadow" | "--shadow-radius" | "--texture-filter" | "--wide" | "--msaa" | "--renderer" => rest.push((a, args.next().unwrap_or_default())),
             "--trace" | "--draw-all" => rest.push((a, String::new())),
             _ if cfg.is_none() => cfg = Some(Config::new(a)),
             _ => {
@@ -37,6 +37,7 @@ fn main() -> ExitCode {
     let mut wide = 0usize;
     let mut scale = 1usize;
     let mut extras = nds::Extras::default();
+    let mut renderer = nds::Renderer::Software;
     for (k, v) in rest {
         match k.as_str() {
             "--vblanks" => cfg.stop_vblanks = v.parse().unwrap_or(0),
@@ -56,6 +57,14 @@ fn main() -> ExitCode {
             "--msaa" => extras.msaa = v.parse().unwrap_or(0),
             "--texture-filter" => extras.filter = nds::TexFilter::parse(&v),
             "--shadow-radius" => extras.shadow_radius = v.parse().unwrap_or(2.0),
+            "--renderer" => match v.as_str() {
+                "gpu" => renderer = nds::Renderer::Gpu,
+                "software" => renderer = nds::Renderer::Software,
+                _ => {
+                    eprintln!("unknown renderer {v} (software or gpu)");
+                    return ExitCode::from(2);
+                }
+            },
             "--wav" => wav = Some(v),
             "--wide" => wide = v.parse().unwrap_or(0),
             "--shots" => shots.extend(v.split(',').filter_map(|x| x.parse::<u64>().ok())),
@@ -74,6 +83,7 @@ fn main() -> ExitCode {
     nds::set_scale(scale);
     nds::set_wide(wide);
     nds::set_extras(extras);
+    nds::set_renderer(renderer);
     nds::set_sound_keep(wav.is_some());
     let mut samples: Vec<i16> = Vec::new();
     let shot_at = |v: u64| (shot_every != 0 && v % shot_every == 0) || shots.contains(&v);
