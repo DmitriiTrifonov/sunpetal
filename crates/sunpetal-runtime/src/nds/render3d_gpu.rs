@@ -2370,4 +2370,80 @@ mod tests {
         both_maps(&j, 1);
         both_maps(&j, 2);
     }
+
+    #[test]
+    fn a_vertex_at_the_near_plane_and_a_degenerate_w_match_the_software() {
+        // what GX's clipping leaves at the camera's boundary: a vertex exactly on the near plane
+        // (z == -w: the depth a hair negative), a vertex with w <= 0 (both engines clamp it to 1),
+        // and a far one; the far square under the triangle stays where the triangle is not nearer
+        let mut j = empty_job();
+        j.verts = vec![
+            vert(20.0, 20.0, 0x0800, 0x1000, 31.0, 0.0, 0.0),
+            vert(150.0, 20.0, 0x0800, 0x1000, 31.0, 0.0, 0.0),
+            vert(150.0, 150.0, 0x0800, 0x1000, 31.0, 0.0, 0.0),
+            vert(20.0, 150.0, 0x0800, 0x1000, 31.0, 0.0, 0.0),
+            vert(40.0, 60.0, -0x1000, 0x1000, 0.0, 31.0, 0.0),
+            vert(160.0, 60.0, 0, 0, 0.0, 31.0, 0.0),
+            vert(100.0, 160.0, 0x1000, 0x1000, 0.0, 31.0, 0.0),
+        ];
+        j.polys = vec![
+            GxPoly { first: 0, n: 4, attr: 31 << 16 | 3 << 24, tex: 0, pal: 0, translucent: false, sortkey: 0 },
+            GxPoly { first: 4, n: 3, attr: 31 << 16 | 5 << 24, tex: 0, pal: 0, translucent: false, sortkey: 0 },
+        ];
+        both(&j, 1);
+        both(&j, 2);
+        both_maps(&j, 1);
+    }
+
+    #[test]
+    fn equal_depth_keeps_the_first_polygon_in_the_job_order() {
+        // two overlapping squares at exactly the same depth: the second is never nearer, so the
+        // first stays everywhere they overlap (the job's order is the only tie-breaker)
+        let mut j = empty_job();
+        j.verts = vec![
+            vert(20.0, 20.0, 0x1000, 0x1000, 31.0, 0.0, 0.0),
+            vert(150.0, 20.0, 0x1000, 0x1000, 31.0, 0.0, 0.0),
+            vert(150.0, 150.0, 0x1000, 0x1000, 31.0, 0.0, 0.0),
+            vert(20.0, 150.0, 0x1000, 0x1000, 31.0, 0.0, 0.0),
+            vert(100.0, 20.0, 0x1000, 0x1000, 0.0, 0.0, 31.0),
+            vert(200.0, 20.0, 0x1000, 0x1000, 0.0, 0.0, 31.0),
+            vert(200.0, 150.0, 0x1000, 0x1000, 0.0, 0.0, 31.0),
+            vert(100.0, 150.0, 0x1000, 0x1000, 0.0, 0.0, 31.0),
+        ];
+        j.polys = vec![
+            GxPoly { first: 0, n: 4, attr: 31 << 16 | 3 << 24, tex: 0, pal: 0, translucent: false, sortkey: 0 },
+            GxPoly { first: 4, n: 4, attr: 31 << 16 | 5 << 24, tex: 0, pal: 0, translucent: false, sortkey: 0 },
+        ];
+        both(&j, 1);
+        both(&j, 2);
+        both_maps(&j, 1);
+    }
+
+    #[test]
+    fn translucent_polygons_at_equal_depth_follow_the_job_order_unless_eq_depth() {
+        // two translucent squares at the same depth, the second over the first (the first writes
+        // its depth, bit 11): without the equal-depth test (bit 14) the second is behind and the
+        // first stays; with it, the second draws over the first
+        for eq in [false, true] {
+            let mut j = empty_job();
+            j.disp3dcnt |= 8;
+            j.verts = vec![
+                vert(40.0, 40.0, -0x0800, 0x1000, 0.0, 31.0, 0.0),
+                vert(160.0, 40.0, -0x0800, 0x1000, 0.0, 31.0, 0.0),
+                vert(160.0, 140.0, -0x0800, 0x1000, 0.0, 31.0, 0.0),
+                vert(40.0, 140.0, -0x0800, 0x1000, 0.0, 31.0, 0.0),
+                vert(80.0, 80.0, -0x0800, 0x1000, 31.0, 0.0, 0.0),
+                vert(180.0, 80.0, -0x0800, 0x1000, 31.0, 0.0, 0.0),
+                vert(180.0, 160.0, -0x0800, 0x1000, 31.0, 0.0, 0.0),
+                vert(80.0, 160.0, -0x0800, 0x1000, 31.0, 0.0, 0.0),
+            ];
+            let eq_bit = if eq { 0x4000 } else { 0 };
+            j.polys = vec![
+                GxPoly { first: 0, n: 4, attr: 15 << 16 | 7 << 24 | 0x800, tex: 0, pal: 0, translucent: true, sortkey: 0 },
+                GxPoly { first: 4, n: 4, attr: 15 << 16 | 9 << 24 | eq_bit, tex: 0, pal: 0, translucent: true, sortkey: 0 },
+            ];
+            both(&j, 1);
+            both_maps(&j, 1);
+        }
+    }
 }
