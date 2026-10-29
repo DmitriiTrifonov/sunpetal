@@ -786,18 +786,29 @@ struct Rendered {
 /// the shadow mask's mark, then the DS blend `(src*(a+1) + dst*(31-a))/32` over what is there —
 /// then the fog over the finished picture, which also drops the alpha-0 pixels.
 pub(super) fn render(job: &Job, scale: usize) -> Result<(Vec<u32>, u32), String> {
-    let r = render_all(job, scale)?;
+    let s = scale.max(1);
+    // supersampling like the software engine's (этап 6.0): the frame k times as large each way,
+    // then the k x k samples of a pixel averaged
+    let k = render3d::msaa_factor(job, s);
+    if k >= 2 {
+        let r = render_all(job, s * k, false)?;
+        return Ok((render3d::resolve(&r.words, job.width * s, 192 * s, k), r.notes & !(1 << 1)));
+    }
+    let r = render_all(job, scale, false)?;
     Ok((r.words, r.notes))
 }
 
 /// Draws a job and reads the auxiliary maps back too (этапы 7.0 и 5.1 of `docs/GPU-BACKEND.md`):
 /// the words, `oid`, `cover`, `trans` and the depth.
 pub(super) fn render_maps(job: &Job, scale: usize) -> Result<(Vec<u32>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<f32>, u32), String> {
-    let r = render_all(job, scale)?;
+    let r = render_all(job, scale, true)?;
     Ok((r.words, r.oid, r.cover, r.trans, r.depth, r.notes))
 }
 
-fn render_all(job: &Job, scale: usize) -> Result<Rendered, String> {
+/// `maps`: read the auxiliary maps back too (the parity harness wants them; a frame for the window
+/// needs only the words, and four more readbacks of the picture's size cost about as much as the
+/// drawing — этап 6.2.2).
+fn render_all(job: &Job, scale: usize, maps: bool) -> Result<Rendered, String> {
     let c = ctx()?;
     let s = scale.max(1);
     let (w, h) = (job.width * s, 192 * s);
@@ -1490,16 +1501,23 @@ fn render_all(job: &Job, scale: usize) -> Result<Rendered, String> {
     }
     // the picture back: copy each attachment to a mappable buffer, then read the rows
     let buf_word = readback_buf(device, &mut enc, &fin, w as u32, h as u32);
-    let buf_oid = readback_buf(device, &mut enc, &oid[cur], w as u32, h as u32);
-    let buf_cover = readback_buf(device, &mut enc, &cover[cur], w as u32, h as u32);
-    let buf_trans = readback_buf(device, &mut enc, &trans[cur], w as u32, h as u32);
-    let buf_depth = readback_buf(device, &mut enc, &depth[cur], w as u32, h as u32);
+    let aux = maps.then(|| {
+        [
+            readback_buf(device, &mut enc, &oid[cur], w as u32, h as u32),
+            readback_buf(device, &mut enc, &cover[cur], w as u32, h as u32),
+            readback_buf(device, &mut enc, &trans[cur], w as u32, h as u32),
+            readback_buf(device, &mut enc, &depth[cur], w as u32, h as u32),
+        ]
+    });
     c.queue.submit([enc.finish()]);
     let words = readback_words(&c.device, &buf_word, w, h)?;
-    let oid_px = readback_bytes(&c.device, &buf_oid, w, h)?;
-    let cover_px = readback_bytes(&c.device, &buf_cover, w, h)?;
-    let trans_px = readback_bytes(&c.device, &buf_trans, w, h)?;
-    let depth_px = readback_floats(&c.device, &buf_depth, w, h)?;
+    let (mut oid_px, mut cover_px, mut trans_px, mut depth_px) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    if let Some([bo, bc, bt, bd]) = &aux {
+        oid_px = readback_bytes(&c.device, bo, w, h)?;
+        cover_px = readback_bytes(&c.device, bc, w, h)?;
+        trans_px = readback_bytes(&c.device, bt, w, h)?;
+        depth_px = readback_floats(&c.device, bd, w, h)?;
+    }
     Ok(Rendered { words, oid: oid_px, cover: cover_px, trans: trans_px, depth: depth_px, notes })
 }
 
@@ -3432,4 +3450,62 @@ mod tests {
         both_maps(&j, 1);
         both_maps(&j, 2);
     }
+    /// Supersampling (этап 6.0): the GPU draws the frame k times as large and averages like the
+    /// software engine, so the two agree word for word at every factor and scale; a triangle's
+    /// slanted edge comes out partly covered, and with the outline on too.
+    #[test]
+    fn supersampling_matches_the_software_engine() {
+        let tri = |msaa: u8| {
+            let mut j = job_with(
+                vec![vert(0.0, 0.0, 0, 0x1000, 31.0, 31.0, 31.0), vert(8.6, 0.0, 0, 0x1000, 31.0, 31.0, 31.0), vert(0.0, 8.6, 0, 0x1000, 31.0, 31.0, 31.0)],
+                3,
+                31 << 16,
+            );
+            j.clear_color = 0;
+            j.extras.msaa = msaa;
+            j
+        };
+        for (msaa, scale) in [(2, 1), (4, 1), (2, 2)] {
+            let j = tri(msaa);
+            let Some(px) = both(&j, scale) else { return };
+            assert_eq!(px.len(), 256 * 192 * scale * scale, "the picture keeps its size");
+        }
+        // partly covered edge pixel: 1 of 4 samples, alpha 8 of 31, like the software test
+        let Some(px) = both(&tri(2), 1) else { return };
+        assert_eq!(px[3 * 256 + 5] >> 18 & 31, 8);
+        // the outline and a wide view at the same time
+        let mut j = tri(2);
+        j.extras.outline = 0.5;
+        j.disp3dcnt |= 1 << 5;
+        j.width = 320;
+        both(&j, 1);
+    }
+
+    /// A timing, not a check (этап 6.1.1): the GPU's and the software engine's time per frame on the
+    /// dump `SUNPETAL_BENCH_DUMP` names, at scales 1-2 and supersampling off, 2 and 4.
+    /// `SUNPETAL_BENCH_DUMP=... cargo test --release --features gpu --lib bench_supersampling -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bench_supersampling() {
+        let Some(path) = std::env::var_os("SUNPETAL_BENCH_DUMP") else { return };
+        let mut d = super::super::jobdump::read(std::path::Path::new(&path)).unwrap();
+        for scale in [1usize, 2] {
+            for msaa in [0u8, 2, 4] {
+                d.job.extras.msaa = msaa;
+                let job = &d.job;
+                let time = |f: &dyn Fn()| {
+                    f(); // warm-up: pipelines, the texture atlas
+                    let t = std::time::Instant::now();
+                    for _ in 0..5 {
+                        f();
+                    }
+                    t.elapsed().as_secs_f64() * 200.0
+                };
+                let gpu = time(&|| drop(render(job, scale).unwrap()));
+                let soft = time(&|| drop(render3d::render(job, scale)));
+                println!("scale {scale} msaa {msaa}: gpu {gpu:.1} ms, software {soft:.1} ms");
+            }
+        }
+    }
+
 }

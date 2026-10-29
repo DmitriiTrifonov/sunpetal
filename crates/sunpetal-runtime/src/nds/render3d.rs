@@ -813,6 +813,17 @@ fn extend_sides(t: &mut Target, job: &Job, w: usize, h: usize, e: usize) {
     }
 }
 
+/// The supersampling factor k a frame at scale `s` is drawn with: `extras.msaa`, halved while the
+/// picture would pass 16x the DS's size each way or 8192 wide (1 = none). The GPU backend uses the
+/// same rule, so both come out the same size.
+pub(super) fn msaa_factor(job: &Job, s: usize) -> usize {
+    let mut k = job.extras.msaa as usize;
+    while k > 1 && (s * k > 16 || job.width * s * k > 8192) {
+        k /= 2;
+    }
+    if k < 2 { 1 } else { k }
+}
+
 /// Draws a frame. Returns the picture and the mask of what it left out (`NOTE`). With
 /// `extras.msaa` = k the frame is drawn k times as large each way (every pass, the outline, the
 /// shading and the widened view's `extend_sides` included) and the samples of each pixel are
@@ -821,10 +832,7 @@ fn extend_sides(t: &mut Target, job: &Job, w: usize, h: usize, e: usize) {
 pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
     let s = scale.max(1);
     // at most 16x the DS's size each way, and 8192 wide: more would not fit in memory
-    let mut k = job.extras.msaa as usize;
-    while k > 1 && (s * k > 16 || job.width * s * k > 8192) {
-        k /= 2;
-    }
+    let k = msaa_factor(job, s);
     if k < 2 {
         let (px, _, notes) = render_at(job, s);
         return (px, notes);
@@ -841,7 +849,7 @@ pub(super) fn render_maps(job: &Job, scale: usize) -> (Vec<u32>, Aux, u32) {
 
 /// Averages the picture's k x k samples per pixel: colour weighted by alpha (a sample with no 3D
 /// has none), alpha as the share covered, the outline and shade levels over the covered samples.
-fn resolve(big: &[u32], w: usize, h: usize, k: usize) -> Vec<u32> {
+pub(super) fn resolve(big: &[u32], w: usize, h: usize, k: usize) -> Vec<u32> {
     let mut out = vec![0u32; w * h];
     let bands = threads().min(h / 32).max(1);
     let per = (h + bands - 1) / bands;
