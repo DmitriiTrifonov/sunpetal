@@ -75,6 +75,21 @@ struct Args {
     /// The 3D's internal resolution (1-8 times the DS's) for `--shot`.
     #[arg(long, value_name = "N")]
     scale: Option<usize>,
+    /// The 3D effects, as `sunpetal-headless` takes them (0-1; 0 off).
+    #[arg(long)]
+    outline: Option<f32>,
+    #[arg(long)]
+    outline_width: Option<f32>,
+    #[arg(long)]
+    shadow: Option<f32>,
+    #[arg(long)]
+    shadow_radius: Option<f32>,
+    /// Supersampling of the 3D edges (0, 2 or 4).
+    #[arg(long, value_name = "0|2|4")]
+    msaa: Option<u8>,
+    /// nearest | bilinear.
+    #[arg(long)]
+    texture_filter: Option<String>,
     /// Print the state (last line, frame, map, story value 0, why autoplay stopped) as a JSON line at the end.
     #[arg(long)]
     state: bool,
@@ -275,6 +290,16 @@ fn run(a: Args) -> Result<(), String> {
     sunpetal_runtime::nds::set_wide(a.wide.unwrap_or(0));
     if let Some(n) = a.scale {
         sunpetal_runtime::nds::set_scale(n);
+    }
+    let mut extras = sunpetal_runtime::nds::Extras::default();
+    if let Some(v) = a.outline { extras.outline = v; }
+    if let Some(v) = a.outline_width { extras.outline_width = v; }
+    if let Some(v) = a.shadow { extras.shadow = v; }
+    if let Some(v) = a.shadow_radius { extras.shadow_radius = v; }
+    if let Some(v) = a.msaa { extras.msaa = v; }
+    if let Some(v) = &a.texture_filter { extras.filter = sunpetal_runtime::nds::TexFilter::parse(v); }
+    if a.outline.is_some() || a.outline_width.is_some() || a.shadow.is_some() || a.shadow_radius.is_some() || a.msaa.is_some() || a.texture_filter.is_some() {
+        sunpetal_runtime::nds::set_extras(extras);
     }
     let tracker = Tracker::install();
     if let Some(d) = &a.text_dir {

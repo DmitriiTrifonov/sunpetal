@@ -15,6 +15,7 @@ pub mod debug;
 mod gpu2d;
 mod gx;
 mod input;
+mod jobdump;
 mod mmio;
 mod render3d;
 mod sound;
@@ -510,6 +511,79 @@ pub enum TexFilter {
     #[default]
     Nearest,
     Bilinear,
+}
+
+/// The comparison of a renderer's picture of a dump with the one stored in it (этап 0 of
+/// `docs/GPU-BACKEND.md`).
+#[derive(Clone, Debug)]
+pub struct ParityReport {
+    /// The dump's frame and file.
+    pub vblank: u64,
+    pub path: String,
+    /// Words of the 3D picture.
+    pub pixels: usize,
+    /// Bit-identical words.
+    pub exact: usize,
+    /// Mean |difference| per colour channel, in 1/63 steps.
+    pub mean_abs: [f32; 3],
+    /// Pixels with any channel off by more than 2 steps.
+    pub over2: usize,
+    /// Pixels with the outline or the shade bits different.
+    pub fx_off: usize,
+    /// The renderer's notes word matches the stored one.
+    pub notes_equal: bool,
+    /// The renderer produced as many words as stored.
+    pub same_size: bool,
+}
+
+/// Renders a dump's job and compares against the picture the dump stores. The software renderer
+/// re-renders its own dumps byte-exact; the GPU backend is scored by the same function
+/// (`docs/GPU-BACKEND.md`, этап 0).
+pub fn parity_check(path: &std::path::Path) -> Result<ParityReport, String> {
+    let d = jobdump::read(path)?;
+    let want = d.job.width * d.scale * 192 * d.scale;
+    if d.px.len() != want {
+        return Err(format!("{}: picture {} words, expected {}", path.display(), d.px.len(), want));
+    }
+    let (px, notes) = render3d::render(&d.job, d.scale);
+    let mut rep = ParityReport {
+        vblank: d.vblank,
+        path: path.display().to_string(),
+        pixels: d.px.len(),
+        exact: 0,
+        mean_abs: [0.0; 3],
+        over2: 0,
+        fx_off: 0,
+        notes_equal: notes == d.notes,
+        same_size: px.len() == d.px.len(),
+    };
+    if !rep.same_size {
+        return Ok(rep);
+    }
+    let (mut sum, mut n) = ([0u64; 3], 0u64);
+    for (a, b) in px.iter().zip(d.px.iter()) {
+        if a == b {
+            rep.exact += 1;
+        }
+        let dr = (a & 63).abs_diff(b & 63);
+        let dg = (a >> 6 & 63).abs_diff(b >> 6 & 63);
+        let db = (a >> 12 & 63).abs_diff(b >> 12 & 63);
+        let da = (a >> 18 & 31).abs_diff(b >> 18 & 31);
+        sum[0] += dr as u64;
+        sum[1] += dg as u64;
+        sum[2] += db as u64;
+        n += 1;
+        if dr.max(dg).max(db).max(da) > 2 {
+            rep.over2 += 1;
+        }
+        if a >> 24 & 15 != b >> 24 & 15 || a >> 28 & 15 != b >> 28 & 15 {
+            rep.fx_off += 1;
+        }
+    }
+    if n > 0 {
+        rep.mean_abs = sum.map(|s| s as f32 / n as f32);
+    }
+    Ok(rep)
 }
 
 impl TexFilter {

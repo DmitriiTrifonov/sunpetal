@@ -1222,6 +1222,7 @@ impl Nds {
             }
         }
         let (px, notes) = super::render3d::render(&job, self.scale);
+        super::jobdump::maybe_dump(&job, self.scale, self.vblanks, &px, notes);
         self.frame3d_wide = (job.width - 256) / 2;
         self.frame3d_scale = self.scale;
         self.frame3d = px;

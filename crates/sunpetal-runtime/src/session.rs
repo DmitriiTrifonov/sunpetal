@@ -107,6 +107,9 @@ impl Session {
         cfg.save_size = 65536;
         nds::boot(cfg)?;
         nds::set_sound_keep(false);
+        // the session draws only the frames a picture asks for (`shot`, autoplay): the 3D job of a
+        // frame is dumped to `SUNPETAL_JOB_DUMP` only for those (docs/GPU-BACKEND.md, этап 0)
+        nds::set_draw(false);
         debug::log_card_reads();
         nds::track_script();
         let tracker = Tracker::install();
