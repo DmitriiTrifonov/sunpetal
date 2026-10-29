@@ -698,6 +698,13 @@ pub struct AuxParity {
     /// The depth difference map, RGBA: gray by the magnitude of the difference (×16 steps,
     /// capped), transparent where the depths match.
     pub depth_diff: Vec<u8>,
+    /// Pixels the 15-bit quantization would change: the software's own depth rounded to the DS's
+    /// 15-bit granularity (512 of 24-bit steps, the w-buffer's) differs there from the float it
+    /// compares. Quantizing the GPU's depth would move it away from the reference by at least
+    /// this many pixels (этап 5.2).
+    pub depth_quantized_diffs: usize,
+    /// The max |quantized − float| depth in 24-bit steps.
+    pub depth_quantized_max_steps: f64,
 }
 
 #[cfg(feature = "gpu")]
@@ -727,6 +734,8 @@ pub fn gpu_aux_check(path: &std::path::Path) -> Result<AuxParity, String> {
         depth_over_tol: 0,
         depth_first: None,
         depth_diff: vec![0; px.len() * 4],
+        depth_quantized_diffs: 0,
+        depth_quantized_max_steps: 0.0,
     };
     for (i, (a, b)) in oid.iter().zip(ref_aux.oid.iter()).enumerate() {
         if a == b {
@@ -776,6 +785,19 @@ pub fn gpu_aux_check(path: &std::path::Path) -> Result<AuxParity, String> {
         rep.depth_mean_steps = sum / depth.len() as f64;
     }
     rep.depth_max_steps = max;
+    // the 15-bit quantization the plan (5.2) weighed: rounding the reference's own depth to the
+    // DS's 15-bit granularity would change this many pixels — so quantizing the GPU's depth can
+    // only move it away from a reference it already matches bit-exactly
+    let (mut qdiff, mut qmax) = (0usize, 0.0f64);
+    for s in &ref_aux.depth {
+        let q = (((*s as f64) * 32768.0).round() / 32768.0) as f32;
+        if q.to_bits() != s.to_bits() {
+            qdiff += 1;
+            qmax = qmax.max(((q as f64) - (*s as f64)).abs() * 16_777_215.0);
+        }
+    }
+    rep.depth_quantized_diffs = qdiff;
+    rep.depth_quantized_max_steps = qmax;
     Ok(rep)
 }
 

@@ -154,7 +154,7 @@ fn gpu_aux_on_real_frames() {
         };
         any = true;
         println!(
-            "{}: oid {}/{} cover {}/{} trans {}/{}, depth exact {}/{} mean {:.3} max {:.3} steps, over tol {}",
+            "{}: oid {}/{} cover {}/{} trans {}/{}, depth exact {}/{} mean {:.3} max {:.3} steps, over tol {}, quantized-to-15-bit would change {} (max {:.3} steps)",
             gp.path,
             gp.oid_exact,
             gp.pixels,
@@ -166,7 +166,9 @@ fn gpu_aux_on_real_frames() {
             gp.pixels,
             gp.depth_mean_steps,
             gp.depth_max_steps,
-            gp.depth_over_tol
+            gp.depth_over_tol,
+            gp.depth_quantized_diffs,
+            gp.depth_quantized_max_steps
         );
         for (name, first) in [("oid", gp.oid_first), ("cover", gp.cover_first), ("trans", gp.trans_first)] {
             if let Some((i, g, s)) = first {
