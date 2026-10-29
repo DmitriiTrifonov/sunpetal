@@ -1,7 +1,9 @@
-//! Этап 0 of the GPU backend plan (`docs/GPU-BACKEND.md`): a dump of a real frame must re-render
-//! with the software renderer byte-exact. Later the GPU renderer is scored against the same
-//! dumps. The dumps are not in the repository: `SUNPETAL_JOB_DUMPS` points at a directory of
-//! `*.spjob` files made with `SUNPETAL_JOB_DUMP` (+ `SUNPETAL_JOB_FRAMES`).
+//! The parity harness of the GPU backend plan (`docs/GPU-BACKEND.md`). Этап 0: a dump of a real
+//! frame must re-render with the software renderer byte-exact. Этап 1: the GPU renderer
+//! (`nds::gpu_parity_check`, feature `gpu`) is scored against the software renderer on the same
+//! filtered job, within the stage's tolerances. The dumps are not in the repository:
+//! `SUNPETAL_JOB_DUMPS` points at a directory of `*.spjob` files made with `SUNPETAL_JOB_DUMP`
+//! (+ `SUNPETAL_JOB_FRAMES`); the GPU test writes its difference maps into `SUNPETAL_JOB_DIFFS`.
 
 use std::path::PathBuf;
 use sunpetal_runtime::nds::parity_check;
@@ -39,5 +41,84 @@ fn software_parity_on_real_frames() {
         );
         assert_eq!(rep.exact, rep.pixels, "{}: not byte-exact", rep.path);
         assert!(rep.notes_equal, "{}: notes differ", rep.path);
+    }
+}
+
+/// Этап 1 acceptance (`docs/GPU-BACKEND.md`): three or more opaque scenes within the tolerances —
+/// mean |d| per channel at most 1/63, fewer than 0.5% of pixels off by more than 2 steps, and the
+/// difference map empty along the polygon edges.
+#[cfg(feature = "gpu")]
+#[test]
+fn gpu_parity_on_real_frames() {
+    use sunpetal_runtime::nds::gpu_parity_check;
+    let Some(dir) = std::env::var_os("SUNPETAL_JOB_DUMPS").map(PathBuf::from) else {
+        println!("SUNPETAL_JOB_DUMPS is not set: no dumps to check");
+        return;
+    };
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .expect("dump dir")
+        .filter_map(|e| {
+            let p = e.unwrap().path();
+            (p.extension()?.to_str()? == "spjob").then_some(p)
+        })
+        .collect();
+    files.sort();
+    assert!(!files.is_empty(), "no .spjob files in {}", dir.display());
+    let mut any = false;
+    let mut opaque = 0usize;
+    for f in files {
+        let gp = match gpu_parity_check(&f) {
+            Err(e) if e.contains("no GPU") => {
+                println!("{}: skipped ({e})", f.display());
+                continue;
+            }
+            Err(e) => panic!("{}: {e}", f.display()),
+            Ok(gp) => gp,
+        };
+        let rep = &gp.report;
+        any = true;
+        println!(
+            "{} (frame {}): exact {:.4}% ({} of {}), mean |d| {:.4}/{:.4}/{:.4}, over2 {:.4}%, edge diffs {}",
+            rep.path,
+            rep.vblank,
+            100.0 * rep.exact as f64 / rep.pixels.max(1) as f64,
+            rep.exact,
+            rep.pixels,
+            rep.mean_abs[0],
+            rep.mean_abs[1],
+            rep.mean_abs[2],
+            100.0 * rep.over2 as f64 / rep.pixels.max(1) as f64,
+            gp.edge_diffs
+        );
+        if rep.exact == rep.pixels {
+            opaque += 1;
+        }
+        // the difference map, if asked: red where the words differ (written before the checks,
+        // so a failing frame still leaves its map behind)
+        if let Some(dir) = std::env::var_os("SUNPETAL_JOB_DIFFS") {
+            let name = f.file_stem().unwrap().to_string_lossy();
+            let dir = PathBuf::from(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join(format!("{name}.png"));
+            let file = std::fs::File::create(&path).unwrap();
+            let mut enc = png::Encoder::new(std::io::BufWriter::new(file), gp.w as u32, gp.h as u32);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            let mut w = enc.write_header().unwrap();
+            w.write_image_data(&gp.diff).unwrap();
+            println!("  diff map: {}", path.display());
+        }
+        // the acceptance of этап 1
+        for c in rep.mean_abs {
+            assert!(c <= 1.0 / 63.0, "{}: mean |d| {c} > 1/63", rep.path);
+        }
+        assert!(rep.over2 * 1000 <= rep.pixels * 5, "{}: {} of {} pixels off by more than 2 steps", rep.path, rep.over2, rep.pixels);
+        assert!(rep.notes_equal, "{}: notes differ", rep.path);
+        assert_eq!(gp.edge_diffs, 0, "{}: differences along polygon edges", rep.path);
+    }
+    if any {
+        println!("{} of the dumps came out exact", opaque);
+    } else {
+        println!("no GPU device: the GPU parity test did not run");
     }
 }

@@ -12,10 +12,15 @@ png = "0.17"
 clap = { version = "4", features = ["derive"], optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
+# The GPU backend of the 3D renderer (`docs/GPU-BACKEND.md`); the version matches sunpetal-app's.
+wgpu = { version = "30.0.1", optional = true }
+pollster = { version = "0.4", optional = true }
 
 [features]
 # Tools for proofreading the translation (docs/DEBUG-TOOLS-PLAN.md); off in an ordinary build.
 debug-tools = ["dep:clap", "dep:serde", "dep:serde_json"]
+# The wgpu renderer of the 3D (nds/render3d_gpu.rs), behind the software one's job stream.
+gpu = ["dep:wgpu", "dep:pollster"]
 
 [[bin]]
 name = "sunpetal-debug"
@@ -24,3 +29,7 @@ required-features = ["debug-tools"]
 
 [build-dependencies]
 cc = "1"
+
+[dev-dependencies]
+# The parity test writes the GPU diff maps (`tests/gpu_parity.rs`); the same crate as the library's.
+png = "0.17"

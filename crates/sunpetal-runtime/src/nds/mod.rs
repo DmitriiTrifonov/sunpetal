@@ -18,6 +18,8 @@ mod input;
 mod jobdump;
 mod mmio;
 mod render3d;
+#[cfg(feature = "gpu")]
+mod render3d_gpu;
 mod sound;
 mod texpack;
 mod spi;
@@ -584,6 +586,79 @@ pub fn parity_check(path: &std::path::Path) -> Result<ParityReport, String> {
         rep.mean_abs = sum.map(|s| s as f32 / n as f32);
     }
     Ok(rep)
+}
+
+/// The GPU backend's parity with the software renderer on a dump: the job is filtered to what the
+/// GPU draws so far (`render3d_gpu::stage1_job`, этап 1 of `docs/GPU-BACKEND.md`), rendered by both
+/// engines, compared. `diff` is the difference map (red where the words differ, black where they
+/// match), `edge_diffs` the differing pixels next to a colour change (a polygon's edge or its
+/// silhouette) — the acceptance wants that empty.
+#[cfg(feature = "gpu")]
+#[derive(Clone, Debug)]
+pub struct GpuParity {
+    /// GPU words against the software engine's on the same filtered job.
+    pub report: ParityReport,
+    /// The difference map, RGBA: red where the words differ, black where they match.
+    pub diff: Vec<u8>,
+    /// The picture's width and height (the map's).
+    pub w: usize,
+    pub h: usize,
+    /// Differing pixels beside a colour change in the reference.
+    pub edge_diffs: usize,
+}
+
+#[cfg(feature = "gpu")]
+pub fn gpu_parity_check(path: &std::path::Path) -> Result<GpuParity, String> {
+    let d = jobdump::read(path)?;
+    let job = render3d_gpu::stage1_job(&d.job);
+    let (w, h) = (job.width * d.scale, 192 * d.scale);
+    let (ref_px, ref_notes) = render3d::render(&job, d.scale);
+    let (px, notes) = render3d_gpu::render(&job, d.scale)?;
+    let mut rep = ParityReport {
+        vblank: d.vblank,
+        path: path.display().to_string(),
+        pixels: ref_px.len(),
+        exact: 0,
+        mean_abs: [0.0; 3],
+        over2: 0,
+        fx_off: 0,
+        notes_equal: notes == ref_notes,
+        same_size: px.len() == ref_px.len(),
+    };
+    let (mut sum, mut n) = ([0u64; 3], 0u64);
+    let mut diff = vec![0u8; ref_px.len() * 4];
+    let mut edge_diffs = 0;
+    for (i, (a, b)) in px.iter().zip(ref_px.iter()).enumerate() {
+        if a == b {
+            rep.exact += 1;
+            continue;
+        }
+        diff[i * 4] = 255;
+        diff[i * 4 + 3] = 255;
+        let dr = (a & 63).abs_diff(b & 63);
+        let dg = (a >> 6 & 63).abs_diff(b >> 6 & 63);
+        let db = (a >> 12 & 63).abs_diff(b >> 12 & 63);
+        let da = (a >> 18 & 31).abs_diff(b >> 18 & 31);
+        sum[0] += dr as u64;
+        sum[1] += dg as u64;
+        sum[2] += db as u64;
+        n += 1;
+        if dr.max(dg).max(db).max(da) > 2 {
+            rep.over2 += 1;
+        }
+        if a >> 24 & 15 != b >> 24 & 15 || a >> 28 & 15 != b >> 28 & 15 {
+            rep.fx_off += 1;
+        }
+        // a colour change across a 4-neighbour: a polygon edge or a silhouette against the 2D
+        let (x, y) = (i % w, i / w);
+        if (x + 1 < w && ref_px[i + 1] != *b) || (x > 0 && ref_px[i - 1] != *b) || (y + 1 < h && ref_px[i + w] != *b) || (y > 0 && ref_px[i - w] != *b) {
+            edge_diffs += 1;
+        }
+    }
+    if n > 0 {
+        rep.mean_abs = sum.map(|s| s as f32 / n as f32);
+    }
+    Ok(GpuParity { report: rep, diff, w, h, edge_diffs })
 }
 
 impl TexFilter {

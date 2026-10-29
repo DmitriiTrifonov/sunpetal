@@ -158,12 +158,12 @@ pub(super) const NOTE: [&str; 2] = [
     "3D: anti-aliasing is not drawn (at 2x and more the picture is smoother anyway)",
 ];
 
-fn c5to6(c: u32) -> u32 {
+pub(super) fn c5to6(c: u32) -> u32 {
     if c != 0 { c * 2 + 1 } else { 0 }
 }
 
 /// A 15-bit palette colour as RGB666.
-fn rgb555(c: u16) -> (u32, u32, u32) {
+pub(super) fn rgb555(c: u16) -> (u32, u32, u32) {
     (c5to6(c as u32 & 31), c5to6(c as u32 >> 5 & 31), c5to6(c as u32 >> 10 & 31))
 }
 
@@ -271,7 +271,7 @@ pub(super) fn sample(job: &Mem, tex: u32, pal: u32, s: f32, t: f32) -> (u32, u32
 }
 
 /// CLEAR_DEPTH's 15 bits as the depth buffer holds them (0-1 of 24 bits).
-fn clear_depth(d: u16) -> f32 {
+pub(super) fn clear_depth(d: u16) -> f32 {
     let d = d as u32;
     (d * 0x200 + ((d + 1) >> 15) * 0x1FF) as f32 / 16_777_215.0
 }
