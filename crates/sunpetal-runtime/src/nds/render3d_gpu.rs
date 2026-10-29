@@ -39,6 +39,8 @@ struct Ctx {
     bgl_fog: wgpu::BindGroupLayout,
     outline_pipeline: wgpu::RenderPipeline,
     bgl_outline: wgpu::BindGroupLayout,
+    shade_pipeline: wgpu::RenderPipeline,
+    bgl_shade: wgpu::BindGroupLayout,
     blend_pipeline: wgpu::RenderPipeline,
     bgl_blend: wgpu::BindGroupLayout,
     mask_pipeline: wgpu::RenderPipeline,
@@ -103,7 +105,8 @@ fn make_ctx() -> Result<Ctx, String> {
         label: Some("render3d_gpu rear"),
         entries: &[uniform(0), tex(3, wgpu::TextureSampleType::Uint)],
     });
-    // the fog pass: uniforms, the finished picture's word, fog flag, depth and the outline level
+    // the fog pass: uniforms, the finished picture's word, fog flag, depth, the outline level, the
+    // shade level and the polygon ID (the edge marking reads it)
     let bgl_fog = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("render3d_gpu fog"),
         entries: &[
@@ -111,7 +114,9 @@ fn make_ctx() -> Result<Ctx, String> {
             tex(4, wgpu::TextureSampleType::Uint),
             tex(5, wgpu::TextureSampleType::Uint),
             tex(6, wgpu::TextureSampleType::Float { filterable: false }),
+            tex(8, wgpu::TextureSampleType::Uint),
             tex(14, wgpu::TextureSampleType::Uint),
+            tex(15, wgpu::TextureSampleType::Uint),
         ],
     });
     // the outline pass (этап 7.1): uniforms and the finished picture's word, depth, ID, cover, trans
@@ -122,6 +127,17 @@ fn make_ctx() -> Result<Ctx, String> {
             tex(4, wgpu::TextureSampleType::Uint),
             tex(6, wgpu::TextureSampleType::Float { filterable: false }),
             tex(11, wgpu::TextureSampleType::Uint),
+            tex(12, wgpu::TextureSampleType::Uint),
+            tex(13, wgpu::TextureSampleType::Uint),
+        ],
+    });
+    // the shade pass (этап 7.2): uniforms and the finished picture's word, depth, cover, trans
+    let bgl_shade = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("render3d_gpu shade"),
+        entries: &[
+            uniform(0),
+            tex(4, wgpu::TextureSampleType::Uint),
+            tex(6, wgpu::TextureSampleType::Float { filterable: false }),
             tex(12, wgpu::TextureSampleType::Uint),
             tex(13, wgpu::TextureSampleType::Uint),
         ],
@@ -284,6 +300,34 @@ fn make_ctx() -> Result<Ctx, String> {
         multiview_mask: None,
         cache: None,
     });
+    // the shading (этап 7.2): a full-screen pass computing the shade level (0-15) per pixel, one
+    // R32Uint target the fog pass packs into the word's bits 28-31
+    let layout_shade = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("render3d_gpu shade"),
+        bind_group_layouts: &[Some(&bgl_shade)],
+        immediate_size: 0,
+    });
+    let shade_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("render3d_gpu shade"),
+        layout: Some(&layout_shade),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_full"),
+            compilation_options: Default::default(),
+            buffers: &[Some(vbuf.clone())],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_shade"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::TextureFormat::R32Uint.into())],
+        }),
+        primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    });
     let layout_blend = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("render3d_gpu blend"),
         bind_group_layouts: &[Some(&bgl_blend)],
@@ -336,7 +380,7 @@ fn make_ctx() -> Result<Ctx, String> {
         multiview_mask: None,
         cache: None,
     });
-    Ok(Ctx { device, queue, pipeline, bgl, rear_pipeline, bgl_rear, fog_pipeline, bgl_fog, outline_pipeline, bgl_outline, blend_pipeline, bgl_blend, mask_pipeline, bgl_mask })
+    Ok(Ctx { device, queue, pipeline, bgl, rear_pipeline, bgl_rear, fog_pipeline, bgl_fog, outline_pipeline, bgl_outline, shade_pipeline, bgl_shade, blend_pipeline, bgl_blend, mask_pipeline, bgl_mask })
 }
 
 /// Where a texture's picture sits in the frame's atlas, and how its coordinates map onto it.
@@ -440,12 +484,16 @@ pub(super) fn stage4_job(job: &Job) -> Job {
     }
 }
 
-/// The job for stage 7.1: `stage4_job` with the outline extras on (a representative strength and
-/// width), so the outline bits (24-27) are part of the comparison.
+/// The job for stage 7.1-7.2: `stage4_job` with the outline and shading extras on (a
+/// representative strength and width/radius), so the outline bits (24-27) and the shade bits
+/// (28-31) are part of the comparison.
 pub(super) fn stage7_job(job: &Job) -> Job {
     let mut j = stage4_job(job);
     j.extras.outline = 0.5;
     j.extras.outline_width = 0.5;
+    j.extras.shadow = 0.5;
+    j.extras.shadow_radius = 2.0;
+    j.disp3dcnt |= 0x20; // the edge marking (этап 7.3), masked off in `stage4_job`
     j
 }
 
@@ -707,7 +755,8 @@ fn render_all(job: &Job, scale: usize) -> Result<Rendered, String> {
     // the uniforms: sizes, the clear word, the modes, the scale, the rear plane's origin, the fog,
     // the clear ID, the blend flag, and the toon and fog tables
     let fog_step = (0x400u32 >> ((job.disp3dcnt >> 8) & 15)).max(1);
-    let mut uni = Vec::with_capacity(84 * 4);
+    let rays = super::render3d::shade_rays();
+    let mut uni = Vec::with_capacity(100 * 4);
     for u in [
         w as u32,
         h as u32,
@@ -729,10 +778,24 @@ fn render_all(job: &Job, scale: usize) -> Result<Rendered, String> {
         (job.disp3dcnt & 8 != 0) as u32,
         job.extras.outline.to_bits(),
         job.extras.outline_width.to_bits(),
+        job.extras.shadow.to_bits(),
+        ((job.extras.shadow_radius * s as f32).round() as u32).max(2),
+        rays[0].0.to_bits(),
+        rays[0].1.to_bits(),
+        rays[1].0.to_bits(),
+        rays[1].1.to_bits(),
+        rays[2].0.to_bits(),
+        rays[2].1.to_bits(),
+        (job.disp3dcnt & 0x20 != 0) as u32,
+        job.edge[0] as u32 | (job.edge[1] as u32) << 16,
+        job.edge[2] as u32 | (job.edge[3] as u32) << 16,
+        job.edge[4] as u32 | (job.edge[5] as u32) << 16,
+        job.edge[6] as u32 | (job.edge[7] as u32) << 16,
     ] {
         uni.extend_from_slice(&u.to_le_bytes());
     }
-    // 20 scalars end on the vec4 arrays' alignment: no padding
+    // 33 scalars = 132 bytes: pad to the vec4 arrays' alignment (144)
+    uni.extend_from_slice(&[0u8; 12]);
     for t in job.toon {
         uni.extend_from_slice(&(t as u32).to_le_bytes());
     }
@@ -1079,13 +1142,53 @@ fn render_all(job: &Job, scale: usize) -> Result<Rendered, String> {
         rp.set_viewport(0.0, 0.0, w as f32, h as f32, 0.0, 1.0);
         rp.draw(0..3, 0..1);
     }
+    // the shading (этап 7.2): the software engine's `shade_pass`, a shade level (0-15) per pixel
+    let shade_tex = attach(device, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
+    {
+        let sv = shade_tex.create_view(&Default::default());
+        let wv = word[cur].create_view(&Default::default());
+        let dv = depth[cur].create_view(&Default::default());
+        let cov = cover[cur].create_view(&Default::default());
+        let trv = trans[cur].create_view(&Default::default());
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("3d shade"),
+            layout: &c.bgl_shade,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&wv) },
+                wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&dv) },
+                wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(&cov) },
+                wgpu::BindGroupEntry { binding: 13, resource: wgpu::BindingResource::TextureView(&trv) },
+            ],
+        });
+        let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("3d shade"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &sv,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        rp.set_pipeline(&c.shade_pipeline);
+        rp.set_bind_group(0, &bind, &[]);
+        rp.set_vertex_buffer(0, quad.slice(..));
+        rp.set_viewport(0.0, 0.0, w as f32, h as f32, 0.0, 1.0);
+        rp.draw(0..3, 0..1);
+    }
     // the fog over the finished picture
     {
         let fv = fin.create_view(&Default::default());
         let wv = word[cur].create_view(&Default::default());
         let fgv = fog.create_view(&Default::default());
         let dv = depth[cur].create_view(&Default::default());
+        let iv = id[cur].create_view(&Default::default());
         let ov = outline_tex.create_view(&Default::default());
+        let sv = shade_tex.create_view(&Default::default());
         let fog_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("3d fog"),
             layout: &c.bgl_fog,
@@ -1094,7 +1197,9 @@ fn render_all(job: &Job, scale: usize) -> Result<Rendered, String> {
                 wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&wv) },
                 wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&fgv) },
                 wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&dv) },
+                wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(&iv) },
                 wgpu::BindGroupEntry { binding: 14, resource: wgpu::BindingResource::TextureView(&ov) },
+                wgpu::BindGroupEntry { binding: 15, resource: wgpu::BindingResource::TextureView(&sv) },
             ],
         });
         let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1266,6 +1371,23 @@ struct Globals {
   // our outline (этап 7.1): its strength (0-1) and width in DS pixels (0.25-2)
   outline: f32,
   outline_width: f32,
+  // our shading (этап 7.2): its strength (0-1), how many steps a ray takes, and the three rays
+  // (computed on the CPU, exactly the software engine's)
+  shadow: f32,
+  shade_steps: u32,
+  ray0x: f32,
+  ray0y: f32,
+  ray1x: f32,
+  ray1y: f32,
+  ray2x: f32,
+  ray2y: f32,
+  // the DS's edge marking (этап 7.3): on (DISP3DCNT bit 5) and the eight edge colours, two
+  // BGR555 words packed per scalar
+  edge_on: u32,
+  edge0: u32,
+  edge1: u32,
+  edge2: u32,
+  edge3: u32,
   // the toon table, four 15-bit colours per vec4 (uniform arrays need a stride of 16)
   toon: array<vec4u, 8>,
   // the fog table, four u8 densities per vec4
@@ -1292,6 +1414,8 @@ struct Globals {
 @group(0) @binding(13) var trans_cur: texture_2d<u32>;
 // the outline's line level (этап 7.1), the fog pass packs it into the word's bits 24-27
 @group(0) @binding(14) var outline_tex: texture_2d<u32>;
+// the shading's shade level (этап 7.2), the fog pass packs it into the word's bits 28-31
+@group(0) @binding(15) var shade_tex: texture_2d<u32>;
 
 // One fan triangle: the exact vertex positions (the software engine's), its area, the ownership
 // of its edges (bits 0-2), the mode, the interpolation data of its three vertices, and its
@@ -1792,6 +1916,12 @@ const INTERFACE_DEPTH: f32 = 0.05;
 const HIDING_ALPHA: u32 = 12u;
 const SILHOUETTE: f32 = 0.5;
 
+// rounding half away from zero (the software engine's `f32::round`): WGSL's own `round` ties to
+// even, which flips a value of exactly 2.5 the wrong way
+fn round_away(x: f32) -> f32 {
+  return select(floor(x + 0.5), ceil(x - 0.5), x < 0.0);
+}
+
 // a neighbour at `q` takes the pair out of the outline (a translucent-depth or an interface pixel)
 fn outline_pair_skip(q: vec2u) -> bool {
   return textureLoad(trans_cur, q, 0u).x != 0u || textureLoad(depth_tex, q, 0u).x < INTERFACE_DEPTH;
@@ -1801,7 +1931,7 @@ fn outline_pair_skip(q: vec2u) -> bool {
 // near side of a jump in depth or of another (last opaque) polygon's ID gets a line, the border
 // with the empty 2D a lighter one; the translucent cover weakens it, none from HIDING_ALPHA
 fn outline_level(p: vec2u) -> u32 {
-  let k = max(u32(round(g.outline_width * f32(g.scale))), 1u);
+  let k = max(u32(round_away(g.outline_width * f32(g.scale))), 1u);
   if (p.x < k || p.y < k || p.x >= g.w - k || p.y >= g.h - k) {
     return 0u;
   }
@@ -1858,7 +1988,7 @@ fn outline_level(p: vec2u) -> u32 {
     return 0u;
   }
   let f = select(SILHOUETTE, 1.0, edge);
-  return u32(round(min(g.outline * f, 1.0) * f32(31u - cover) / 31.0 * 15.0));
+  return u32(round_away(min(g.outline * f, 1.0) * f32(31u - cover) / 31.0 * 15.0));
 }
 
 struct FOutline {
@@ -1872,6 +2002,87 @@ fn fs_outline(in: VFull) -> FOutline {
   return o;
 }
 
+// the shading (этап 7.2): the software engine's `shade_pass` — three rays back towards the light
+// (up and a little left), up to `shade_steps` pixels; one that meets something nearer by JUMP of
+// depth shades the pixel, the nearer the stronger (a penumbra, the rays apart). Only what lies
+// behind an object is shaded, never the object itself; interface, translucent-depth and empty
+// pixels are not occluders, and a translucent cover weakens the shade like the outline's.
+const JUMP: f32 = 0.006;
+
+// one of the three rays, from the uniform (the CPU computed them exactly as the software engine)
+fn shade_ray(r: u32) -> vec2f {
+  if (r == 0u) {
+    return vec2f(g.ray0x, g.ray0y);
+  }
+  if (r == 1u) {
+    return vec2f(g.ray1x, g.ray1y);
+  }
+  return vec2f(g.ray2x, g.ray2y);
+}
+
+fn shade_level(p: vec2u) -> u32 {
+  let alpha = (textureLoad(color, p, 0u).x >> 18u) & 31u;
+  let d = textureLoad(depth_tex, p, 0u).x;
+  let cover = textureLoad(cover_cur, p, 0u).x;
+  if (alpha < 31u || textureLoad(trans_cur, p, 0u).x != 0u || d < INTERFACE_DEPTH || cover >= HIDING_ALPHA) {
+    return 0u;
+  }
+  var total = 0.0;
+  for (var r = 0u; r < 3u; r++) {
+    let ray = shade_ray(r);
+    for (var n = 1u; n <= g.shade_steps; n++) {
+      let q = vec2i(i32(p.x) + i32(round_away(ray.x * f32(n))), i32(p.y) + i32(round_away(ray.y * f32(n))));
+      if (q.x < 0 || q.y < 0 || q.x >= i32(g.w) || q.y >= i32(g.h)) {
+        break;
+      }
+      let qq = vec2u(u32(q.x), u32(q.y));
+      let qa = (textureLoad(color, qq, 0u).x >> 18u) & 31u;
+      if (qa < 31u || textureLoad(trans_cur, qq, 0u).x != 0u || textureLoad(depth_tex, qq, 0u).x < INTERFACE_DEPTH) {
+        continue;
+      }
+      if (textureLoad(depth_tex, qq, 0u).x < d - JUMP) {
+        total = total + (1.0 - div(f32(n - 1u), f32(g.shade_steps)));
+        break;
+      }
+    }
+  }
+  let dim = div(f32(31u - cover), 31.0);
+  return u32(round_away(div(total, 3.0) * min(g.shadow, 1.0) * dim * 15.0));
+}
+
+struct FShade {
+  @location(0) shade: vec4u,
+};
+
+@fragment
+fn fs_shade(in: VFull) -> FShade {
+  var o: FShade;
+  o.shade = vec4u(shade_level(vec2u(u32(floor(in.clip.x)), u32(floor(in.clip.y)))), 0u, 0u, 0u);
+  return o;
+}
+
+// a neighbour at `q` is of another polygon ID and not nearer: the pixel takes its edge colour
+fn edge_neighbour(q: vec2u, id: u32, d: f32) -> bool {
+  return textureLoad(id_cur, q, 0u).x != id && textureLoad(depth_tex, q, 0u).x >= d;
+}
+
+// the edge colour of a polygon ID: EDGE_COLOR[(id >> 3) & 7], two BGR555 words per scalar
+fn edge_colour(id: u32) -> u32 {
+  let ei = (id >> 3u) & 7u;
+  var e: u32;
+  if (ei < 2u) {
+    e = g.edge0;
+  } else if (ei < 4u) {
+    e = g.edge1;
+  } else if (ei < 6u) {
+    e = g.edge2;
+  } else {
+    e = g.edge3;
+  }
+  let c = select(e & 0xFFFFu, e >> 16u, (ei & 1u) != 0u);
+  return c5to6(c & 31u) | c5to6((c >> 5u) & 31u) << 6u | c5to6((c >> 10u) & 31u) << 12u;
+}
+
 @fragment
 fn fs_fog(in: VFull) -> FFog {
   let p = vec2u(u32(floor(in.clip.x)), u32(floor(in.clip.y)));
@@ -1880,6 +2091,31 @@ fn fs_fog(in: VFull) -> FFog {
   var cg = (word >> 6u) & 63u;
   var cb = (word >> 12u) & 63u;
   var ca = (word >> 18u) & 31u;
+  // the DS's edge marking (этап 7.3): an opaque pixel beside a farther-or-equal pixel of another
+  // polygon ID takes its ID's edge colour — before the fog mixes the colour
+  if (g.edge_on != 0u && ca == 31u) {
+    let id = textureLoad(id_cur, p, 0u).x;
+    let d = textureLoad(depth_tex, p, 0u).x;
+    var marked = false;
+    if (p.x >= g.scale) {
+      marked = edge_neighbour(vec2u(p.x - g.scale, p.y), id, d);
+    }
+    if (!marked && p.x + g.scale < g.w) {
+      marked = edge_neighbour(vec2u(p.x + g.scale, p.y), id, d);
+    }
+    if (!marked && p.y >= g.scale) {
+      marked = edge_neighbour(vec2u(p.x, p.y - g.scale), id, d);
+    }
+    if (!marked && p.y + g.scale < g.h) {
+      marked = edge_neighbour(vec2u(p.x, p.y + g.scale), id, d);
+    }
+    if (marked) {
+      let ec = edge_colour(id);
+      cr = ec & 63u;
+      cg = (ec >> 6u) & 63u;
+      cb = (ec >> 12u) & 63u;
+    }
+  }
   if (g.fog_enable != 0u && textureLoad(fogtex, p, 0u).x != 0u) {
     let depth = textureLoad(depth_tex, p, 0u).x;
     let depth24 = u32(clamp(depth, 0.0, 1.0) * 16777215.0);
@@ -1900,7 +2136,8 @@ fn fs_fog(in: VFull) -> FFog {
     o.word = vec4u(0u, 0u, 0u, 0u);
   } else {
     let line = textureLoad(outline_tex, p, 0u).x & 15u;
-    o.word = vec4u(cr | cg << 6u | cb << 12u | ca << 18u | line << 24u, 0u, 0u, 0u);
+    let shade = textureLoad(shade_tex, p, 0u).x & 15u;
+    o.word = vec4u(cr | cg << 6u | cb << 12u | ca << 18u | line << 24u | shade << 28u, 0u, 0u, 0u);
   }
   return o;
 }
@@ -2021,7 +2258,21 @@ mod tests {
             }
         };
         assert_eq!(notes, wnotes, "notes differ");
-        assert_eq!(got, want, "words differ");
+        let diffs: Vec<(usize, &u32, &u32)> = got
+            .iter()
+            .zip(&want)
+            .enumerate()
+            .filter(|(_, (a, b))| a != b)
+            .take(8)
+            .map(|(i, (a, b))| (i, a, b))
+            .collect();
+        if !diffs.is_empty() {
+            let mut msg = format!("words differ at {} pixels, e.g.", got.iter().zip(&want).filter(|(a, b)| a != b).count());
+            for (i, a, b) in diffs {
+                msg.push_str(&format!("\n  pixel {i}: gpu {a:#010x} soft {b:#010x}"));
+            }
+            panic!("{msg}");
+        }
         assert_eq!(oid, want_aux.oid, "oid map differs");
         assert_eq!(cover, want_aux.cover, "cover map differs");
         assert_eq!(trans, want_aux.trans, "trans map differs");
@@ -2673,6 +2924,57 @@ mod tests {
         let (want, _, _) = super::super::render3d::render_maps(&j, 1);
         let lines = want.iter().filter(|w| *w >> 24 & 15 != 0).count();
         assert!(lines > 0, "the reference frame has no outline at all");
+        both_maps(&j, 1);
+        both_maps(&j, 2);
+    }
+
+    #[test]
+    fn the_shading_matches_the_software_behind_an_occluder() {
+        // a far square, a nearer square over its middle: from the far square's pixels just below
+        // and right of the nearer one, a ray towards the light (up and a little left) meets the
+        // nearer square and shades them — the shade level matches the software engine's
+        let mut j = empty_job();
+        j.extras.shadow = 1.0;
+        j.extras.shadow_radius = 2.0;
+        j.verts = vec![
+            vert(20.0, 20.0, 0x0800, 0x1000, 31.0, 0.0, 0.0),
+            vert(180.0, 20.0, 0x0800, 0x1000, 31.0, 0.0, 0.0),
+            vert(180.0, 180.0, 0x0800, 0x1000, 31.0, 0.0, 0.0),
+            vert(20.0, 180.0, 0x0800, 0x1000, 31.0, 0.0, 0.0),
+            vert(60.0, 40.0, -0x0800, 0x1000, 0.0, 31.0, 0.0),
+            vert(120.0, 40.0, -0x0800, 0x1000, 0.0, 31.0, 0.0),
+            vert(120.0, 100.0, -0x0800, 0x1000, 0.0, 31.0, 0.0),
+            vert(60.0, 100.0, -0x0800, 0x1000, 0.0, 31.0, 0.0),
+        ];
+        j.polys = vec![
+            GxPoly { first: 0, n: 4, attr: 31 << 16 | 3 << 24, tex: 0, pal: 0, translucent: false, sortkey: 0 },
+            GxPoly { first: 4, n: 4, attr: 31 << 16 | 5 << 24, tex: 0, pal: 0, translucent: false, sortkey: 0 },
+        ];
+        let (want, _, _) = super::super::render3d::render_maps(&j, 1);
+        let shaded = want.iter().filter(|w| *w >> 28 & 15 != 0).count();
+        assert!(shaded > 0, "the reference frame has no shading at all");
+        both_maps(&j, 1);
+        both_maps(&j, 2);
+    }
+
+    #[test]
+    fn the_edge_marking_colours_a_polygon_border_by_its_id() {
+        // a red square (id 3): its border against the clear plane takes the edge colour for
+        // (3 >> 3) & 7 = 0 — green here — while the inside keeps the polygon's red
+        let mut j = empty_job();
+        j.disp3dcnt |= 0x20;
+        j.edge = [0x03E0, 0x001F, 0, 0, 0, 0, 0, 0];
+        j.verts = vec![
+            vert(20.0, 20.0, 0x0800, 0x1000, 31.0, 0.0, 0.0),
+            vert(150.0, 20.0, 0x0800, 0x1000, 31.0, 0.0, 0.0),
+            vert(150.0, 150.0, 0x0800, 0x1000, 31.0, 0.0, 0.0),
+            vert(20.0, 150.0, 0x0800, 0x1000, 31.0, 0.0, 0.0),
+        ];
+        j.polys = vec![GxPoly { first: 0, n: 4, attr: 31 << 16 | 3 << 24, tex: 0, pal: 0, translucent: false, sortkey: 0 }];
+        let (want, _, _) = super::super::render3d::render_maps(&j, 1);
+        // the edge colour (green: 63 in bits 6-11) appears along the border, the red stays inside
+        assert!(want.iter().any(|w| *w & 0x3FFFF == 63 << 6), "the reference has no edge-marked pixels");
+        assert!(want.iter().any(|w| *w & 0x3FFFF == 63), "the reference lost the polygon's own colour");
         both_maps(&j, 1);
         both_maps(&j, 2);
     }

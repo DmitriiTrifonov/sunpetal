@@ -692,6 +692,16 @@ fn outline_pass(strength: f32, width: f32, t: &Target, w: usize, h: usize, s: us
     lines
 }
 
+/// The shading's three rays: up and a little left, a little apart. Shared with the GPU backend
+/// (этап 7.2), so the GPU walks exactly the same rays.
+pub(super) fn shade_rays() -> [(f32, f32); 3] {
+    [-0.3f32, 0.0, 0.3].map(|a| {
+        let (c, sn) = (a.cos(), a.sin());
+        let (dx, dy) = (-0.4f32, -0.92f32);
+        (dx * c - dy * sn, dx * sn + dy * c)
+    })
+}
+
 /// Soft shadows from the depth: each pixel's shade level, 0-15 (0 none; the compositor darkens the
 /// 3D's colour by it, in bits 28-31 of the picture's word). The light is up and a little left, so
 /// a shadow falls down and a little right: from a pixel three rays go back towards the light, up to
@@ -706,14 +716,7 @@ fn shade_pass(strength: f32, radius: f32, t: &Target, w: usize, h: usize, s: usi
     const JUMP: f32 = 0.006;
     let steps = ((radius * s as f32).round() as usize).max(2);
     // towards the light: up and a little left, the rays a little apart
-    let rays: Vec<(f32, f32)> = [-0.3f32, 0.0, 0.3]
-        .iter()
-        .map(|a| {
-            let (c, sn) = (a.cos(), a.sin());
-            let (dx, dy) = (-0.4f32, -0.92f32);
-            (dx * c - dy * sn, dx * sn + dy * c)
-        })
-        .collect();
+    let rays: Vec<(f32, f32)> = shade_rays().to_vec();
     let (wi, hi) = (w as isize, h as isize);
     let mut out = vec![0u8; w * h];
     let bands = threads().min(h / 64).max(1);

@@ -875,6 +875,99 @@ pub fn gpu_outline_check(path: &std::path::Path) -> Result<OutlineParity, String
     Ok(rep)
 }
 
+/// The GPU backend's shading (этап 7.2 of `docs/GPU-BACKEND.md`) against the software engine's on
+/// a dump: the job is filtered to `stage7_job` (the shading extras on) and the words — including
+/// the shade bits (28-31) — compared. The acceptance: the shade bits match on ≥ 95 % of the pixels.
+#[cfg(feature = "gpu")]
+#[derive(Clone, Debug)]
+pub struct ShadeParity {
+    pub path: String,
+    pub pixels: usize,
+    /// Pixels whose whole word matches.
+    pub exact: usize,
+    /// Pixels whose shade bits match.
+    pub shade_exact: usize,
+    /// Pixels with the shade bits on in the reference.
+    pub shade_on: usize,
+    /// The first differing pixel: (index, GPU, software).
+    pub first: Option<(usize, u32, u32)>,
+}
+
+#[cfg(feature = "gpu")]
+pub fn gpu_shade_check(path: &std::path::Path) -> Result<ShadeParity, String> {
+    let d = jobdump::read(path)?;
+    let job = render3d_gpu::stage7_job(&d.job);
+    let (ref_px, ref_notes) = render3d::render(&job, d.scale);
+    let (px, notes) = render3d_gpu::render(&job, d.scale)?;
+    if notes != ref_notes {
+        eprintln!("{}: notes differ (gpu {:#x} soft {:#x})", path.display(), notes, ref_notes);
+    }
+    let mut rep = ShadeParity {
+        path: path.display().to_string(),
+        pixels: ref_px.len(),
+        exact: 0,
+        shade_exact: 0,
+        shade_on: 0,
+        first: None,
+    };
+    for (i, (a, b)) in px.iter().zip(ref_px.iter()).enumerate() {
+        if a >> 28 & 15 == b >> 28 & 15 {
+            rep.shade_exact += 1;
+        }
+        if b >> 28 & 15 != 0 {
+            rep.shade_on += 1;
+        }
+        if a == b {
+            rep.exact += 1;
+        } else if rep.first.is_none() {
+            rep.first = Some((i, *a, *b));
+        }
+    }
+    Ok(rep)
+}
+
+/// The GPU backend's edge marking (этап 7.3 of `docs/GPU-BACKEND.md`) against the software
+/// engine's on a dump: the job is filtered to `stage7_job` (the edge marking bit on) and the words
+/// compared — the acceptance is byte-exactness, like the stages before.
+#[cfg(feature = "gpu")]
+#[derive(Clone, Debug)]
+pub struct EdgeParity {
+    pub path: String,
+    pub pixels: usize,
+    /// Pixels whose whole word matches.
+    pub exact: usize,
+    /// Pixels whose colour the edge marking changed in the reference (against `stage4_job`).
+    pub edge_pixels: usize,
+    /// The first differing pixel: (index, GPU, software).
+    pub first: Option<(usize, u32, u32)>,
+}
+
+#[cfg(feature = "gpu")]
+pub fn gpu_edge_check(path: &std::path::Path) -> Result<EdgeParity, String> {
+    let d = jobdump::read(path)?;
+    let job = render3d_gpu::stage7_job(&d.job);
+    let (ref_px, ref_notes) = render3d::render(&job, d.scale);
+    let (px, notes) = render3d_gpu::render(&job, d.scale)?;
+    if notes != ref_notes {
+        eprintln!("{}: notes differ (gpu {:#x} soft {:#x})", path.display(), notes, ref_notes);
+    }
+    // the pixels the edge marking changed: the stage-7 reference against the stage-4 one
+    let job4 = render3d_gpu::stage4_job(&d.job);
+    let (ref4, _) = render3d::render(&job4, d.scale);
+    let mut rep = EdgeParity { path: path.display().to_string(), pixels: ref_px.len(), exact: 0, edge_pixels: 0, first: None };
+    for (i, ((a, b), b4)) in px.iter().zip(ref_px.iter()).zip(ref4.iter()).enumerate() {
+        if a == b {
+            rep.exact += 1;
+        } else if rep.first.is_none() {
+            rep.first = Some((i, *a, *b));
+        }
+        if b & 0x3FFFF != b4 & 0x3FFFF {
+            rep.edge_pixels += 1;
+        }
+    }
+    Ok(rep)
+}
+
 impl TexFilter {
     pub fn parse(s: &str) -> TexFilter {
         match s {

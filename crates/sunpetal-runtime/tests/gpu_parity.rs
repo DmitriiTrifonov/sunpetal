@@ -273,3 +273,104 @@ fn gpu_outline_on_real_frames() {
         println!("no GPU device: the outline test did not run");
     }
 }
+
+/// Этап 7.2 acceptance (`docs/GPU-BACKEND.md`): the shade bits (28-31) match the software
+/// engine's on ≥ 95 % of the pixels of every dump.
+#[cfg(feature = "gpu")]
+#[test]
+fn gpu_shade_on_real_frames() {
+    use sunpetal_runtime::nds::gpu_shade_check;
+    let Some(dir) = std::env::var_os("SUNPETAL_JOB_DUMPS").map(PathBuf::from) else {
+        println!("SUNPETAL_JOB_DUMPS is not set: no dumps to check");
+        return;
+    };
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .expect("dump dir")
+        .filter_map(|e| {
+            let p = e.unwrap().path();
+            (p.extension()?.to_str()? == "spjob").then_some(p)
+        })
+        .collect();
+    files.sort();
+    assert!(!files.is_empty(), "no .spjob files in {}", dir.display());
+    let mut any = false;
+    for f in files {
+        let gp = match gpu_shade_check(&f) {
+            Err(e) if e.contains("no GPU") => {
+                println!("{}: skipped ({e})", f.display());
+                continue;
+            }
+            Err(e) => panic!("{}: {e}", f.display()),
+            Ok(gp) => gp,
+        };
+        any = true;
+        println!(
+            "{}: shade bits {}/{} ({:.4}%), on {} pixels, words exact {}/{}",
+            gp.path,
+            gp.shade_exact,
+            gp.pixels,
+            100.0 * gp.shade_exact as f64 / gp.pixels.max(1) as f64,
+            gp.shade_on,
+            gp.exact,
+            gp.pixels
+        );
+        if let Some((i, g, s)) = gp.first {
+            println!("  first word mismatch at pixel {i}: gpu {g:08x} soft {s:08x}");
+        }
+        assert!(
+            gp.shade_exact * 100 >= gp.pixels * 95,
+            "{}: shade bits match on {} of {} pixels",
+            gp.path,
+            gp.shade_exact,
+            gp.pixels
+        );
+    }
+    if any {
+        println!("shade bits matched on all the dumps");
+    } else {
+        println!("no GPU device: the shading test did not run");
+    }
+}
+
+/// Этап 7.3 acceptance (`docs/GPU-BACKEND.md`): the edge marking (DISP3DCNT bit 5) matches the
+/// software engine's byte-exact on every dump.
+#[cfg(feature = "gpu")]
+#[test]
+fn gpu_edge_on_real_frames() {
+    use sunpetal_runtime::nds::gpu_edge_check;
+    let Some(dir) = std::env::var_os("SUNPETAL_JOB_DUMPS").map(PathBuf::from) else {
+        println!("SUNPETAL_JOB_DUMPS is not set: no dumps to check");
+        return;
+    };
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .expect("dump dir")
+        .filter_map(|e| {
+            let p = e.unwrap().path();
+            (p.extension()?.to_str()? == "spjob").then_some(p)
+        })
+        .collect();
+    files.sort();
+    assert!(!files.is_empty(), "no .spjob files in {}", dir.display());
+    let mut any = false;
+    for f in files {
+        let gp = match gpu_edge_check(&f) {
+            Err(e) if e.contains("no GPU") => {
+                println!("{}: skipped ({e})", f.display());
+                continue;
+            }
+            Err(e) => panic!("{}: {e}", f.display()),
+            Ok(gp) => gp,
+        };
+        any = true;
+        println!("{}: words exact {}/{} ({} edge-marked pixels in the reference)", gp.path, gp.exact, gp.pixels, gp.edge_pixels);
+        if let Some((i, g, s)) = gp.first {
+            println!("  first word mismatch at pixel {i}: gpu {g:08x} soft {s:08x}");
+        }
+        assert_eq!(gp.exact, gp.pixels, "{}: the edge marking differs", gp.path);
+    }
+    if any {
+        println!("edge marking matched on all the dumps");
+    } else {
+        println!("no GPU device: the edge test did not run");
+    }
+}
