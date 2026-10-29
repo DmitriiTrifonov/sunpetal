@@ -50,6 +50,8 @@ struct Ctx {
     blend_pipeline: wgpu::RenderPipeline,
     bgl_blend: wgpu::BindGroupLayout,
     mask_pipeline: wgpu::RenderPipeline,
+    resolve_pipeline: wgpu::RenderPipeline,
+    bgl_resolve: wgpu::BindGroupLayout,
     bgl_mask: wgpu::BindGroupLayout,
 }
 
@@ -489,7 +491,7 @@ fn make_ctx() -> Result<Ctx, String> {
             module: &shader,
             entry_point: Some("vs"),
             compilation_options: Default::default(),
-            buffers: &[Some(vbuf)],
+            buffers: &[Some(vbuf.clone())],
         },
         fragment: Some(wgpu::FragmentState {
             module: &shader,
@@ -503,7 +505,39 @@ fn make_ctx() -> Result<Ctx, String> {
         multiview_mask: None,
         cache: None,
     });
-    Ok(Ctx { device, queue, pipeline, bgl, rear_pipeline, bgl_rear, fog_pipeline, bgl_fog, outline_pipeline, bgl_outline, shade_pipeline, bgl_shade, rows_pipeline, bgl_rows, skyrow_pipeline, bgl_skyrow, extend_pipeline, bgl_extend, blend_pipeline, bgl_blend, mask_pipeline, bgl_mask })
+    // the supersampling resolve (этап 6.2.1): the k x k samples of a pixel averaged into one,
+    // so only the final picture is read back; k comes in a uniform
+    let bgl_resolve = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("render3d_gpu resolve"),
+        entries: &[uniform(0), tex(4, wgpu::TextureSampleType::Uint), uniform(16)],
+    });
+    let layout_resolve = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("render3d_gpu resolve"),
+        bind_group_layouts: &[Some(&bgl_resolve)],
+        immediate_size: 0,
+    });
+    let resolve_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("render3d_gpu resolve"),
+        layout: Some(&layout_resolve),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_full"),
+            compilation_options: Default::default(),
+            buffers: &[Some(vbuf.clone())],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_resolve"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::TextureFormat::R32Uint.into())],
+        }),
+        primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    });
+    Ok(Ctx { device, queue, pipeline, bgl, rear_pipeline, bgl_rear, fog_pipeline, bgl_fog, outline_pipeline, bgl_outline, shade_pipeline, bgl_shade, rows_pipeline, bgl_rows, skyrow_pipeline, bgl_skyrow, extend_pipeline, bgl_extend, blend_pipeline, bgl_blend, mask_pipeline, bgl_mask, resolve_pipeline, bgl_resolve })
 }
 
 /// Where a texture's picture sits in the frame's atlas, and how its coordinates map onto it.
@@ -791,24 +825,27 @@ pub(super) fn render(job: &Job, scale: usize) -> Result<(Vec<u32>, u32), String>
     // then the k x k samples of a pixel averaged
     let k = render3d::msaa_factor(job, s);
     if k >= 2 {
-        let r = render_all(job, s * k, false)?;
-        return Ok((render3d::resolve(&r.words, job.width * s, 192 * s, k), r.notes & !(1 << 1)));
+        let r = render_all(job, s * k, false, k)?;
+        return Ok((r.words, r.notes & !(1 << 1)));
     }
-    let r = render_all(job, scale, false)?;
+    let r = render_all(job, scale, false, 1)?;
     Ok((r.words, r.notes))
 }
 
 /// Draws a job and reads the auxiliary maps back too (этапы 7.0 и 5.1 of `docs/GPU-BACKEND.md`):
 /// the words, `oid`, `cover`, `trans` and the depth.
 pub(super) fn render_maps(job: &Job, scale: usize) -> Result<(Vec<u32>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<f32>, u32), String> {
-    let r = render_all(job, scale, true)?;
+    let r = render_all(job, scale, true, 1)?;
     Ok((r.words, r.oid, r.cover, r.trans, r.depth, r.notes))
 }
 
 /// `maps`: read the auxiliary maps back too (the parity harness wants them; a frame for the window
 /// needs only the words, and four more readbacks of the picture's size cost about as much as the
 /// drawing — этап 6.2.2).
-fn render_all(job: &Job, scale: usize, maps: bool) -> Result<Rendered, String> {
+///
+/// `k` > 1: `scale` is already the supersampled one (s·k) and the words come back resolved to the
+/// size of `scale / k` (the GPU averages the k x k samples, этап 6.2.1); `maps` must be off then.
+fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered, String> {
     let c = ctx()?;
     let s = scale.max(1);
     let (w, h) = (job.width * s, 192 * s);
@@ -983,7 +1020,7 @@ fn render_all(job: &Job, scale: usize, maps: bool) -> Result<Rendered, String> {
     let trans = pair(wgpu::TextureFormat::R32Uint);
     let fog = attach(device, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC);
     let depth_stencil = attach(device, w, h, wgpu::TextureFormat::Depth32Float, wgpu::TextureUsages::RENDER_ATTACHMENT);
-    let fin = attach(device, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC);
+    let fin = attach(device, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING);
     let mut cur = 0usize;
     let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     let rear_bind = rear.as_ref().map(|data| {
@@ -1500,7 +1537,50 @@ fn render_all(job: &Job, scale: usize, maps: bool) -> Result<Rendered, String> {
         rp.draw(0..3, 0..1);
     }
     // the picture back: copy each attachment to a mappable buffer, then read the rows
-    let buf_word = readback_buf(device, &mut enc, &fin, w as u32, h as u32);
+    let (ow, oh) = (w / k, h / k);
+    let res = (k > 1).then(|| {
+        let res = attach(device, ow, oh, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC);
+        let kb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("3d resolve k"),
+            contents: &[k as u32, 0, 0, 0].iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>(),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let fiv = fin.create_view(&Default::default());
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("3d resolve"),
+            layout: &c.bgl_resolve,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&fiv) },
+                wgpu::BindGroupEntry { binding: 16, resource: kb.as_entire_binding() },
+            ],
+        });
+        let rv = res.create_view(&Default::default());
+        let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("3d resolve"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &rv,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        rp.set_pipeline(&c.resolve_pipeline);
+        rp.set_bind_group(0, &bind, &[]);
+        rp.set_vertex_buffer(0, quad.slice(..));
+        rp.set_viewport(0.0, 0.0, ow as f32, oh as f32, 0.0, 1.0);
+        rp.draw(0..3, 0..1);
+        drop(rp);
+        res
+    });
+    let buf_word = match &res {
+        Some(r) => readback_buf(device, &mut enc, r, ow as u32, oh as u32),
+        None => readback_buf(device, &mut enc, &fin, w as u32, h as u32),
+    };
     let aux = maps.then(|| {
         [
             readback_buf(device, &mut enc, &oid[cur], w as u32, h as u32),
@@ -1510,7 +1590,7 @@ fn render_all(job: &Job, scale: usize, maps: bool) -> Result<Rendered, String> {
         ]
     });
     c.queue.submit([enc.finish()]);
-    let words = readback_words(&c.device, &buf_word, w, h)?;
+    let words = readback_words(&c.device, &buf_word, ow, oh)?;
     let (mut oid_px, mut cover_px, mut trans_px, mut depth_px) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     if let Some([bo, bc, bt, bd]) = &aux {
         oid_px = readback_bytes(&c.device, bo, w, h)?;
@@ -2192,6 +2272,41 @@ fn fs_rear(in: VFull) -> FOut {
   o.cover = vec4u(0u, 0u, 0u, 0u);
   o.trans = vec4u(0u, 0u, 0u, 0u);
   o.depth = d;
+  return o;
+}
+
+// the supersampling resolve: the pixel's k x k samples of the big picture averaged, colour
+// weighted by alpha (a sample with no 3D has none), alpha as the share covered, the outline and
+// shade levels over the covered samples; 1:1 with the software engine's `resolve`
+@group(0) @binding(16) var<uniform> rk: vec4u;
+
+@fragment
+fn fs_resolve(in: VFull) -> FFog {
+  let x = u32(floor(in.clip.x));
+  let y = u32(floor(in.clip.y));
+  let k = rk.x;
+  var sa = 0u; var sr = 0u; var sg = 0u; var sb = 0u; var sl = 0u; var sh = 0u;
+  for (var dy = 0u; dy < k; dy++) {
+    for (var dx = 0u; dx < k; dx++) {
+      let p = textureLoad(color, vec2u(x * k + dx, y * k + dy), 0u).x;
+      let a = (p >> 18u) & 31u;
+      if (a == 0u) { continue; }
+      sa += a;
+      sr += (p & 63u) * a;
+      sg += ((p >> 6u) & 63u) * a;
+      sb += ((p >> 12u) & 63u) * a;
+      sl += ((p >> 24u) & 15u) * a;
+      sh += ((p >> 28u) & 15u) * a;
+    }
+  }
+  var o: FFog;
+  o.word = vec4u(0u, 0u, 0u, 0u);
+  let n = k * k;
+  if (sa == 0u) { return o; }
+  let alpha = (sa + n / 2u) / n;
+  if (alpha == 0u) { return o; }
+  let hs = sa / 2u;
+  o.word = vec4u(((sr + hs) / sa) | (((sg + hs) / sa) << 6u) | (((sb + hs) / sa) << 12u) | (alpha << 18u) | (((sl + hs) / sa) << 24u) | (((sh + hs) / sa) << 28u), 0u, 0u, 0u);
   return o;
 }
 
@@ -3504,6 +3619,26 @@ mod tests {
                 let gpu = time(&|| drop(render(job, scale).unwrap()));
                 let soft = time(&|| drop(render3d::render(job, scale)));
                 println!("scale {scale} msaa {msaa}: gpu {gpu:.1} ms, software {soft:.1} ms");
+            }
+        }
+    }
+
+    /// The supersampling on real frames (этап 6.2.1): every `*.spjob` in `SUNPETAL_JOB_DUMPS`,
+    /// drawn with msaa 2 and 4, must come out word for word like the software engine's.
+    /// `SUNPETAL_JOB_DUMPS=$PWD/build/gpu-parity/dumps cargo test --release --features gpu --lib supersampling_on_dumps -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn supersampling_on_dumps() {
+        let Some(dir) = std::env::var_os("SUNPETAL_JOB_DUMPS") else { return };
+        let mut files: Vec<_> = std::fs::read_dir(&dir).unwrap().filter_map(|e| Some(e.ok()?.path())).filter(|p| p.extension().is_some_and(|e| e == "spjob")).collect();
+        files.sort();
+        for f in files {
+            let d = super::super::jobdump::read(&f).unwrap();
+            for msaa in [2u8, 4] {
+                let mut job = stage7w_job(&d.job);
+                job.extras.msaa = msaa;
+                both(&job, d.scale);
+                println!("{} msaa {msaa}: identical", f.display());
             }
         }
     }
