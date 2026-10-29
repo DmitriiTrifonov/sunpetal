@@ -90,6 +90,9 @@ struct Args {
     /// nearest | bilinear.
     #[arg(long)]
     texture_filter: Option<String>,
+    /// The engine that draws the 3D: software (default) or gpu (needs the `gpu` feature).
+    #[arg(long, value_name = "software|gpu")]
+    renderer: Option<String>,
     /// Print the state (last line, frame, map, story value 0, why autoplay stopped) as a JSON line at the end.
     #[arg(long)]
     state: bool,
@@ -300,6 +303,19 @@ fn run(a: Args) -> Result<(), String> {
     if let Some(v) = &a.texture_filter { extras.filter = sunpetal_runtime::nds::TexFilter::parse(v); }
     if a.outline.is_some() || a.outline_width.is_some() || a.shadow.is_some() || a.shadow_radius.is_some() || a.msaa.is_some() || a.texture_filter.is_some() {
         sunpetal_runtime::nds::set_extras(extras);
+    }
+    match a.renderer.as_deref() {
+        None | Some("software") => {}
+        Some("gpu") => {
+            if !cfg!(feature = "gpu") {
+                eprintln!("--renderer gpu: this build has no `gpu` feature, the software engine draws");
+            }
+            sunpetal_runtime::nds::set_renderer(sunpetal_runtime::nds::Renderer::Gpu);
+        }
+        Some(v) => {
+            eprintln!("unknown renderer {v} (software or gpu)");
+            std::process::exit(2);
+        }
     }
     let tracker = Tracker::install();
     if let Some(d) = &a.text_dir {

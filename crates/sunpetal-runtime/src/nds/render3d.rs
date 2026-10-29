@@ -976,10 +976,10 @@ fn render_at(job: &Job, s: usize) -> (Vec<u32>, Aux, u32) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn empty_job() -> Job {
+    pub(crate) fn empty_job() -> Job {
         Job {
             verts: vec![],
             polys: vec![],

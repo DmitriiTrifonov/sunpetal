@@ -298,6 +298,9 @@ impl App {
         if s.video.res != a.video.res {
             self.shared.scale.store(s.video.res, Ordering::Relaxed);
         }
+        if s.video.renderer != a.video.renderer {
+            self.shared.renderer.store((config::parse_renderer(&s.video.renderer) == Some(sunpetal_runtime::nds::Renderer::Gpu)) as u8, Ordering::Relaxed);
+        }
         // another texture set chosen in the menu: swapped in before the next frame
         if s.video.texture_pack != a.video.texture_pack {
             let p = PathBuf::from(&s.video.texture_pack);
@@ -856,6 +859,8 @@ pub struct Options {
     pub lang: Option<String>,
     /// The widened 3D view for this run (`--wide on|off`), over the setting.
     pub wide: Option<bool>,
+    /// The 3D engine for this run (`--renderer software|gpu`), over the setting.
+    pub renderer: Option<String>,
 }
 
 /// Runs the game in a window until it closes.
@@ -867,6 +872,10 @@ pub fn run(o: Options, el: EventLoop<()>) {
     }
     if let Some(w) = o.wide {
         settings.video.wide = w;
+    }
+    if let Some(r) = o.renderer {
+        settings.video.renderer = r;
+        settings.sanitize(); // an unknown name becomes `software`
     }
     if let Some(l) = o.lang {
         settings.game.language = if l == "none" { String::new() } else { l };
@@ -908,6 +917,7 @@ pub fn run(o: Options, el: EventLoop<()>) {
     }
     let shared = Shared::new();
     shared.scale.store(settings.video.res, Ordering::Relaxed);
+    shared.renderer.store((config::parse_renderer(&settings.video.renderer) == Some(sunpetal_runtime::nds::Renderer::Gpu)) as u8, Ordering::Relaxed);
     *shared.extras.lock().unwrap() = settings.effects.extras();
     // the stream must outlive the machine's use of the ring
     let (ring, _stream) = if o.mute {
@@ -1000,7 +1010,7 @@ fn restart_args(mut args: Vec<std::ffi::OsString>, pack: &str) -> Vec<std::ffi::
     let mut out = Vec::new();
     while !args.is_empty() {
         let a = args.remove(0);
-        if matches!(a.to_str(), Some("--texture-pack" | "--wide" | "--res" | "--lang")) {
+        if matches!(a.to_str(), Some("--texture-pack" | "--wide" | "--res" | "--lang" | "--renderer")) {
             if !args.is_empty() {
                 args.remove(0);
             }
@@ -1036,7 +1046,7 @@ mod restart_tests {
 pub fn desktop_main() {
     let mut args = std::env::args().skip(1);
     let mut rom: Option<PathBuf> = None;
-    let mut o = Options { rom: PathBuf::new(), out: None, save: None, mute: false, res: None, menu: false, dump: None, pack: None, lang: None, wide: None };
+    let mut o = Options { rom: PathBuf::new(), out: None, save: None, mute: false, res: None, menu: false, dump: None, pack: None, lang: None, wide: None, renderer: None };
     while let Some(a) = args.next() {
         match a.as_str() {
             "--out" => o.out = args.next().map(PathBuf::from),
@@ -1050,6 +1060,13 @@ pub fn desktop_main() {
             "--texture-pack" => o.pack = args.next().map(PathBuf::from),
             "--lang" => o.lang = args.next(),
             "--wide" => o.wide = args.next().map(|v| !matches!(v.as_str(), "off" | "0" | "no")),
+            "--renderer" => match args.next() {
+                Some(v) if config::parse_renderer(&v).is_some() => o.renderer = Some(v),
+                v => {
+                    eprintln!("unknown renderer {} (software or gpu)", v.unwrap_or_default());
+                    std::process::exit(2);
+                }
+            },
             _ if rom.is_none() => rom = Some(PathBuf::from(a)),
             _ => {
                 eprintln!("unknown argument {}", a);
@@ -1083,7 +1100,7 @@ pub fn desktop_main() {
                     PathBuf::new()
                 }
                 None => {
-                    eprintln!("usage: sunpetal-app [ROM.nds] [--out DIR] [--save FILE] [--mute] [--res N] [--menu] [--texture-pack FILE] [--lang ru|none]");
+                    eprintln!("usage: sunpetal-app [ROM.nds] [--out DIR] [--save FILE] [--mute] [--res N] [--menu] [--texture-pack FILE] [--lang ru|none] [--renderer software|gpu]");
                     eprintln!("{}", locate::no_game(&dirs));
                     std::process::exit(2);
                 }
@@ -1112,7 +1129,7 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
         eprintln!("{}: no ROM there", rom.display());
         return;
     }
-    run(Options { rom, out: Some(dir), save: None, mute: false, res: Some(1), menu: false, dump: None, pack: None, lang: None }, el);
+    run(Options { rom, out: Some(dir), save: None, mute: false, res: Some(1), menu: false, dump: None, pack: None, lang: None, wide: None, renderer: None }, el);
 }
 
 #[cfg(target_os = "android")]

@@ -1223,18 +1223,18 @@ impl Nds {
         }
         let (px, notes) = match self.renderer {
             #[cfg(feature = "gpu")]
-            super::Renderer::Gpu => match super::render3d_gpu::render(&job, self.scale) {
-                Ok(v) => v,
-                Err(e) => {
-                    // the software engine takes over, once per distinct failure
+            super::Renderer::Gpu => {
+                let (v, failed) = gpu_or_software(&job, self.scale, || super::render3d_gpu::render(&job, self.scale));
+                if let Some(e) = failed {
+                    // told once per distinct failure
                     let mut h = 0u32;
                     for b in e.bytes() {
                         h = h.wrapping_mul(31).wrapping_add(b as u32);
                     }
                     self.once("3d-gpu", h, || format!("GPU renderer failed: {e}; the software one takes over"));
-                    super::render3d::render(&job, self.scale)
                 }
-            },
+                v
+            }
             _ => super::render3d::render(&job, self.scale),
         };
         super::jobdump::maybe_dump(&job, self.scale, self.vblanks, &px, notes);
@@ -1246,5 +1246,56 @@ impl Nds {
                 self.once("3d", s as u32, || text.to_string());
             }
         }
+    }
+}
+
+/// Draws a frame with the GPU engine (`gpu`), except one with no polygons (the logos, a menu: only
+/// the clear plane and the fog), which the software engine draws for next to nothing while the
+/// GPU pays its fixed cost (≈ 0.7 ms: the frame's resources and the wait); the two agree word for
+/// word on such frames (the parity dumps `logos_empty_*`). If the GPU fails (no device, a device error) the
+/// software engine draws it instead and the failure comes back as text, for a note. The device is
+/// made once and its failure is kept, so a machine with none pays only for the check each frame.
+#[cfg(feature = "gpu")]
+fn gpu_or_software(job: &super::render3d::Job, scale: usize, gpu: impl FnOnce() -> Result<(Vec<u32>, u32), String>) -> ((Vec<u32>, u32), Option<String>) {
+    if job.polys.is_empty() {
+        return (super::render3d::render(job, scale), None);
+    }
+    match gpu() {
+        Ok(v) => (v, None),
+        Err(e) => (super::render3d::render(job, scale), Some(e)),
+    }
+}
+
+#[cfg(all(test, feature = "gpu"))]
+mod gpu_fallback_tests {
+    use super::super::render3d::{self, GxPoly, GxVertex, Job};
+    use super::*;
+
+    /// A job with one (degenerate, one-vertex) polygon: not an empty frame, nothing drawn by it.
+    fn one_polygon() -> Job {
+        let mut job = render3d::tests::empty_job();
+        job.verts.push(GxVertex { x: 0, y: 0, z: 0, w: 0x1000, sx: 0.0, sy: 0.0, ix: 0, iy: 0, r: 0.0, g: 0.0, b: 0.0, s: 0.0, t: 0.0 });
+        job.polys.push(GxPoly { first: 0, n: 1, attr: 31 << 16, tex: 0, pal: 0, translucent: false, sortkey: 0 });
+        job
+    }
+
+    #[test]
+    fn a_failing_gpu_engine_leaves_the_software_picture_and_a_note() {
+        let job = one_polygon();
+        let want = render3d::render(&job, 1);
+        let (got, failed) = gpu_or_software(&job, 1, || Err("no GPU adapter".to_string()));
+        assert_eq!(failed.as_deref(), Some("no GPU adapter"));
+        assert_eq!(got, want);
+        let (got, failed) = gpu_or_software(&job, 1, || Ok((vec![7; 4], 0)));
+        assert!(failed.is_none());
+        assert_eq!(got.0, vec![7; 4], "a working engine's picture is used as it is");
+    }
+
+    #[test]
+    fn a_frame_with_no_polygons_is_the_software_engines_and_never_asks_the_gpu() {
+        let job = render3d::tests::empty_job();
+        let want = render3d::render(&job, 1);
+        let (got, failed) = gpu_or_software(&job, 1, || panic!("the GPU draws a frame with no polygons"));
+        assert_eq!((got, failed), (want, None));
     }
 }

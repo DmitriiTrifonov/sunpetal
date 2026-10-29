@@ -22,9 +22,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
       - run: cargo build --workspace
       - run: cargo test --workspace
-      # The GPU backend of the 3D (docs/GPU-BACKEND.md) compiles everywhere; its parity tests
-      # need an adapter and run on a developer's machine.
+      # The GPU backend of the 3D (docs/GPU-BACKEND.md) compiles everywhere (the app turns it on, so
+      # the workspace build above has it; this builds the runtime on its own with it). Its unit
+      # tests skip themselves where there is no adapter, as on these machines; the parity tests
+      # need the dumps and an adapter and run on a developer's machine.
       - run: cargo build -p sunpetal-runtime --features gpu
+      - run: cargo test -p sunpetal-runtime --features gpu --lib
 
   tools:
     runs-on: ubuntu-latest

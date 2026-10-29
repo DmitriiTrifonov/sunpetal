@@ -6,6 +6,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use sunpetal_runtime::nds;
 use winit::keyboard::KeyCode;
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
@@ -48,13 +49,25 @@ pub struct Video {
     pub show_stats: bool,
     /// A data file (`.spdata`) or a folder of replacement textures (empty: none); read when the game starts.
     pub texture_pack: String,
+    /// The engine that draws the 3D: `software` (the reference) or `gpu` (the device; the software
+    /// one takes over, with a note, if it cannot be made).
+    pub renderer: String,
     /// The window's size in logical points when it was closed.
     pub window: [u32; 2],
 }
 
+/// The 3D engine a setting or `--renderer` names (`software` or `gpu`, any case).
+pub fn parse_renderer(name: &str) -> Option<nds::Renderer> {
+    match name.to_ascii_lowercase().as_str() {
+        "software" => Some(nds::Renderer::Software),
+        "gpu" => Some(nds::Renderer::Gpu),
+        _ => None,
+    }
+}
+
 impl Default for Video {
     fn default() -> Video {
-        Video { res: 2, linear: true, layout: "stacked".into(), lower: false, panel: false, counter: true, auto: true, wide: true, bars_match: true, fit: "fit".into(), pixel_aspect: 1.0, logos_in_turn: true, puzzle: "inset".into(), fullscreen: false, background: "edge".into(), show_stats: false, texture_pack: String::new(), window: [512, 768] }
+        Video { res: 2, linear: true, layout: "stacked".into(), lower: false, panel: false, counter: true, auto: true, wide: true, bars_match: true, fit: "fit".into(), pixel_aspect: 1.0, logos_in_turn: true, puzzle: "inset".into(), fullscreen: false, background: "edge".into(), show_stats: false, texture_pack: String::new(), renderer: "software".into(), window: [512, 768] }
     }
 }
 
@@ -234,6 +247,9 @@ impl Settings {
         if !matches!(self.video.fit.as_str(), "fit" | "integer" | "fill" | "stretch") {
             self.video.fit = "fit".into();
         }
+        if parse_renderer(&self.video.renderer).is_none() {
+            self.video.renderer = "software".into();
+        }
         if !matches!(self.interface.language.as_str(), "auto" | "en" | "ru") {
             self.interface.language = "auto".into();
         }
@@ -364,6 +380,18 @@ mod tests {
     }
 
     #[test]
+    fn the_renderer_setting_defaults_to_software_and_parses() {
+        let s: Settings = toml::from_str("[video]\nres = 4\n").unwrap();
+        assert_eq!(s.video.renderer, "software");
+        assert_eq!(parse_renderer("gpu"), Some(nds::Renderer::Gpu));
+        assert_eq!(parse_renderer("software"), Some(nds::Renderer::Software));
+        assert_eq!(parse_renderer("GPU"), Some(nds::Renderer::Gpu));
+        assert_eq!(parse_renderer("vulkan"), None);
+        let s: Settings = toml::from_str("[video]\nrenderer = \"gpu\"\n").unwrap();
+        assert_eq!(s.video.renderer, "gpu");
+    }
+
+    #[test]
     fn a_file_with_fields_left_out_gets_the_defaults() {
         let s: Settings = toml::from_str("[video]\nres = 4\n").unwrap();
         assert_eq!(s.video.res, 4);
@@ -376,6 +404,7 @@ mod tests {
         let mut s: Settings = toml::from_str("[video]\nres = 99\n[audio]\nvolume = 7.0\n[input.keys]\nA = \"NoSuchKey\"\n").unwrap();
         s.sanitize();
         assert_eq!(s.video.res, 8);
+        assert_eq!(s.video.renderer, "software");
         assert_eq!(s.audio.volume, 1.0);
         assert_eq!(s.input.keys["A"], "KeyZ");
         assert_eq!(parse_key(&s.input.keys["START"]), Some(KeyCode::Enter));

@@ -1,7 +1,7 @@
 //! The machine on its own thread: the runtime keeps its state per thread, and the window's thread
 //! belongs to the window. Frames and sound go out, input comes in, through `Shared`.
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -72,6 +72,8 @@ pub struct Shared {
     pub frame: Mutex<Option<(usize, Vec<u8>)>>,
     /// The internal resolution, times 256x192 (1-8): the 3D is drawn that large.
     pub scale: AtomicUsize,
+    /// The engine that draws the 3D: 0 software, 1 the GPU one (`Renderer`), changed by the window.
+    pub renderer: AtomicU8,
     /// The 3D's outline and shading.
     pub extras: Mutex<nds::Extras>,
     /// A texture pack to swap in before the next frame (`Some(None)`: none); the window sets it, the emulation takes it.
@@ -125,6 +127,7 @@ impl Shared {
             input: Mutex::new(Input::default()),
             frame: Mutex::new(None),
             scale: AtomicUsize::new(2),
+            renderer: AtomicU8::new(0),
             extras: Mutex::new(nds::Extras::default()),
             pack_swap: Mutex::new(None),
             logo_click: AtomicBool::new(false),
@@ -205,6 +208,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             nds::set_wide(want_e);
             last_e = want_e;
         }
+        nds::set_renderer(if shared.renderer.load(Ordering::Relaxed) == 1 { nds::Renderer::Gpu } else { nds::Renderer::Software });
         nds::set_scale(if skipping_now { 1 } else { shared.scale.load(Ordering::Relaxed) });
         let mut extras = *shared.extras.lock().unwrap();
         // the window's 3D is drawn at scale x samples at most (`effects::MSAA_BUDGET`): more would not keep up

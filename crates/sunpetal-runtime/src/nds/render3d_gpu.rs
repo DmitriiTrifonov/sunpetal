@@ -846,6 +846,7 @@ pub(super) fn render_maps(job: &Job, scale: usize) -> Result<(Vec<u32>, Vec<u8>,
 /// `k` > 1: `scale` is already the supersampled one (s·k) and the words come back resolved to the
 /// size of `scale / k` (the GPU averages the k x k samples, этап 6.2.1); `maps` must be off then.
 fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered, String> {
+    let t0 = std::time::Instant::now();
     let c = ctx()?;
     let s = scale.max(1);
     let (w, h) = (job.width * s, 192 * s);
@@ -929,7 +930,9 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
             wgpu::Extent3d { width: r.w, height: r.h, depth_or_array_layers: 1 },
         );
     }
+    let t_atlas = t0.elapsed();
     let built = build(job, s, &regions);
+    let t_build = t0.elapsed();
     let rear = rear_data(job);
     // the uniforms: sizes, the clear word, the modes, the scale, the rear plane's origin, the fog,
     // the clear ID, the blend flag, the widened view's settings, and the toon and fog tables
@@ -1022,6 +1025,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
     let depth_stencil = attach(device, w, h, wgpu::TextureFormat::Depth32Float, wgpu::TextureUsages::RENDER_ATTACHMENT);
     let fin = attach(device, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING);
     let mut cur = 0usize;
+    let t_res = t0.elapsed();
     let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     let rear_bind = rear.as_ref().map(|data| {
         let rt = device.create_texture(&wgpu::TextureDescriptor {
@@ -1164,14 +1168,12 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
         .filter(|p| p.translucent || (p.attr >> 4) & 3 == 3)
         .map(|p| (p.attr >> 4) & 3 == 3 && (p.attr >> 24) & 63 == 0)
         .collect();
-    for (i, (verts, tris)) in built.serial.iter().enumerate() {
-        let nvert = (verts.len() / 8) as u32;
-        if nvert == 0 {
-            continue; // a degenerate polygon: no triangles to draw
-        }
-        let mask = serial_masks[i];
+    // the two buffers hold the same picture before each polygon; a polygon reads one and draws
+    // into the other inside its bounding box only, then the box is copied back (этап 8.2.4: a
+    // whole-picture copy of seven textures per polygon cost most of a busy frame)
+    let (mut n_blend, mut n_mask, mut n_skipped, mut px_copied) = (0u32, 0u32, 0u32, 0u64);
+    if !built.serial.is_empty() {
         let next = 1 - cur;
-        // the accumulated picture carries over to the next buffer
         for (a, b) in [
             (&word[cur], &word[next]),
             (&id[cur], &id[next]),
@@ -1187,6 +1189,45 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
                 wgpu::Extent3d { width: w as u32, height: h as u32, depth_or_array_layers: 1 },
             );
         }
+    }
+    // each polygon's box, buffers and kind; then runs of consecutive polygons of one kind whose
+    // boxes do not overlap share a pass (they read the one buffer and write the other, so the
+    // order between them cannot matter; the passes cost far more than the polygons)
+    struct Item {
+        x0: u32,
+        y0: u32,
+        bw: u32,
+        bh: u32,
+        nvert: u32,
+        mask: bool,
+        vb: wgpu::Buffer,
+        tb: wgpu::Buffer,
+    }
+    let mut items: Vec<Item> = Vec::new();
+    for (i, (verts, tris)) in built.serial.iter().enumerate() {
+        let nvert = (verts.len() / 8) as u32;
+        if nvert == 0 {
+            continue; // a degenerate polygon: no triangles to draw
+        }
+        // the box of the rasterized triangles (their vertices are in picture pixels), a pixel wider
+        let (mut bx0, mut by0, mut bx1, mut by1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for v in verts.chunks_exact(8) {
+            let x = f32::from_le_bytes([v[0], v[1], v[2], v[3]]);
+            let y = f32::from_le_bytes([v[4], v[5], v[6], v[7]]);
+            bx0 = bx0.min(x);
+            bx1 = bx1.max(x);
+            by0 = by0.min(y);
+            by1 = by1.max(y);
+        }
+        let x0 = ((bx0.floor() - 1.0).max(0.0)) as u32;
+        let y0 = ((by0.floor() - 1.0).max(0.0)) as u32;
+        let x1 = ((bx1.ceil() + 1.0).min(w as f32)).max(0.0) as u32;
+        let y1 = ((by1.ceil() + 1.0).min(h as f32)).max(0.0) as u32;
+        if x1 <= x0 || y1 <= y0 {
+            n_skipped += 1;
+            continue; // off the picture: it changes nothing
+        }
+        px_copied += ((x1 - x0) * (y1 - y0)) as u64;
         let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("3d trans verts"),
             contents: verts,
@@ -1197,18 +1238,49 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
             contents: tris,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
+        items.push(Item { x0, y0, bw: x1 - x0, bh: y1 - y0, nvert, mask: serial_masks[i], vb, tb });
+    }
+    // a polygon's level: one past the highest level of an earlier polygon whose box overlaps it
+    // (those must come first, in order). Polygons of one level overlap nobody of that level, so
+    // they read the one buffer and write the other in any order: a level's masks go in one pass,
+    // its blends in another (the passes cost far more than the polygons)
+    let overlap = |o: &Item, n: &Item| !(n.x0 >= o.x0 + o.bw || o.x0 >= n.x0 + n.bw || n.y0 >= o.y0 + o.bh || o.y0 >= n.y0 + n.bh);
+    let mut level = vec![0usize; items.len()];
+    let batching = std::env::var_os("SUNPETAL_NO_BATCH").is_none();
+    for j in 0..items.len() {
+        level[j] = if batching { (0..j).filter(|&i| overlap(&items[i], &items[j])).map(|i| level[i] + 1).max().unwrap_or(0) } else { j };
+    }
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    for l in 0..=level.iter().copied().max().unwrap_or(0) {
+        for mask in [true, false] {
+            let g: Vec<usize> = (0..items.len()).filter(|&j| level[j] == l && items[j].mask == mask).collect();
+            if !g.is_empty() {
+                groups.push(g);
+            }
+        }
+    }
+    for group in &groups {
+        let batch: Vec<&Item> = group.iter().map(|&j| &items[j]).collect();
+        let mask = batch[0].mask;
+        let next = 1 - cur;
         if mask {
+            n_mask += 1;
             let sv = stencil[next].create_view(&Default::default());
             let dc = depth[cur].create_view(&Default::default());
-            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("3d mask"),
-                layout: &c.bgl_mask,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: tb.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&dc) },
-                ],
-            });
+            let binds: Vec<wgpu::BindGroup> = batch
+                .iter()
+                .map(|it| {
+                    device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("3d mask"),
+                        layout: &c.bgl_mask,
+                        entries: &[
+                            wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                            wgpu::BindGroupEntry { binding: 1, resource: it.tb.as_entire_binding() },
+                            wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&dc) },
+                        ],
+                    })
+                })
+                .collect();
             let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("3d shadow mask"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1224,10 +1296,14 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
             });
             rp.set_viewport(0.0, 0.0, w as f32, h as f32, 0.0, 1.0);
             rp.set_pipeline(&c.mask_pipeline);
-            rp.set_bind_group(0, &bind, &[]);
-            rp.set_vertex_buffer(0, vb.slice(..));
-            rp.draw(0..nvert, 0..1);
+            for (it, bind) in batch.iter().zip(&binds) {
+                rp.set_scissor_rect(it.x0, it.y0, it.bw, it.bh);
+                rp.set_bind_group(0, bind, &[]);
+                rp.set_vertex_buffer(0, it.vb.slice(..));
+                rp.draw(0..it.nvert, 0..1);
+            }
         } else {
+            n_blend += 1;
             let wv = word[next].create_view(&Default::default());
             let iv = id[next].create_view(&Default::default());
             let sv = stencil[next].create_view(&Default::default());
@@ -1243,34 +1319,31 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
             let oc = oid[cur].create_view(&Default::default());
             let coc = cover[cur].create_view(&Default::default());
             let trc = trans[cur].create_view(&Default::default());
-            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("3d blend"),
-                layout: &c.bgl_blend,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: tb.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&atlas_view) },
-                    wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureView(&wc) },
-                    wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(&ic) },
-                    wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&sc) },
-                    wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&dc) },
-                    wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&oc) },
-                    wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(&coc) },
-                    wgpu::BindGroupEntry { binding: 13, resource: wgpu::BindingResource::TextureView(&trc) },
-                ],
-            });
+            let binds: Vec<wgpu::BindGroup> = batch
+                .iter()
+                .map(|it| {
+                    device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("3d blend"),
+                        layout: &c.bgl_blend,
+                        entries: &[
+                            wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                            wgpu::BindGroupEntry { binding: 1, resource: it.tb.as_entire_binding() },
+                            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&atlas_view) },
+                            wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureView(&wc) },
+                            wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(&ic) },
+                            wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&sc) },
+                            wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&dc) },
+                            wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&oc) },
+                            wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(&coc) },
+                            wgpu::BindGroupEntry { binding: 13, resource: wgpu::BindingResource::TextureView(&trc) },
+                        ],
+                    })
+                })
+                .collect();
+            let load = |v| Some(wgpu::RenderPassColorAttachment { view: v, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } });
             let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("3d translucent"),
-                color_attachments: &[
-                    Some(wgpu::RenderPassColorAttachment { view: &wv, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } }),
-                    Some(wgpu::RenderPassColorAttachment { view: &fv, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } }),
-                    Some(wgpu::RenderPassColorAttachment { view: &dv, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } }),
-                    Some(wgpu::RenderPassColorAttachment { view: &iv, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } }),
-                    Some(wgpu::RenderPassColorAttachment { view: &sv, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } }),
-                    Some(wgpu::RenderPassColorAttachment { view: &ov, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } }),
-                    Some(wgpu::RenderPassColorAttachment { view: &cov, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } }),
-                    Some(wgpu::RenderPassColorAttachment { view: &trv, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } }),
-                ],
+                color_attachments: &[load(&wv), load(&fv), load(&dv), load(&iv), load(&sv), load(&ov), load(&cov), load(&trv)],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
@@ -1278,11 +1351,36 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
             });
             rp.set_viewport(0.0, 0.0, w as f32, h as f32, 0.0, 1.0);
             rp.set_pipeline(&c.blend_pipeline);
-            rp.set_bind_group(0, &bind, &[]);
-            rp.set_vertex_buffer(0, vb.slice(..));
-            rp.draw(0..nvert, 0..1);
+            for (it, bind) in batch.iter().zip(&binds) {
+                rp.set_scissor_rect(it.x0, it.y0, it.bw, it.bh);
+                rp.set_bind_group(0, bind, &[]);
+                rp.set_vertex_buffer(0, it.vb.slice(..));
+                rp.draw(0..it.nvert, 0..1);
+            }
         }
-        cur = next;
+        // each box back into the other buffer, so both hold the picture again
+        let changed: Vec<(&wgpu::Texture, &wgpu::Texture)> = if mask {
+            vec![(&stencil[next], &stencil[cur])]
+        } else {
+            vec![
+                (&word[next], &word[cur]),
+                (&id[next], &id[cur]),
+                (&stencil[next], &stencil[cur]),
+                (&depth[next], &depth[cur]),
+                (&oid[next], &oid[cur]),
+                (&cover[next], &cover[cur]),
+                (&trans[next], &trans[cur]),
+            ]
+        };
+        for it in &batch {
+            for &(from, to) in &changed {
+                enc.copy_texture_to_texture(
+                    wgpu::TexelCopyTextureInfo { texture: from, mip_level: 0, origin: wgpu::Origin3d { x: it.x0, y: it.y0, z: 0 }, aspect: wgpu::TextureAspect::All },
+                    wgpu::TexelCopyTextureInfo { texture: to, mip_level: 0, origin: wgpu::Origin3d { x: it.x0, y: it.y0, z: 0 }, aspect: wgpu::TextureAspect::All },
+                    wgpu::Extent3d { width: it.bw, height: it.bh, depth_or_array_layers: 1 },
+                );
+            }
+        }
     }
     // the widened view (этап 7.4): the software engine's `extend_sides` — the side columns no
     // polygon touched run on with the row's first sky column (else the nearest row's sky, else the
@@ -1589,8 +1687,21 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
             readback_buf(device, &mut enc, &depth[cur], w as u32, h as u32),
         ]
     });
+    let t_enc = t0.elapsed();
     c.queue.submit([enc.finish()]);
+    let timing = std::env::var_os("SUNPETAL_GPU_TIMING").is_some();
+    if timing {
+        let _ = c.device.poll(wgpu::PollType::wait_indefinitely()); // the GPU's work alone
+    }
+    let t_gpu = t0.elapsed();
     let words = readback_words(&c.device, &buf_word, ow, oh)?;
+    if timing {
+        // cumulative ms: textures decoded and uploaded, polygons built, resources made, commands
+        // recorded, the GPU's work (waited for alone), then the readback
+        let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0;
+        eprintln!("gpu frame {w}x{h}: atlas {:.2}, build {:.2}, resources {:.2}, encode {:.2}, gpu {:.2}, readback done {:.2} ms", ms(t_atlas), ms(t_build), ms(t_res), ms(t_enc), ms(t_gpu), ms(t0.elapsed()));
+        eprintln!("  serial passes: {n_blend} blend, {n_mask} mask (of {} polygons), {n_skipped} off-picture; {:.1}% of the picture copied per polygon on average", built.serial.len(), if n_blend + n_mask > 0 { px_copied as f64 / (built.serial.len() as f64 * (w * h) as f64) * 100.0 } else { 0.0 });
+    }
     let (mut oid_px, mut cover_px, mut trans_px, mut depth_px) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     if let Some([bo, bc, bt, bd]) = &aux {
         oid_px = readback_bytes(&c.device, bo, w, h)?;

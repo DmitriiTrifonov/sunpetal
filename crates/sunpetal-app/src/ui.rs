@@ -63,6 +63,12 @@ impl Menu {
                     ui.add(egui::Slider::new(&mut s.video.res, 1..=8).suffix("x"));
                 });
                 ui.label(format!("{} {}x{}", tx("each screen, pixels:", "каждый экран, точек:"), internal.0, internal.1));
+                let rl = |v: &str| if v == "gpu" { tx("Graphics card (faster at high resolution)", "Видеокарта (быстрее при высоком разрешении)") } else { tx("Processor (the reference)", "Процессор (эталон)") };
+                egui::ComboBox::from_label(tx("3D drawn by", "3D рисует")).selected_text(rl(&s.video.renderer)).show_ui(ui, |ui| {
+                    for v in ["software", "gpu"] {
+                        ui.selectable_value(&mut s.video.renderer, v.to_string(), rl(v));
+                    }
+                });
                 ui.checkbox(&mut s.video.linear, tx("Smooth when stretched (linear filter)", "Сглаживание при растяжении (линейный фильтр)"));
                 egui::ComboBox::from_label(tx("Screen layout", "Раскладка экранов")).selected_text(layout_label(&s.video.layout, lang)).show_ui(ui, |ui| {
                     for l in layouts {
