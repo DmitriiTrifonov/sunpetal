@@ -296,14 +296,15 @@ struct Target {
 }
 
 /// The per-pixel data the outline and the shading read, returned alongside the picture for the GPU
-/// backend's parity (этап 7.0 of `docs/GPU-BACKEND.md`): the ID of the last opaque polygon, how much
-/// the translucent polygons over it hide the picture (0-31), and whether a translucent polygon wrote
-/// the depth.
+/// backend's parity (этапы 7.0 и 5.1 of `docs/GPU-BACKEND.md`): the ID of the last opaque polygon,
+/// how much the translucent polygons over it hide the picture (0-31), whether a translucent polygon
+/// wrote the depth, and the depth itself (the DS's 24-bit depth as a float, 0-1).
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Aux {
     pub oid: Vec<u8>,
     pub cover: Vec<u8>,
     pub trans: Vec<u8>,
+    pub depth: Vec<f32>,
 }
 
 fn edge(a: (f32, f32), b: (f32, f32), p: (f32, f32)) -> f32 {
@@ -922,11 +923,12 @@ fn render_at(job: &Job, s: usize) -> (Vec<u32>, Aux, u32) {
         extend_sides(&mut t, job, w, h, (job.width - 256) / 2 * s);
     }
     // the auxiliary maps are final here: the edge marking, the outline, the shading and the fog
-    // below leave them alone (этап 7.0 of the GPU backend compares the GPU's copies with these)
+    // below leave them alone (этапы 7.0 и 5.1 of the GPU backend compare the GPU's copies with these)
     let aux = Aux {
         oid: t.oid.clone(),
         cover: t.cover.clone(),
         trans: t.trans.iter().map(|&b| b as u8).collect(),
+        depth: t.depth.clone(),
     };
     if job.disp3dcnt & 0x20 != 0 {
         // edge marking: a pixel with a nearer-or-equal... no: a pixel beside a farther pixel of another

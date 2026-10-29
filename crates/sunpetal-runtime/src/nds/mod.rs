@@ -666,15 +666,18 @@ pub fn gpu_parity_check(path: &std::path::Path) -> Result<GpuParity, String> {
     Ok(GpuParity { report: rep, diff, w, h, edge_diffs })
 }
 
-/// The GPU backend's auxiliary maps (`oid`, `cover`, `trans`) against the software engine's on a
-/// dump (этап 7.0 of `docs/GPU-BACKEND.md`): the job is filtered to `stage4_job` and the two
-/// engines' maps compared pixel by pixel. `oid` is the last opaque polygon's ID (0-63), `cover` how
-/// much the translucent polygons hide the pixel (0-31), `trans` whether a translucent polygon wrote
-/// the depth (0 or 1).
+/// The GPU backend's auxiliary maps (`oid`, `cover`, `trans`, `depth`) against the software engine's
+/// on a dump (этапы 7.0 и 5.1 of `docs/GPU-BACKEND.md`): the job is filtered to `stage4_job` and the
+/// two engines' maps compared pixel by pixel. `oid` is the last opaque polygon's ID (0-63), `cover`
+/// how much the translucent polygons hide the pixel (0-31), `trans` whether a translucent polygon
+/// wrote the depth (0 or 1); the depth is compared by value, in steps of the DS's 24-bit depth
+/// (×16 777 215), against the equal-depth test's tolerance of 0x200.
 #[cfg(feature = "gpu")]
 #[derive(Clone, Debug)]
 pub struct AuxParity {
     pub path: String,
+    pub w: usize,
+    pub h: usize,
     pub pixels: usize,
     pub oid_exact: usize,
     pub cover_exact: usize,
@@ -683,19 +686,34 @@ pub struct AuxParity {
     pub oid_first: Option<(usize, u8, u8)>,
     pub cover_first: Option<(usize, u8, u8)>,
     pub trans_first: Option<(usize, u8, u8)>,
+    /// Pixels whose depth is bit-identical.
+    pub depth_exact: usize,
+    /// The mean and max |GPU − software| depth in 24-bit steps.
+    pub depth_mean_steps: f64,
+    pub depth_max_steps: f64,
+    /// Pixels whose depth differs by more than the equal-depth test's tolerance (0x200 steps).
+    pub depth_over_tol: usize,
+    /// The first differing depth: (pixel index, GPU, software).
+    pub depth_first: Option<(usize, f32, f32)>,
+    /// The depth difference map, RGBA: gray by the magnitude of the difference (×16 steps,
+    /// capped), transparent where the depths match.
+    pub depth_diff: Vec<u8>,
 }
 
 #[cfg(feature = "gpu")]
 pub fn gpu_aux_check(path: &std::path::Path) -> Result<AuxParity, String> {
     let d = jobdump::read(path)?;
     let job = render3d_gpu::stage4_job(&d.job);
+    let (w, h) = (job.width * d.scale, 192 * d.scale);
     let (_ref_px, ref_aux, ref_notes) = render3d::render_maps(&job, d.scale);
-    let (px, oid, cover, trans, notes) = render3d_gpu::render_maps(&job, d.scale)?;
+    let (px, oid, cover, trans, depth, notes) = render3d_gpu::render_maps(&job, d.scale)?;
     if notes != ref_notes {
         eprintln!("{}: notes differ (gpu {:#x} soft {:#x})", path.display(), notes, ref_notes);
     }
     let mut rep = AuxParity {
         path: path.display().to_string(),
+        w,
+        h,
         pixels: px.len(),
         oid_exact: 0,
         cover_exact: 0,
@@ -703,6 +721,12 @@ pub fn gpu_aux_check(path: &std::path::Path) -> Result<AuxParity, String> {
         oid_first: None,
         cover_first: None,
         trans_first: None,
+        depth_exact: 0,
+        depth_mean_steps: 0.0,
+        depth_max_steps: 0.0,
+        depth_over_tol: 0,
+        depth_first: None,
+        depth_diff: vec![0; px.len() * 4],
     };
     for (i, (a, b)) in oid.iter().zip(ref_aux.oid.iter()).enumerate() {
         if a == b {
@@ -725,6 +749,33 @@ pub fn gpu_aux_check(path: &std::path::Path) -> Result<AuxParity, String> {
             rep.trans_first = Some((i, *a, *b));
         }
     }
+    // the depth (этап 5.1): how far the GPU's float depth is from the software engine's, in the
+    // DS's 24-bit steps; over the equal-depth test's tolerance (0x200) a pixel could flip a test
+    let (mut sum, mut max) = (0.0f64, 0.0f64);
+    for (i, (g, s)) in depth.iter().zip(ref_aux.depth.iter()).enumerate() {
+        if g.to_bits() == s.to_bits() {
+            rep.depth_exact += 1;
+            continue;
+        }
+        let steps = ((*g as f64) - (*s as f64)).abs() * 16_777_215.0;
+        sum += steps;
+        max = max.max(steps);
+        if steps > 512.0 {
+            rep.depth_over_tol += 1;
+        }
+        if rep.depth_first.is_none() {
+            rep.depth_first = Some((i, *g, *s));
+        }
+        let m = (steps * 16.0).min(255.0) as u8;
+        rep.depth_diff[i * 4] = m;
+        rep.depth_diff[i * 4 + 1] = m;
+        rep.depth_diff[i * 4 + 2] = m;
+        rep.depth_diff[i * 4 + 3] = 255;
+    }
+    if !depth.is_empty() {
+        rep.depth_mean_steps = sum / depth.len() as f64;
+    }
+    rep.depth_max_steps = max;
     Ok(rep)
 }
 

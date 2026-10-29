@@ -154,13 +154,41 @@ fn gpu_aux_on_real_frames() {
         };
         any = true;
         println!(
-            "{}: oid {}/{} cover {}/{} trans {}/{}",
-            gp.path, gp.oid_exact, gp.pixels, gp.cover_exact, gp.pixels, gp.trans_exact, gp.pixels
+            "{}: oid {}/{} cover {}/{} trans {}/{}, depth exact {}/{} mean {:.3} max {:.3} steps, over tol {}",
+            gp.path,
+            gp.oid_exact,
+            gp.pixels,
+            gp.cover_exact,
+            gp.pixels,
+            gp.trans_exact,
+            gp.pixels,
+            gp.depth_exact,
+            gp.pixels,
+            gp.depth_mean_steps,
+            gp.depth_max_steps,
+            gp.depth_over_tol
         );
         for (name, first) in [("oid", gp.oid_first), ("cover", gp.cover_first), ("trans", gp.trans_first)] {
             if let Some((i, g, s)) = first {
                 println!("  first {name} mismatch at pixel {i}: gpu {g} soft {s}");
             }
+        }
+        if let Some((i, g, s)) = gp.depth_first {
+            println!("  first depth mismatch at pixel {i}: gpu {:.9} soft {:.9}", g, s);
+        }
+        // the depth difference map (этап 5.1), if asked: gray by the magnitude of the difference
+        if let Some(dir) = std::env::var_os("SUNPETAL_JOB_DIFFS") {
+            let name = f.file_stem().unwrap().to_string_lossy();
+            let dir = PathBuf::from(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join(format!("{name}.depth.png"));
+            let file = std::fs::File::create(&path).unwrap();
+            let mut enc = png::Encoder::new(std::io::BufWriter::new(file), gp.w as u32, gp.h as u32);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            let mut w = enc.write_header().unwrap();
+            w.write_image_data(&gp.depth_diff).unwrap();
+            println!("  depth diff map: {}", path.display());
         }
         assert_eq!(gp.oid_exact, gp.pixels, "{}: oid map differs", gp.path);
         assert_eq!(gp.cover_exact, gp.pixels, "{}: cover map differs", gp.path);

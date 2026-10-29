@@ -538,12 +538,13 @@ fn build(job: &Job, s: usize, regions: &HashMap<(u32, u32), TexInfo>) -> Built {
 }
 
 /// A frame the GPU drew, with the picture and the auxiliary maps the outline and the shading read
-/// (этап 7.0 of `docs/GPU-BACKEND.md`).
+/// (этапы 7.0 и 5.1 of `docs/GPU-BACKEND.md`).
 struct Rendered {
     words: Vec<u32>,
     oid: Vec<u8>,
     cover: Vec<u8>,
     trans: Vec<u8>,
+    depth: Vec<f32>,
     notes: u32,
 }
 
@@ -558,10 +559,11 @@ pub(super) fn render(job: &Job, scale: usize) -> Result<(Vec<u32>, u32), String>
     Ok((r.words, r.notes))
 }
 
-/// Draws a job and reads the auxiliary maps back too (этап 7.0 of `docs/GPU-BACKEND.md`).
-pub(super) fn render_maps(job: &Job, scale: usize) -> Result<(Vec<u32>, Vec<u8>, Vec<u8>, Vec<u8>, u32), String> {
+/// Draws a job and reads the auxiliary maps back too (этапы 7.0 и 5.1 of `docs/GPU-BACKEND.md`):
+/// the words, `oid`, `cover`, `trans` and the depth.
+pub(super) fn render_maps(job: &Job, scale: usize) -> Result<(Vec<u32>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<f32>, u32), String> {
     let r = render_all(job, scale)?;
-    Ok((r.words, r.oid, r.cover, r.trans, r.notes))
+    Ok((r.words, r.oid, r.cover, r.trans, r.depth, r.notes))
 }
 
 fn render_all(job: &Job, scale: usize) -> Result<Rendered, String> {
@@ -1023,12 +1025,14 @@ fn render_all(job: &Job, scale: usize) -> Result<Rendered, String> {
     let buf_oid = readback_buf(device, &mut enc, &oid[cur], w as u32, h as u32);
     let buf_cover = readback_buf(device, &mut enc, &cover[cur], w as u32, h as u32);
     let buf_trans = readback_buf(device, &mut enc, &trans[cur], w as u32, h as u32);
+    let buf_depth = readback_buf(device, &mut enc, &depth[cur], w as u32, h as u32);
     c.queue.submit([enc.finish()]);
     let words = readback_words(&c.device, &buf_word, w, h)?;
     let oid_px = readback_bytes(&c.device, &buf_oid, w, h)?;
     let cover_px = readback_bytes(&c.device, &buf_cover, w, h)?;
     let trans_px = readback_bytes(&c.device, &buf_trans, w, h)?;
-    Ok(Rendered { words, oid: oid_px, cover: cover_px, trans: trans_px, notes })
+    let depth_px = readback_floats(&c.device, &buf_depth, w, h)?;
+    Ok(Rendered { words, oid: oid_px, cover: cover_px, trans: trans_px, depth: depth_px, notes })
 }
 
 /// A 2D texture of the picture's size for one of the passes' attachments.
@@ -1103,6 +1107,11 @@ fn readback_bytes(device: &wgpu::Device, buf: &wgpu::Buffer, w: usize, h: usize)
     drop(map);
     buf.unmap();
     Ok(v)
+}
+
+/// Reads a mapped readback buffer's floats (the depth attachment, `R32Float`).
+fn readback_floats(device: &wgpu::Device, buf: &wgpu::Buffer, w: usize, h: usize) -> Result<Vec<f32>, String> {
+    Ok(readback_words(device, buf, w, h)?.into_iter().map(f32::from_bits).collect())
 }
 
 /// The rear plane's bitmap as a 256x256 `Rgba32Uint` texture: each texel is the colour word
@@ -1813,7 +1822,7 @@ mod tests {
     /// Both engines draw the job and their words, notes and auxiliary maps must all match.
     fn both_maps(job: &Job, scale: usize) -> Option<()> {
         let (want, want_aux, wnotes) = super::super::render3d::render_maps(job, scale);
-        let (got, oid, cover, trans, notes) = match render_maps(job, scale) {
+        let (got, oid, cover, trans, depth, notes) = match render_maps(job, scale) {
             Ok(v) => v,
             Err(e) => {
                 eprintln!("GPU test skipped: {e}");
@@ -1825,6 +1834,7 @@ mod tests {
         assert_eq!(oid, want_aux.oid, "oid map differs");
         assert_eq!(cover, want_aux.cover, "cover map differs");
         assert_eq!(trans, want_aux.trans, "trans map differs");
+        assert_eq!(depth, want_aux.depth, "depth map differs");
         Some(())
     }
 
