@@ -1435,7 +1435,7 @@ pub fn dialogue() -> Option<Dialogue> {
             let (on, n) = a.get();
             a.set(if seen != key {
                 (true, 0)
-            } else if (drawn && !ink) || n >= COMING_FRAMES {
+            } else if (drawn && !ink) || (!drawn && n >= COMING_FRAMES) {
                 (false, 0)
             } else {
                 (on, n + 1)
