@@ -279,7 +279,9 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             let rendered_hidden = hide_now;
             hide_now = shared.crisp_text.load(Ordering::Relaxed) && dialogue.as_ref().is_some_and(|d| d.coming);
             nds::hide_dialogue_raster(hide_now);
-            let dialogue_line = dialogue.filter(|d| d.drawn && rendered_hidden).map(|d| (d.text, middle));
+            // the wipe that opens and closes the panel covers the text in the game; ours waits for it to pass
+            let wiped = crate::layout::wipe_over_row(picture.0, &picture.1, middle.unwrap_or(168.0));
+            let dialogue_line = dialogue.filter(|d| d.drawn && rendered_hidden && !wiped).map(|d| (d.text, middle));
             if skipping {
                 let print = fingerprint(&picture.1);
                 still = if print == last_print { still + 1 } else { 0 };

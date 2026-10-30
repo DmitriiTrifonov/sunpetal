@@ -181,6 +181,21 @@ pub fn dialogue_panel_middle(scale: usize, rgba: &[u8]) -> Option<f32> {
     None
 }
 
+/// Whether the red wipe that opens and closes the dialogue panel covers the row of text (DS pixel row `y`): the wipe is
+/// a solid red band across it, the panel's own red lines are a column or two (under a tenth of the row).
+pub fn wipe_over_row(scale: usize, rgba: &[u8], y: f32) -> bool {
+    let w = 256 * scale;
+    let row = (y as usize).min(191) * scale;
+    let (mut n, mut red) = (0, 0);
+    for x in (0..256usize).step_by(2) {
+        let o = (row * w + x * scale) * 4;
+        let Some(p) = rgba.get(o..o + 3) else { return false };
+        n += 1;
+        red += (p[0] > 200 && p[1] < 60 && p[2] < 60) as usize;
+    }
+    red * 10 >= n
+}
+
 /// Whether the picture is the collection's list: a black header band on the upper screen (the card above) and the list's
 /// yellow squares down the lower screen's left side (56 rows lit on the game's frames, none on any other screen).
 pub fn collection_in(scale: usize, rgba: &[u8]) -> bool {
@@ -609,6 +624,22 @@ impl Layout {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_wipe_is_a_red_band_not_the_panels_red_lines() {
+        let paint = |from: usize, to: usize| {
+            let mut px = vec![150u8; 256 * 192 * 4];
+            for y in 0..192 {
+                for x in from..to {
+                    px[(y * 256 + x) * 4..][..3].copy_from_slice(&[255, 0, 0]);
+                }
+            }
+            px
+        };
+        assert!(!super::wipe_over_row(1, &paint(0, 0), 168.0), "no red");
+        assert!(!super::wipe_over_row(1, &paint(48, 50), 168.0), "the portrait's frame line is two columns");
+        assert!(super::wipe_over_row(1, &paint(0, 120), 168.0), "half the row red");
+        assert!(super::wipe_over_row(1, &paint(0, 256), 168.0));
+    }
     use super::*;
 
     #[test]
