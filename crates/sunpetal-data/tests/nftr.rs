@@ -46,13 +46,14 @@ fn a_font_in_the_pack_replaces_the_roms_dialogue_font() {
 
     let (mut tr, _) = Translation::make(&rom, &rom, Table::default(), "ru", "ue").unwrap();
     assert!(tr.deltas.is_empty());
-    tr.set_font(&rom, &font).unwrap();
-    tr.set_font(&rom, &font).unwrap(); // twice: replaced, not added
+    tr.set_font(&rom, DIALOGUE_FONT, &font).unwrap();
+    tr.set_font(&rom, DIALOGUE_FONT, &font).unwrap(); // twice: replaced, not added
     assert_eq!(tr.deltas.len(), 1);
     let back = Translation::from_bytes(&tr.to_bytes().unwrap()).unwrap();
     let files = back.overlay(&rom).unwrap();
     let made = &files.iter().find(|f| f.0 == DIALOGUE_FONT).expect("the font is in the overlay").1;
     assert_eq!(made, &font);
     assert!(Font::parse(made).unwrap().has('П'));
-    assert!(tr.set_font(&rom, b"not a font").is_err());
+    assert!(tr.set_font(&rom, DIALOGUE_FONT, b"not a font").is_err());
+    assert!(tr.set_font(&rom, "Chapter/other.nftr", &font).is_err());
 }

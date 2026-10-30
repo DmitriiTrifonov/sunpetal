@@ -14,6 +14,15 @@ const RAW_DIRS: [&str; 3] = ["2D", "EdoComment", "Profile"];
 /// The font the dialogue window and the game's menus draw with.
 pub const DIALOGUE_FONT: &str = "Chapter/Pack/Common/font.nftr";
 
+/// The fonts of the ROM: the dialogue one and three of the 2D screens (the save screen, the
+/// notes, the profiles). Each draws with its own file, so a language needs all four.
+pub const FONTS: [&str; 4] = [DIALOGUE_FONT, "2D/Savefont_Chiaro_12px_log8.NFTR", "2D/katharinefont.NFTR", "2D/profile_font.NFTR"];
+
+/// The name a font of `FONTS` has in a folder of ready fonts (`sunpetal-font --all`, `--font-dir`).
+pub fn font_file_name(path: &str) -> String {
+    path.replace('/', "_")
+}
+
 /// The table: (chapter or folder, scene) → ID → text.
 #[derive(Default)]
 pub struct Table {
@@ -213,16 +222,19 @@ impl Translation {
         Ok((Translation { lang: lang.into(), base: base.into(), rom_crc: crc32(rom), table, deltas }, problems))
     }
 
-    /// Puts `font` (an NFTR) in place of the dialogue font of the ROM, as a delta; one the
-    /// translated ROM brought is replaced. The ROM must be the one the translation is for.
-    pub fn set_font(&mut self, rom: &[u8], font: &[u8]) -> Result<(), String> {
-        crate::nftr::Nftr::parse(font).map_err(|e| format!("the font: {}", e))?;
+    /// Puts `font` (an NFTR) in place of the ROM's font `path` (one of `FONTS`), as a delta; one
+    /// the translated ROM brought is replaced. The ROM must be the one the translation is for.
+    pub fn set_font(&mut self, rom: &[u8], path: &str, font: &[u8]) -> Result<(), String> {
+        if !FONTS.contains(&path) {
+            return Err(format!("{} is not a font of the game", path));
+        }
+        crate::nftr::Nftr::parse(font).map_err(|e| format!("the font for {}: {}", path, e))?;
         if crc32(rom) != self.rom_crc {
             return Err(format!("the translation `{}` is for another ROM", self.lang));
         }
-        let orig = NitroFs::parse(rom)?.file(rom, DIALOGUE_FONT).ok_or_else(|| format!("{} is not in the ROM", DIALOGUE_FONT))?.to_vec();
-        self.deltas.retain(|(p, _)| p != DIALOGUE_FONT);
-        self.deltas.push((DIALOGUE_FONT.to_string(), diff_file(DIALOGUE_FONT, &orig, font)?));
+        let orig = NitroFs::parse(rom)?.file(rom, path).ok_or_else(|| format!("{} is not in the ROM", path))?.to_vec();
+        self.deltas.retain(|(p, _)| p != path);
+        self.deltas.push((path.to_string(), diff_file(path, &orig, font)?));
         Ok(())
     }
 

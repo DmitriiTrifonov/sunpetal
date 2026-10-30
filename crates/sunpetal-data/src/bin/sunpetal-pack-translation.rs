@@ -5,8 +5,9 @@
 //!     sunpetal-pack-translation --rom ORIGINAL.nds [--translated TRANSLATED.nds] --table text/ru.csv \
 //!         --lang ru [--column Русский] [--base ue] [--font font.nftr] --out sunpetal.data [--merge OTHER.spdata]
 //!
-//! `--font` puts a ready font (`sunpetal-font`) in place of the ROM's dialogue font; it wins over
-//! the font of the translated ROM.
+//! `--font` puts a ready font (`sunpetal-font`) in place of the ROM's dialogue font; `--font-dir`
+//! does it for all four fonts of the game, the folder holding what `sunpetal-font --all` wrote.
+//! They win over the fonts of the translated ROM.
 //!
 //! With `--merge` the sections of that file are kept (the pictures), the translation of the same
 //! language in it is replaced.
@@ -14,7 +15,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use sunpetal_data::container::Container;
-use sunpetal_data::translate::{Table, Translation};
+use sunpetal_data::translate::{font_file_name, Table, Translation, DIALOGUE_FONT, FONTS};
 
 fn main() -> ExitCode {
     match run() {
@@ -28,7 +29,7 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), String> {
     let mut args = std::env::args().skip(1);
-    let (mut rom, mut done, mut table, mut out, mut merge, mut font) = (None, None, None, None, None, None);
+    let (mut rom, mut done, mut table, mut out, mut merge, mut font, mut font_dir) = (None, None, None, None, None, None, None);
     let (mut lang, mut column, mut base) = ("ru".to_string(), "Русский".to_string(), "ue".to_string());
     while let Some(a) = args.next() {
         let mut v = || args.next().ok_or_else(|| format!("{} wants a value", a));
@@ -38,6 +39,7 @@ fn run() -> Result<(), String> {
             "--table" => table = Some(PathBuf::from(v()?)),
             "--out" => out = Some(PathBuf::from(v()?)),
             "--font" => font = Some(PathBuf::from(v()?)),
+            "--font-dir" => font_dir = Some(PathBuf::from(v()?)),
             "--merge" => merge = Some(PathBuf::from(v()?)),
             "--lang" => lang = v()?,
             "--column" => column = v()?,
@@ -64,7 +66,13 @@ fn run() -> Result<(), String> {
         eprintln!("warning: {}", p);
     }
     if let Some(f) = &font {
-        tr.set_font(&rom, &read(f)?)?;
+        tr.set_font(&rom, DIALOGUE_FONT, &read(f)?)?;
+    }
+    if let Some(dir) = &font_dir {
+        for path in FONTS {
+            let f = dir.join(font_file_name(path));
+            tr.set_font(&rom, path, &read(&f)?)?;
+        }
     }
     let bytes = tr.to_bytes()?;
     let mut c = match &merge {

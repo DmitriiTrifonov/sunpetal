@@ -12,13 +12,26 @@ pub struct Params {
     pub size: f32,
     /// Coverage gain: above 1 makes the strokes heavier, below 1 lighter.
     pub weight: f32,
+    /// Pixel look, like the game's own hand-drawn font: the coverage (after the weight) is cut at
+    /// `PIXEL_CUT` into full strokes, half of it into the middle level, and the advance is the ink
+    /// (the game adds a pixel between letters).
+    pub pixel: bool,
 }
+
+/// Coverage from which a pixel of a pixel-look glyph is full; half of it makes a middle one.
+pub const PIXEL_CUT: f32 = 0.5;
 
 impl Default for Params {
     fn default() -> Params {
-        Params { size: 12.0, weight: 1.0 }
+        Params { size: 12.0, weight: 1.0, pixel: false }
     }
 }
+
+/// The text-box marker of the game's texts: the engine takes it as a code, the font keeps the star the game draws for it.
+const MARKER: char = '\u{BD}';
+
+/// Codes the font does not draw from the TTF: the marker (a star in the game's font) and the line ends.
+const EMPTY: [char; 3] = [MARKER, '\r', '\n'];
 
 /// The characters of the text that a font must have: printable ones, and the ASCII the game's own
 /// texts and `?` need.
@@ -26,6 +39,7 @@ pub fn charset<'a>(texts: impl IntoIterator<Item = &'a str>) -> BTreeSet<char> {
     let mut set: BTreeSet<char> = (0x20u8..0x7F).map(char::from).collect();
     for t in texts {
         set.extend(t.chars().filter(|c| !c.is_control()));
+    set.extend(EMPTY);
     }
     set
 }
@@ -44,12 +58,20 @@ pub fn build(base: &Nftr, ttf: &[u8], chars: &BTreeSet<char>, p: &Params) -> Res
     if chars.len() > 0xFFFF {
         return Err("too many characters for one font".into());
     }
-    let lacking: String = chars.iter().filter(|c| **c != ' ' && font.glyph_id(**c).0 == 0).collect();
+    let lacking: String = chars.iter().filter(|c| **c != ' ' && !EMPTY.contains(c) && font.glyph_id(**c).0 == 0).collect();
     if !lacking.is_empty() {
         return Err(format!("the font file lacks: {}", lacking));
     }
     let (mut glyphs, mut widths, mut pairs) = (Vec::new(), Vec::new(), Vec::new());
     for (i, &c) in chars.iter().enumerate() {
+        if EMPTY.contains(&c) {
+            // the marker is a star in the game's own font: keep that glyph; line ends stay empty
+            let own = if c == MARKER { base_glyph(base, c) } else { None };
+            widths.push(own.as_ref().map_or((0, 0, 0), |(_, w)| *w));
+            glyphs.push(own.map_or_else(|| pack(&vec![0u8; cw * ch], base.depth, base.cell_size as usize), |(g, _)| g));
+            pairs.push((c as u32 as u16, i as u16));
+            continue;
+        }
         let id = font.glyph_id(c);
         let adv = scaled.h_advance(id).round().clamp(0.0, 255.0) as u8;
         let mut cell = vec![0u8; cw * ch];
@@ -65,7 +87,12 @@ pub fn build(base: &Nftr, ttf: &[u8], chars: &BTreeSet<char>, p: &Params) -> Res
                 if py < 0 || py as usize >= ch || px >= cw {
                     return;
                 }
-                let v = (cov * p.weight).clamp(0.0, 1.0) * levels;
+                let c = (cov * p.weight).clamp(0.0, 1.0);
+                let v = if p.pixel {
+                    if c >= PIXEL_CUT { levels } else if c >= PIXEL_CUT / 2.0 { (levels / 2.0).round() } else { 0.0 }
+                } else {
+                    c * levels
+                };
                 let v = v.round() as u8;
                 if v > 0 {
                     cell[py as usize * cw + px] = v;
@@ -75,7 +102,16 @@ pub fn build(base: &Nftr, ttf: &[u8], chars: &BTreeSet<char>, p: &Params) -> Res
             ink = right as u8;
         }
         glyphs.push(pack(&cell, base.depth, base.cell_size as usize));
-        widths.push((bearing, ink, adv.max((bearing.max(0) as u8).saturating_add(ink))));
+        let own = (bearing.max(0) as u8).saturating_add(ink);
+        // pixel look: the letter's own width; the space keeps the font's advance
+        let adv = if p.pixel && ink > 0 {
+            own
+        } else if c == ' ' {
+            base_advance(base, ' ').unwrap_or(adv)
+        } else {
+            adv.max(own)
+        };
+        widths.push((bearing, ink, adv));
         pairs.push((c as u32 as u16, i as u16));
     }
     if chars.iter().any(|c| *c as u32 > 0xFFFF) {
@@ -89,6 +125,28 @@ pub fn build(base: &Nftr, ttf: &[u8], chars: &BTreeSet<char>, p: &Params) -> Res
     out.alt_index = alt;
     out.maps = vec![CharMap { lo: 0, hi: 0xFFFF, data: MapData::Scan(pairs) }];
     Ok(out)
+}
+
+/// The advance the base font gives a character (the game reserves room for numbers in spaces).
+fn base_advance(base: &Nftr, c: char) -> Option<u8> {
+    base_glyph(base, c).map(|(_, w)| w.2)
+}
+
+/// The bitmap and widths the base font has for a character.
+fn base_glyph(base: &Nftr, c: char) -> Option<(Vec<u8>, (i8, u8, u8))> {
+    let code = c as u32 as u16;
+    let g = base.maps.iter().find_map(|m| {
+        if code < m.lo || code > m.hi {
+            return None;
+        }
+        match &m.data {
+            MapData::Direct(first) => Some(first + (code - m.lo)),
+            MapData::Table(t) => t.get((code - m.lo) as usize).copied().filter(|g| *g != 0xFFFF),
+            MapData::Scan(p) => p.iter().find(|(k, _)| *k == code).map(|(_, g)| *g),
+        }
+    })?;
+    let w = *base.widths.get(g.checked_sub(base.first_width)? as usize)?;
+    Some((base.glyphs.get(g as usize)?.clone(), w))
 }
 
 /// Pixels of a cell (one value each, row after row) as the font stores them: `depth` bits each,
@@ -123,7 +181,7 @@ mod tests {
     use super::*;
     use crate::nftr::Font;
 
-    fn base() -> Nftr {
+    pub(super) fn base() -> Nftr {
         Nftr {
             version: 0x100,
             font_type: 0,
@@ -180,11 +238,28 @@ mod tests {
     fn heavier_weight_darkens_and_a_missing_character_is_an_error() {
         let chars = charset(["О"]);
         let sum = |w: f32| {
-            let f = build(&base(), UBUNTU, &chars, &Params { size: 12.0, weight: w }).unwrap();
+            let f = build(&base(), UBUNTU, &chars, &Params { size: 12.0, weight: w, pixel: false }).unwrap();
             f.glyphs.iter().flat_map(|g| unpack(g, 3, 13 * 14)).map(|v| v as u32).sum::<u32>()
         };
         assert!(sum(1.6) > sum(0.8));
         let err = build(&base(), UBUNTU, &charset(["日"]), &Params::default()).unwrap_err();
         assert!(err.contains("日"), "{}", err);
+    }
+}
+
+#[cfg(test)]
+mod pixel_tests {
+    use super::*;
+
+    #[test]
+    fn the_pixel_look_has_only_full_and_middle_levels_and_a_tight_advance() {
+        let base = super::tests::base();
+        let chars = charset(["Ш"]);
+        let f = build(&base, epaint_default_fonts::UBUNTU_LIGHT, &chars, &Params { size: 13.0, weight: 1.6, pixel: true }).unwrap();
+        let at = chars.iter().position(|c| *c == 'Ш').unwrap();
+        let px = unpack(&f.glyphs[at], 3, 13 * 14);
+        assert!(px.iter().all(|v| matches!(v, 0 | 4 | 7)), "{:?}", px.iter().collect::<std::collections::BTreeSet<_>>());
+        let w = f.widths[at];
+        assert_eq!(w.2, (w.0.max(0) as u8) + w.1);
     }
 }
