@@ -45,6 +45,8 @@ pub struct Video {
     /// The dialogue lines: `crisp` (the app draws them in the window's resolution), `pixel` (the game's own raster text)
     /// or `auto` (crisp from 2 window pixels to a DS pixel).
     pub dialogue_text: String,
+    /// The window takes the shape of the chosen layout's picture when the layout changes (no bars at the sides).
+    pub follow_shape: bool,
     pub fullscreen: bool,
     /// Behind the screens: "edge" (a lone screen's edge rows run on), "glow" (their colours, blurred) or "black".
     pub background: String,
@@ -77,7 +79,7 @@ pub fn parse_renderer(name: &str) -> Option<nds::Renderer> {
 
 impl Default for Video {
     fn default() -> Video {
-        Video { res: 2, linear: true, layout: "stacked".into(), lower: false, panel: false, counter: true, auto: true, wide: true, bars_match: true, fit: "fit".into(), pixel_aspect: 1.0, logos_in_turn: true, puzzle: "inset".into(), dialogue_text: "auto".into(), fullscreen: false, background: "edge".into(), show_stats: false, texture_pack: String::new(), renderer: default_renderer().into(), window: [512, 768] }
+        Video { res: 2, linear: true, layout: "stacked".into(), lower: false, panel: false, counter: true, auto: true, wide: true, bars_match: true, fit: "fit".into(), pixel_aspect: 1.0, logos_in_turn: true, puzzle: "inset".into(), dialogue_text: "auto".into(), follow_shape: false, fullscreen: false, background: "edge".into(), show_stats: false, texture_pack: String::new(), renderer: default_renderer().into(), window: [512, 768] }
     }
 }
 

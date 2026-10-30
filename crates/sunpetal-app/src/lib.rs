@@ -156,6 +156,8 @@ struct App {
     pad: u32,
     pads: Option<gilrs::Gilrs>,
     win_size: (u32, u32),
+    /// The picture's shape (width over height) the window was last given (`video.follow_shape`); 0: none yet.
+    shape_last: f32,
     /// The lower screen has the map's counter (`layout::counter_in`, from the last picture).
     counter_seen: bool,
     /// The lower screen has the action icon (`layout::hint_in`).
@@ -786,6 +788,7 @@ impl ApplicationHandler for App {
                 self.skip_fade += (target - self.skip_fade).clamp(-0.07, 0.07);
                 let fade = self.skip_fade;
                 let mut action = None;
+                let mut want_shape: Option<f32> = None;
                 {
                     let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, hint_seen, puzzle_hold, puzzle_side, coll_seen, coll_card, pending_capture, edo_seen, prompt, bar_color, auto_lower, hold, wide_now, paper, scroll, portrait_left, .. } = self;
                     let live = layout::Live { vblank: shared.vblank.load(Ordering::Relaxed), counter_seen: *counter_seen, hint_seen: *hint_seen, both: *puzzle_hold > 0, both_side: *puzzle_side, collection: coll_seen.then(|| coll_card.get()), lower: *auto_lower || hold.is_some(), edo: *edo_seen, prompt: *prompt, wide: *wide_now as f32, scroll: (*paper && *auto_lower).then_some(*scroll) };
@@ -797,6 +800,11 @@ impl ApplicationHandler for App {
                         }
                         // the 3D view is widened to the window's shape when the upper screen is alone
                         let base = layout::find(layouts, &settings.video, &layout::Live { wide: 0.0, ..live });
+                        // the layout the setting names, not what the game moves to for a moment (a puzzle, a card)
+                        if settings.video.follow_shape && !settings.video.fullscreen {
+                            let named = layouts.iter().find(|l| l.name == settings.video.layout).unwrap_or(&base);
+                            want_shape = Some(named.size.0 * named.fit.par.clamp(0.25, 4.0) / named.size.1);
+                        }
                         let upper_alone = base.screens[0].is_some() && (base.screens[1].is_none() || base.name == "overlay");
                         let want = if settings.video.wide && upper_alone {
                             layout::wide_each_side(g.size(), settings.video.pixel_aspect, sunpetal_runtime::nds::WIDE_MAX)
@@ -875,6 +883,19 @@ impl ApplicationHandler for App {
                             g.draw(&layout, &fx, None);
                         }
                     }
+                }
+                // the window takes the picture's shape, keeping its area (once per change of shape, so a window the player drags stays)
+                match want_shape {
+                    Some(a) if (a - self.shape_last).abs() > 0.004 => {
+                        let area = self.win_size.0 as f32 * self.win_size.1 as f32;
+                        let w = (area * a).sqrt();
+                        if let Some(win) = &self.window {
+                            let _ = win.request_inner_size(winit::dpi::PhysicalSize::new(w as u32, (w / a) as u32));
+                        }
+                        self.shape_last = a;
+                    }
+                    Some(_) => {}
+                    None => self.shape_last = 0.0,
                 }
                 if action == Some(ui::Action::Quit) {
                     self.save();
@@ -1041,6 +1062,7 @@ pub fn run(o: Options, el: EventLoop<()>) {
         pad: 0,
         pads: gilrs::Gilrs::new().map_err(|e| eprintln!("no pads: {}", e)).ok(),
         win_size: (512, 768),
+        shape_last: 0.0,
         counter_seen: false,
         hint_seen: false,
         puzzle_hold: 0,
