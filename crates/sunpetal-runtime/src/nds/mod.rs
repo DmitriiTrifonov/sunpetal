@@ -1365,6 +1365,9 @@ pub fn dialogue_text() -> Option<(u32, String)> {
     })?
 }
 
+/// Frames a set line is awaited without its letters coming (`dialogue`).
+const COMING_FRAMES: u32 = 90;
+
 /// What `dialogue` tells: the window's text and whether the game has begun to draw it (its letters are in the window's canvas).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Dialogue {
@@ -1377,7 +1380,8 @@ pub struct Dialogue {
 thread_local! {
     /// The line the window showed at the last `dialogue` call (its pointer), and the canvas's sum then: the line is
     /// drawn once the canvas has changed (and has ink).
-    static COMING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// A line was set: whether its letters are awaited, and for how many frames.
+    static COMING: std::cell::Cell<(bool, u32)> = const { std::cell::Cell::new((false, 0)) };
     static DIALOGUE_SEEN: std::cell::Cell<(u32, u64, bool)> = const { std::cell::Cell::new((0, 0, false)) };
 }
 
@@ -1412,7 +1416,7 @@ fn dialogue_canvas() -> Option<(u64, bool)> {
 pub fn dialogue() -> Option<Dialogue> {
     let Some((ptr, text)) = dialogue_text() else {
         DIALOGUE_SEEN.with(|c| c.set((0, 0, false)));
-        COMING.with(|a| a.set(false));
+        COMING.with(|a| a.set((false, 0)));
         return None;
     };
     // the raster text the 2D engine drew in the band, when frames are drawn (its dark letters are the ink); else the
@@ -1425,7 +1429,18 @@ pub fn dialogue() -> Option<Dialogue> {
     let key = text.bytes().fold(ptr as u64, |h, b| (h ^ b as u64).wrapping_mul(0x100_0000_01b3)) as u32;
     let drawn = DIALOGUE_SEEN.with(|c| {
         let (seen, base, drawn) = c.get();
-        COMING.with(|a| a.set(if !ink { false } else { a.get() || seen != key }));
+        // armed when a line is set (about 21 frames before its first letter), until its window is gone after the letters
+        // came; a line whose letters never come (a false change) lets go after `COMING_FRAMES`
+        COMING.with(|a| {
+            let (on, n) = a.get();
+            a.set(if seen != key {
+                (true, 0)
+            } else if (drawn && !ink) || n >= COMING_FRAMES {
+                (false, 0)
+            } else {
+                (on, n + 1)
+            });
+        });
         let now = if seen != key {
             (key, sum, false)
         } else if !ink {
@@ -1439,7 +1454,7 @@ pub fn dialogue() -> Option<Dialogue> {
         c.set(now);
         now.2
     });
-    Some(Dialogue { text, drawn, coming: COMING.with(|a| a.get()) })
+    Some(Dialogue { text, drawn, coming: COMING.with(|a| a.get().0) })
 }
 
 /// Whether the game's script is at a `WAIT`, a command that waits for the player's A (a line of speech is
