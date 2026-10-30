@@ -1305,6 +1305,22 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
         });
         items.push(Item { x0, y0, bw: x1 - x0, bh: y1 - y0, nvert, mask: serial_masks[i], vb, tb });
     }
+    if std::env::var_os("SUNPETAL_GPU_TIMING").is_some() && !items.is_empty() {
+        // how many translucent/shadow polygons' boxes meet in one 16x16 tile (этап 9.4.0)
+        let (tw, th) = (w.div_ceil(16), h.div_ceil(16));
+        let mut count = vec![0u32; tw * th];
+        for it in &items {
+            for ty in (it.y0 / 16) as usize..=((it.y0 + it.bh - 1) / 16) as usize {
+                for tx in (it.x0 / 16) as usize..=((it.x0 + it.bw - 1) / 16) as usize {
+                    count[ty * tw + tx] += 1;
+                }
+            }
+        }
+        let hit: Vec<u32> = count.iter().copied().filter(|&n| n > 0).collect();
+        let (max, sum) = (hit.iter().copied().max().unwrap_or(0), hit.iter().map(|&n| n as u64).sum::<u64>());
+        let over = hit.iter().filter(|&&n| n > 32).count();
+        eprintln!("  tiles 16x16: {} of {} hit, polygons per tile avg {:.1}, max {max}, {over} with more than 32", hit.len(), tw * th, sum as f64 / hit.len().max(1) as f64);
+    }
     // a polygon's level: one past the highest level of an earlier polygon whose box overlaps it
     // (those must come first, in order). Polygons of one level overlap nobody of that level, so
     // they read the one buffer and write the other in any order: a level's masks go in one pass,
