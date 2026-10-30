@@ -171,6 +171,8 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     let frame = Duration::from_secs_f64(1.0 / FRAME_RATE);
     let mut next = Instant::now();
     let stats = std::env::var_os("SUNPETAL_STATS").is_some();
+    // 9в.10: crisp dialogue text (behind a flag until the menu setting)
+    let vtext = std::env::var_os("SUNPETAL_VTEXT").is_some_and(|v| v == "1");
     let (mut counted, mut since) = (0u32, Instant::now());
     let (mut shown, mut shown_since) = (0u32, Instant::now());
     let (mut t_run, mut t_grab) = (Duration::ZERO, Duration::ZERO);
@@ -258,6 +260,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             let picture = nds::screens_rgba();
             shared.dialogue.store(dialogue_shown(picture.0, &picture.1), Ordering::Relaxed);
             let dialogue_line = nds::dialogue().filter(|d| d.drawn).map(|d| d.text);
+            nds::hide_dialogue_raster(vtext && dialogue_line.is_some());
             if skipping {
                 let print = fingerprint(&picture.1);
                 still = if print == last_print { still + 1 } else { 0 };

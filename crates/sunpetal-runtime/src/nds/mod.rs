@@ -464,6 +464,12 @@ pub fn set_draw(on: bool) {
     nds(|n| n.gpu.on = on);
 }
 
+/// The app draws the dialogue line itself: the game's raster text (BG3, upper screen, lines
+/// 144..191) is left out of the next frames until this is called with false.
+pub fn hide_dialogue_raster(on: bool) {
+    nds(|n| n.gpu.hide_dialogue = on);
+}
+
 pub use input::KEY_NAMES;
 
 /// Live input for the next frame: the buttons held (bit i of `KEY_NAMES`) and the stylus on the

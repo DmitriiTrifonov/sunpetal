@@ -35,11 +35,14 @@ pub(super) struct Gpu2d {
     pub(super) on: bool,
     /// [engine][BG]: the line a mosaic block repeats.
     mosaic: Vec<[u32; 256]>,
+    /// The dialogue line is drawn by the app in a crisp font: the game's raster text (BG3 of the
+    /// upper screen, lines 144..191) is not drawn.
+    pub(super) hide_dialogue: bool,
 }
 
 impl Gpu2d {
     pub(super) fn new() -> Gpu2d {
-        Gpu2d { px: vec![0; 2 * 192 * 256 * 2], refs: [[[0; 2]; 2]; 2], on: true, mosaic: vec![[0; 256]; 8] }
+        Gpu2d { px: vec![0; 2 * 192 * 256 * 2], refs: [[[0; 2]; 2]; 2], on: true, mosaic: vec![[0; 256]; 8], hide_dialogue: false }
     }
 
     fn at(e: usize, y: usize) -> usize {
@@ -697,6 +700,9 @@ impl Nds {
                         }
                         self.gpu.mosaic[e * 4 + bg] = buf;
                     }
+                }
+                if self.gpu.hide_dialogue && e == 0 && bg == 3 && y >= 144 {
+                    continue;
                 }
                 for x in 0..256 {
                     if buf[x] & PX_OPAQUE != 0 && l.win[x] & (1 << bg) != 0 {

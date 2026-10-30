@@ -72,3 +72,66 @@ fn a_line_is_drawn_when_the_game_draws_its_first_letter() {
         assert!(*drawn > *changed + 5, "drawn at once, before the game draws");
     }
 }
+
+/// One run to a fully drawn line, and its next frame drawn with or without the raster text hidden.
+fn frame_after_a_drawn_line(rom: PathBuf, save: PathBuf, hide: bool) -> (usize, Vec<u8>) {
+    let copy = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("vtext3{}.sav", hide as u8));
+    std::fs::copy(&save, &copy).expect("the save's copy");
+    let mut s = Session::open(rom, Some(copy)).expect("open");
+    s.goto("C01_01", None).expect("goto");
+    // `dialogue()` is polled each frame, as the app does; A moves the lines on until one is drawn
+    let mut drawn = false;
+    for i in 0..3000 {
+        if i % 90 == 0 {
+            s.press("A", 3).unwrap();
+        } else {
+            s.run(1).unwrap();
+        }
+        if nds::dialogue().is_some_and(|d| d.drawn) {
+            drawn = true;
+            break;
+        }
+    }
+    assert!(drawn, "no line was drawn");
+    // the whole line is drawn, nothing moves any more
+    for _ in 0..90 {
+        s.run(1).unwrap();
+        nds::dialogue();
+    }
+    // the session draws only on request
+    nds::hide_dialogue_raster(hide);
+    nds::set_draw(true);
+    s.run(1).unwrap();
+    let out = nds::screens_rgba();
+    nds::set_draw(false);
+    nds::hide_dialogue_raster(false);
+    out
+}
+
+/// With the raster text hidden the frame differs from the plain one only in the dialogue band (upper screen, lines 144..191).
+#[test]
+fn hiding_the_raster_text_changes_only_the_dialogue_band() {
+    let (Some(rom), Some(save)) = (std::env::var_os("SUNPETAL_ROM").map(PathBuf::from), std::env::var_os("SUNPETAL_SAVE").map(PathBuf::from)) else {
+        eprintln!("skipped: SUNPETAL_ROM and SUNPETAL_SAVE are not both set");
+        return;
+    };
+    // the emulator's state belongs to its thread: each run has a thread of its own
+    let run = |hide: bool| {
+        let (rom, save) = (rom.clone(), save.clone());
+        std::thread::spawn(move || frame_after_a_drawn_line(rom, save, hide)).join().unwrap()
+    };
+    let (scale, plain) = run(false);
+    let (_, hidden) = run(true);
+    assert_eq!(plain.len(), hidden.len());
+    let row = 256 * scale * 4;
+    let (mut inside, mut outside) = (0usize, 0usize);
+    for (i, (a, b)) in plain.chunks_exact(4).zip(hidden.chunks_exact(4)).enumerate() {
+        if a != b {
+            let y = i * 4 / row;
+            if (144 * scale..192 * scale).contains(&y) { inside += 1 } else { outside += 1 }
+        }
+    }
+    eprintln!("changed: {} in the band, {} elsewhere", inside, outside);
+    assert!(inside > 100, "the letters are still there");
+    assert_eq!(outside, 0, "something other than the band changed");
+}
