@@ -161,6 +161,10 @@ pub(crate) fn on_enter(c: &mut Cpu, key: u32) {
 
 /// `len` bytes of ARM9 memory at `addr`, if all of them are memory.
 pub fn peek(addr: u32, len: usize) -> Option<Vec<u8>> {
+    if (0x0400_0000..0x0800_0000).contains(&addr) {
+        // registers, palettes, video memory, OAM: as the ARM9 sees them (0 where nothing is mapped)
+        return Some(super::nds(|n| (0..len as u32).map(|i| n.mmio_read(9, addr + i, 1) as u8).collect()));
+    }
     let mut out = vec![0; len];
     machine(|m| m.mem.read_bytes(9, addr, &mut out)).then_some(out)
 }
