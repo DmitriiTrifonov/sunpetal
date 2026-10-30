@@ -213,8 +213,8 @@ impl App {
         let e = &self.settings.effects;
         let window_png = format!("artifacts/shots/window_{}.png", self.shared.vblank.load(Ordering::Relaxed));
         let meta = format!(
-            "{},\"window_png\":{:?},\"effects\":{{\"preset\":{:?},\"smooth_2d\":{:?},\"smooth_strength\":{},\"texture_filter\":{:?},\"outline\":{},\"shadow\":{},\"fxaa\":{},\"bloom\":{},\"sharp\":{}}},\"background\":{:?},\"texture_pack\":{:?}",
-            meta, window_png, e.preset, e.smooth_2d, e.smooth_strength, e.texture_filter, e.outline, e.shadow, e.fxaa, e.bloom, e.sharp, v.background, v.texture_pack
+            "{},\"window_png\":{:?},\"effects\":{{\"preset\":{:?},\"smooth_2d\":{:?},\"smooth_strength\":{},\"texture_filter\":{:?},\"outline\":{},\"shadow\":{},\"fxaa\":{},\"bloom\":{},\"sharp\":{}}},\"background\":{:?},\"texture_pack\":{:?},\"renderer\":{:?},\"msaa\":{}",
+            meta, window_png, e.preset, e.smooth_2d, e.smooth_strength, e.texture_filter, e.outline, e.shadow, e.fxaa, e.bloom, e.sharp, v.background, v.texture_pack, v.renderer, e.msaa
         );
         self.pending_capture.set(Some(std::path::PathBuf::from(window_png)));
         *self.shared.dump_meta.lock().unwrap() = meta;
@@ -771,7 +771,9 @@ impl ApplicationHandler for App {
                         let band = touchpad::band(ww, wh);
                         g.reserve = if pad_on { band.h } else { 0.0 };
                         let corner_on = cfg!(target_os = "android") && !pad_on;
-                        if menu.open || pad_on || corner_on || fade > 0.0 {
+                        // the touch panel and the Android corner show the speed figures themselves; elsewhere they go over the picture
+                        let stats_on = settings.video.show_stats && !pad_on && !corner_on;
+                        if menu.open || pad_on || corner_on || stats_on || fade > 0.0 {
                             let held = touch_held.clone();
                             let mut f = |ctx: &egui::Context| {
                                 if fade > 0.0 {
@@ -788,6 +790,18 @@ impl ApplicationHandler for App {
                                     let fast = settings.emulation.fast_button.then(|| shared.fast.load(Ordering::Relaxed));
                                     let skip = settings.emulation.skip_button.then(|| shared.skip.load(Ordering::Relaxed));
                                     touchpad::paint_menu_button(ctx, ww, wh, &info, fast, skip);
+                                }
+                                if stats_on {
+                                    // one line, in the top right corner (the game's own counter is at the left)
+                                    let info = match stopped_msg {
+                                        Some(why) => format!("stopped: {}", why),
+                                        None => shared.status.lock().unwrap().lines().take(2).collect::<Vec<_>>().join("   "),
+                                    };
+                                    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("stats")));
+                                    let galley = p.layout_no_wrap(info, egui::FontId::monospace(13.0), egui::Color32::WHITE);
+                                    let at = ctx.content_rect().right_top() + egui::vec2(-8.0 - galley.size().x, 8.0);
+                                    p.rect_filled(egui::Rect::from_min_size(at, galley.size()).expand(4.0), 3.0, egui::Color32::from_black_alpha(160));
+                                    p.galley(at, galley, egui::Color32::WHITE);
                                 }
                                 if pad_on {
                                     let info = match stopped_msg {
