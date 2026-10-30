@@ -1323,6 +1323,42 @@ pub fn script_mark() -> Option<u32> {
     })?
 }
 
+/// The pointer to the text of the line the dialogue window shows (`0207_5A28`, 0 when none) and that text
+/// (UTF-16, the `\n` between the lines kept), for a line drawn by the app in the window's own resolution
+/// (docs/PLAN.md, 9в.10); `None` when the window shows nothing or the game is not the European one.
+pub fn dialogue_text() -> Option<(u32, String)> {
+    const SHOWN: u32 = 0x0207_5A28;
+    const MAIN_RAM: std::ops::Range<u32> = 0x0200_0000..0x0240_0000;
+    const MAX_UNITS: usize = 512;
+    nds(|n| n.cart.rom.get(0xC..0x10) == Some(b"YHNP".as_slice())).then(|| {
+        crate::machine::machine(|m| {
+            let mut w = [0u8; 4];
+            if !m.mem.read_bytes(9, SHOWN, &mut w) {
+                return None;
+            }
+            let ptr = u32::from_le_bytes(w);
+            if ptr == 0 || ptr % 2 != 0 || !MAIN_RAM.contains(&ptr) {
+                return None;
+            }
+            let mut units = Vec::new();
+            let mut at = ptr;
+            while units.len() < MAX_UNITS && MAIN_RAM.contains(&(at + 1)) {
+                let mut u = [0u8; 2];
+                if !m.mem.read_bytes(9, at, &mut u) {
+                    return None;
+                }
+                let c = u16::from_le_bytes(u);
+                if c == 0 {
+                    return Some((ptr, String::from_utf16_lossy(&units)));
+                }
+                units.push(c);
+                at += 2;
+            }
+            None
+        })
+    })?
+}
+
 /// Whether the game's script is at a `WAIT`, a command that waits for the player's A (a line of speech is
 /// followed by one), by the command the runner holds (`0207596C + 0x1C`); `None` as `script_idle`.
 pub fn script_waits() -> Option<bool> {
