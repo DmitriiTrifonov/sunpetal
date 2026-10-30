@@ -266,9 +266,10 @@ pub fn edge_color(layout: &Layout, scale: usize, rgba: &[u8]) -> Option<[f32; 3]
 }
 
 /// The hint text of Edo's screens (what the chosen key does), cut from the upper screen and put
-/// into the free corner of the lower one, whose keys are the screen's use.
+/// into the free corner of the lower one, whose keys are the screen's use. The cut starts at 83: the
+/// Russian text of this screen takes four lines and ends at 143 (the cut was 80..140 and lost the last).
 pub fn edo_patch() -> Patch {
-    Patch { screen: 0, src: Rect { x: 106.0, y: 80.0, w: 148.0, h: 60.0 }, dst: Rect { x: 106.0, y: 130.0, w: 148.0, h: 60.0 }, pinned: false, round: false }
+    Patch { screen: 0, src: Rect { x: 106.0, y: 83.0, w: 148.0, h: 60.0 }, dst: Rect { x: 106.0, y: 130.0, w: 148.0, h: 60.0 }, pinned: false, round: false }
 }
 
 /// Whether the pink of the title ("Hello!! SAVE DATA") reaches into the hint's place on the upper screen (the
