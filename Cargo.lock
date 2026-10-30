@@ -2849,6 +2849,10 @@ dependencies = [
 [[package]]
 name = "sunpetal-data"
 version = "0.0.1"
+dependencies = [
+ "ab_glyph",
+ "epaint_default_fonts",
+]
 
 [[package]]
 name = "sunpetal-runtime"

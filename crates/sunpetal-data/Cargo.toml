@@ -6,3 +6,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+ab_glyph = "0.2.32"
+
+[dev-dependencies]
+# a font with Latin, Greek and Cyrillic for the tests of the font maker; not shipped
+epaint_default_fonts = "0.37.0"
