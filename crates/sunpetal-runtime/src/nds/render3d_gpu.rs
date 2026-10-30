@@ -91,6 +91,8 @@ struct Ctx {
     resolve_pipeline: wgpu::RenderPipeline,
     bgl_resolve: wgpu::BindGroupLayout,
     bgl_mask: wgpu::BindGroupLayout,
+    tiled_pipeline: wgpu::RenderPipeline,
+    bgl_tiled: wgpu::BindGroupLayout,
     /// The attachments the frames are done with, to be taken again (этап 9.1.1).
     pool: Mutex<Vec<(PoolKey, wgpu::Texture)>>,
     /// The small per-frame buffers (uniforms, the full-screen triangle, the resolve factor) the same way (этап 9.1.4).
@@ -532,6 +534,52 @@ fn make_ctx() -> Result<Ctx, String> {
         multiview_mask: None,
         cache: None,
     });
+    // the tiled translucent pass (этап 9.4): one full-screen pass over every translucent and shadow polygon
+    let bgl_tiled = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("render3d_gpu tiled"),
+        entries: &[
+            uniform(0),
+            storage(1),
+            tex(2, wgpu::TextureSampleType::Uint),
+            tex(7, wgpu::TextureSampleType::Uint),
+            tex(8, wgpu::TextureSampleType::Uint),
+            tex(9, wgpu::TextureSampleType::Uint),
+            tex(10, wgpu::TextureSampleType::Float { filterable: false }),
+            tex(11, wgpu::TextureSampleType::Uint),
+            tex(12, wgpu::TextureSampleType::Uint),
+            tex(13, wgpu::TextureSampleType::Uint),
+            storage(17),
+            storage(18),
+            storage(19),
+            tex(20, wgpu::TextureSampleType::Uint),
+        ],
+    });
+    let layout_tiled = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("render3d_gpu tiled"),
+        bind_group_layouts: &[Some(&bgl_tiled)],
+        immediate_size: 0,
+    });
+    let tiled_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("render3d_gpu tiled"),
+        layout: Some(&layout_tiled),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_full"),
+            compilation_options: Default::default(),
+            buffers: &[Some(vbuf.clone())],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_tiled"),
+            compilation_options: Default::default(),
+            targets: &color_targets,
+        }),
+        primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    });
     let layout_mask = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("render3d_gpu mask"),
         bind_group_layouts: &[Some(&bgl_mask)],
@@ -590,7 +638,7 @@ fn make_ctx() -> Result<Ctx, String> {
         multiview_mask: None,
         cache: None,
     });
-    Ok(Ctx { device, queue, pipeline, bgl, rear_pipeline, bgl_rear, fog_pipeline, bgl_fog, outline_pipeline, bgl_outline, shade_pipeline, bgl_shade, rows_pipeline, bgl_rows, skyrow_pipeline, bgl_skyrow, extend_pipeline, bgl_extend, blend_pipeline, bgl_blend, mask_pipeline, bgl_mask, resolve_pipeline, bgl_resolve, pool: Mutex::new(Vec::new()), buf_pool: Mutex::new(Vec::new()), atlas_cache: Mutex::new(None) })
+    Ok(Ctx { device, queue, pipeline, bgl, rear_pipeline, bgl_rear, fog_pipeline, bgl_fog, outline_pipeline, bgl_outline, shade_pipeline, bgl_shade, rows_pipeline, bgl_rows, skyrow_pipeline, bgl_skyrow, extend_pipeline, bgl_extend, blend_pipeline, bgl_blend, mask_pipeline, bgl_mask, resolve_pipeline, bgl_resolve, tiled_pipeline, bgl_tiled, pool: Mutex::new(Vec::new()), buf_pool: Mutex::new(Vec::new()), atlas_cache: Mutex::new(None) })
 }
 
 /// Where a texture's picture sits in the frame's atlas, and how its coordinates map onto it.
@@ -1265,6 +1313,8 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
         bh: u32,
         nvert: u32,
         mask: bool,
+        /// Its index in `built.serial`.
+        src: usize,
         vb: wgpu::Buffer,
         tb: wgpu::Buffer,
     }
@@ -1303,7 +1353,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
             contents: tris,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
-        items.push(Item { x0, y0, bw: x1 - x0, bh: y1 - y0, nvert, mask: serial_masks[i], vb, tb });
+        items.push(Item { x0, y0, bw: x1 - x0, bh: y1 - y0, nvert, mask: serial_masks[i], src: i, vb, tb });
     }
     if std::env::var_os("SUNPETAL_GPU_TIMING").is_some() && !items.is_empty() {
         // how many translucent/shadow polygons' boxes meet in one 16x16 tile (этап 9.4.0)
@@ -1340,7 +1390,109 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
             }
         }
     }
-    for group in &groups {
+    // the tiled pass (этап 9.4, `SUNPETAL_TILED`): all the polygons in one full-screen pass, each pixel going
+    // through its 16x16 tile's polygons in the job's order, instead of a pass per group
+    let tiled = std::env::var_os("SUNPETAL_TILED").is_none_or(|v| v != "0") && !items.is_empty();
+    if tiled {
+        let next = 1 - cur;
+        let mut all_tris: Vec<u8> = Vec::new();
+        let mut table: Vec<u8> = Vec::new();
+        let mut first = 0u32;
+        for it in &items {
+            let n = it.nvert / 3;
+            all_tris.extend_from_slice(&built.serial[it.src].1);
+            for v in [first, n, it.mask as u32, 0] {
+                table.extend_from_slice(&v.to_le_bytes());
+            }
+            first += n;
+        }
+        let (tw, th) = (w.div_ceil(16), h.div_ceil(16));
+        let mut lists: Vec<Vec<u32>> = vec![Vec::new(); tw * th];
+        let (mut ux0, mut uy0, mut ux1, mut uy1) = (u32::MAX, u32::MAX, 0u32, 0u32);
+        for (j, it) in items.iter().enumerate() {
+            for ty in (it.y0 / 16) as usize..=((it.y0 + it.bh - 1) / 16) as usize {
+                for tx in (it.x0 / 16) as usize..=((it.x0 + it.bw - 1) / 16) as usize {
+                    lists[ty * tw + tx].push(j as u32);
+                }
+            }
+            (ux0, uy0, ux1, uy1) = (ux0.min(it.x0), uy0.min(it.y0), ux1.max(it.x0 + it.bw), uy1.max(it.y0 + it.bh));
+        }
+        let (mut off, mut idx) = (Vec::with_capacity((tw * th + 1) * 4), Vec::new());
+        off.extend_from_slice(&0u32.to_le_bytes());
+        let mut n_idx = 0u32;
+        for l in &lists {
+            for &j in l {
+                idx.extend_from_slice(&j.to_le_bytes());
+            }
+            n_idx += l.len() as u32;
+            off.extend_from_slice(&n_idx.to_le_bytes());
+        }
+        let buf = |label: &str, contents: &[u8]| made_buffer_init(device, &wgpu::util::BufferInitDescriptor { label: Some(label), contents, usage: wgpu::BufferUsages::STORAGE });
+        let (tris_b, polys_b, off_b, idx_b) = (buf("3d tiled tris", &all_tris), buf("3d tiled polys", &table), buf("3d tiled tile offsets", &off), buf("3d tiled tile indices", &idx));
+        let fog_old = attach(c, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING);
+        enc.copy_texture_to_texture(
+            wgpu::TexelCopyTextureInfo { texture: &fog, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            wgpu::TexelCopyTextureInfo { texture: &fog_old, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            wgpu::Extent3d { width: w as u32, height: h as u32, depth_or_array_layers: 1 },
+        );
+        let view = |t: &wgpu::Texture| t.create_view(&Default::default());
+        let (wv, iv, sv, dv, ov, cov, trv, fv) = (view(&word[next]), view(&id[next]), view(&stencil[next]), view(&depth[next]), view(&oid[next]), view(&cover[next]), view(&trans[next]), view(&fog));
+        let (wc, ic, sc, dc, oc, coc, trc, fo) = (view(&word[cur]), view(&id[cur]), view(&stencil[cur]), view(&depth[cur]), view(&oid[cur]), view(&cover[cur]), view(&trans[cur]), view(&fog_old));
+        let bind = made_bind_group(device, &wgpu::BindGroupDescriptor {
+            label: Some("3d tiled"),
+            layout: &c.bgl_tiled,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: tris_b.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&atlas_view) },
+                wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureView(&wc) },
+                wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(&ic) },
+                wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&sc) },
+                wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&dc) },
+                wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&oc) },
+                wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(&coc) },
+                wgpu::BindGroupEntry { binding: 13, resource: wgpu::BindingResource::TextureView(&trc) },
+                wgpu::BindGroupEntry { binding: 17, resource: polys_b.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 18, resource: off_b.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 19, resource: idx_b.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 20, resource: wgpu::BindingResource::TextureView(&fo) },
+            ],
+        });
+        let load = |v| Some(wgpu::RenderPassColorAttachment { view: v, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } });
+        {
+            let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("3d tiled translucent"),
+                color_attachments: &[load(&wv), load(&fv), load(&dv), load(&iv), load(&sv), load(&ov), load(&cov), load(&trv)],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            rp.set_viewport(0.0, 0.0, w as f32, h as f32, 0.0, 1.0);
+            rp.set_scissor_rect(ux0, uy0, ux1 - ux0, uy1 - uy0);
+            rp.set_pipeline(&c.tiled_pipeline);
+            rp.set_bind_group(0, &bind, &[]);
+            rp.set_vertex_buffer(0, quad.slice(..));
+            rp.draw(0..3, 0..1);
+        }
+        n_blend += 1;
+        for (from, to) in [
+            (&word[next], &word[cur]),
+            (&id[next], &id[cur]),
+            (&stencil[next], &stencil[cur]),
+            (&depth[next], &depth[cur]),
+            (&oid[next], &oid[cur]),
+            (&cover[next], &cover[cur]),
+            (&trans[next], &trans[cur]),
+        ] {
+            enc.copy_texture_to_texture(
+                wgpu::TexelCopyTextureInfo { texture: from, mip_level: 0, origin: wgpu::Origin3d { x: ux0, y: uy0, z: 0 }, aspect: wgpu::TextureAspect::All },
+                wgpu::TexelCopyTextureInfo { texture: to, mip_level: 0, origin: wgpu::Origin3d { x: ux0, y: uy0, z: 0 }, aspect: wgpu::TextureAspect::All },
+                wgpu::Extent3d { width: ux1 - ux0, height: uy1 - uy0, depth_or_array_layers: 1 },
+            );
+        }
+    }
+    for group in groups.iter().filter(|_| !tiled) {
         let batch: Vec<&Item> = group.iter().map(|&j| &items[j]).collect();
         let mask = batch[0].mask;
         let next = 1 - cur;
@@ -2081,6 +2233,14 @@ struct Globals {
 // far columns (bit 15 set when found), b the nearest row with a sky column (bit 15 when found,
 // bits 0-11 the row), a that row's sky column
 @group(0) @binding(16) var srcinfo_tex: texture_2d<u32>;
+// the tiled translucent pass (этап 9.4): every translucent and shadow polygon's triangles in one
+// buffer (`tris`), a table of the polygons (first triangle, triangle count, 1 for a shadow mask), the
+// 16x16 tiles' lists of polygon indices in the job's order (offsets, then the indices), and the fog
+// flags before the pass
+@group(0) @binding(17) var<storage, read> polys: array<vec4u>;
+@group(0) @binding(18) var<storage, read> tile_off: array<u32>;
+@group(0) @binding(19) var<storage, read> tile_idx: array<u32>;
+@group(0) @binding(20) var fog_old: texture_2d<u32>;
 
 // One fan triangle: the exact vertex positions (the software engine's), its area, the ownership
 // of its edges (bits 0-2), the mode, the interpolation data of its three vertices, and its
@@ -2260,6 +2420,30 @@ fn tex_bilinear(t: Tri, s: f32, tt: f32) -> vec4u {
   return vec4u(u32(min(floor(div(r, a) + 0.5), 63.0)), u32(min(floor(div(g, a) + 0.5), 63.0)), u32(min(floor(div(b, a) + 0.5), 63.0)), u32(min(floor(div(a, wa) + 0.5), 31.0)));
 }
 
+// the tiled pass's version of `bary`: the weights and whether the pixel is inside, no discard. The drawing
+// passes keep `bary` as it was: rewriting it through this changed the compiled arithmetic (the parity tests
+// caught it)
+struct Bary {
+  l: vec3f,
+  ok: bool,
+};
+
+fn bary_try(t: Tri, pt: vec2f) -> Bary {
+  let a = vec2f(t.ax, t.ay);
+  let b = vec2f(t.bx, t.by);
+  let c = vec2f(t.cx, t.cy);
+  let w0 = edge(b, c, pt);
+  let w1 = edge(c, a, pt);
+  let w2 = edge(a, b, pt);
+  let in0 = w0 > 0.0 || (w0 == 0.0 && (t.owns & 1u) != 0u);
+  let in1 = w1 > 0.0 || (w1 == 0.0 && (t.owns & 2u) != 0u);
+  let in2 = w2 > 0.0 || (w2 == 0.0 && (t.owns & 4u) != 0u);
+  var o: Bary;
+  o.ok = in0 && in1 && in2;
+  o.l = vec3f(div(w0, t.area), div(w1, t.area), div(w2, t.area));
+  return o;
+}
+
 // the pixel's barycentric weights in a fan triangle, or it is discarded outside (the exact
 // inside test of the software engine: strictly in, or on an edge the polygon owns)
 fn bary(t: Tri, pt: vec2f) -> vec3f {
@@ -2287,9 +2471,9 @@ fn depth_at(t: Tri, l: vec3f) -> f32 {
   return (fma(l.x, t.d0, 0.0) + fma(l.y, t.d1, 0.0)) + fma(l.z, t.d2, 0.0);
 }
 
-// the shaded colour and alpha of a pixel: (r6, g6, b6, oa); a transparent texel is discarded, the
-// alpha test may take more, and without blending on a translucent result turns opaque
-fn shade(t: Tri, l: vec3f) -> vec4u {
+// the shaded colour and alpha of a pixel: (r6, g6, b6, oa); a transparent texel is gone (alpha 0 comes
+// back), the alpha test may take more, and without blending a translucent result turns opaque
+fn shade_try(t: Tri, l: vec3f) -> vec4u {
   // the colour, perspective-correct, exactly as the software engine weights it (the sums keep
   // the engine's order of operations)
   let p0 = l.x * t.iw0;
@@ -2368,9 +2552,18 @@ fn shade(t: Tri, l: vec3f) -> vec4u {
   }
   // a transparent texel is gone; the alpha test may take more
   if (oa == 0u || (g.alpha_test != 0u && oa <= g.alpha_ref)) {
-    discard;
+    return vec4u(0u);
   }
   return vec4u(r6, g6, b6, oa);
+}
+
+// the same, the pixel discarded where it is gone
+fn shade(t: Tri, l: vec3f) -> vec4u {
+  let c = shade_try(t, l);
+  if (c.w == 0u) {
+    discard;
+  }
+  return c;
 }
 
 @fragment
@@ -2485,6 +2678,106 @@ fn fs_mask(in: VOut) -> FMask {
   } else {
     discard;
   }
+  return o;
+}
+
+// the tiled translucent pass: the pixel takes its tile's polygons in the job's order, each fan triangle
+// as `fs_trans`/`fs_mask` do it, over the state it keeps in locals; a pixel nothing changed is
+// discarded, so the other ping-pong buffer keeps the picture it holds
+@fragment
+fn fs_tiled(in: VFull) -> FTrans {
+  let pix = vec2u(u32(floor(in.clip.x)), u32(floor(in.clip.y)));
+  let pt = vec2f(floor(in.clip.x) + 0.5, floor(in.clip.y) + 0.5);
+  let tile = (pix.y / 16u) * ((g.w + 15u) / 16u) + pix.x / 16u;
+  var word = textureLoad(word_cur, pix, 0u).x;
+  var id = textureLoad(id_cur, pix, 0u).x;
+  var stencil = textureLoad(stencil_cur, pix, 0u).x;
+  var depth = textureLoad(depth_cur, pix, 0u).x;
+  var oid = textureLoad(oid_cur, pix, 0u).x;
+  var cover = textureLoad(cover_cur, pix, 0u).x;
+  var trans = textureLoad(trans_cur, pix, 0u).x;
+  var fogf = textureLoad(fog_old, pix, 0u).x;
+  var changed = false;
+  let tol = 0x200.0 / 16777215.0;
+  for (var k = tile_off[tile]; k < tile_off[tile + 1u]; k++) {
+    let pp = polys[tile_idx[k]];
+    for (var ti = pp.x; ti < pp.x + pp.y; ti++) {
+      let t = tris[ti];
+      let b = bary_try(t, pt);
+      if (!b.ok) {
+        continue;
+      }
+      let dz = depth_at(t, b.l);
+      let behind = select(dz >= depth, abs(dz - depth) > tol, t.eq_depth != 0u);
+      if (pp.z == 1u) {
+        // a shadow mask: a mark where it lies behind something
+        if (behind) {
+          stencil = 1u;
+          changed = true;
+        }
+        continue;
+      }
+      if (behind) {
+        continue;
+      }
+      if (t.mode == 3u) {
+        if (stencil == 0u || id == t.pid) {
+          continue;
+        }
+      }
+      let c = shade_try(t, b.l);
+      let oa = c.w;
+      if (oa == 0u) {
+        continue;
+      }
+      if (oa == 31u) {
+        // an opaque result (blending off): overwrite, write the depth
+        word = c.x | c.y << 6u | c.z << 12u | 31u << 18u;
+        fogf = t.fog;
+        depth = dz;
+        id = t.pid;
+        stencil = 0u;
+        oid = t.pid;
+        cover = 0u;
+        trans = 0u;
+        changed = true;
+        continue;
+      }
+      let old_alpha = (word >> 18u) & 31u;
+      // a translucent polygon does not draw over its own ID
+      if (id == t.pid && old_alpha > 0u && old_alpha < 31u) {
+        continue;
+      }
+      if (old_alpha == 0u) {
+        word = c.x | c.y << 6u | c.z << 12u | oa << 18u;
+      } else {
+        let nr = dsmix(c.x, word & 63u, oa);
+        let ng = dsmix(c.y, word >> 6u & 63u, oa);
+        let nb = dsmix(c.z, word >> 12u & 63u, oa);
+        let na = max(old_alpha, oa);
+        word = nr | ng << 6u | nb << 12u | na << 18u;
+      }
+      fogf = t.fog;
+      depth = select(depth, dz, t.write_trans != 0u);
+      id = t.pid;
+      stencil = 0u;
+      cover = select(cover, max(cover, oa), old_alpha > 0u);
+      trans = trans | t.write_trans;
+      changed = true;
+    }
+  }
+  if (!changed) {
+    discard;
+  }
+  var o: FTrans;
+  o.word = vec4u(word, 0u, 0u, 0u);
+  o.fog = vec4u(fogf, 0u, 0u, 0u);
+  o.depth_out = vec4f(depth, 0.0, 0.0, 0.0);
+  o.id = vec4u(id, 0u, 0u, 0u);
+  o.stencil = vec4u(stencil, 0u, 0u, 0u);
+  o.oid = vec4u(oid, 0u, 0u, 0u);
+  o.cover = vec4u(cover, 0u, 0u, 0u);
+  o.trans = vec4u(trans, 0u, 0u, 0u);
   return o;
 }
 
