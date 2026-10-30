@@ -17,6 +17,7 @@ mod config;
 mod dial;
 mod effects;
 mod emu;
+mod fonts;
 mod gfx;
 mod layout;
 mod locate;

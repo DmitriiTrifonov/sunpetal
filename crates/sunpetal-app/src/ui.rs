@@ -23,11 +23,13 @@ pub struct Menu {
     message: String,
     /// The restart button was pressed once: the next press does it.
     restart_ask: bool,
+    /// What egui has now (None: the bundled font only), to reload only when it changes.
+    font_set: Option<String>,
 }
 
 impl Menu {
     pub fn new() -> Menu {
-        Menu { open: false, rebinding: None, profile_name: String::new(), profiles: config::profiles(), message: String::new(), restart_ask: false }
+        Menu { open: false, rebinding: None, profile_name: String::new(), profiles: config::profiles(), message: String::new(), restart_ask: false, font_set: None }
     }
 
     pub fn toggle(&mut self) {
@@ -40,6 +42,14 @@ impl Menu {
 
     /// Draws the menu; changes go straight into `s`.
     pub fn show(&mut self, ctx: &egui::Context, s: &mut Settings, layouts: &[&str], internal: (u32, u32)) -> Option<Action> {
+        // the OS font behind the bundled one: only for a language that has a table, or a chosen file
+        let custom_lang = crate::uitext::codes().contains(&crate::uitext::code_of(&s.interface.language));
+        let want = if custom_lang || !s.interface.font.is_empty() { Some(s.interface.font.clone()) } else { None };
+        if self.font_set != want {
+            let bytes = want.as_ref().and_then(|f| crate::fonts::pick(f)).map(|(_, b)| b);
+            ctx.set_fonts(crate::fonts::definitions(bytes));
+            self.font_set = want;
+        }
         let lang = Lang::resolve(&s.interface.language);
         // a table in `ui/<code>.toml` (uitext.rs) translates text by text over the built-in two
         let table = crate::uitext::table(&crate::uitext::code_of(&s.interface.language));

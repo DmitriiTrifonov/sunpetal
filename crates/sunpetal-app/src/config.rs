@@ -159,11 +159,13 @@ impl Default for Emulation {
 pub struct Interface {
     /// "auto" (the system's language), "en" or "ru".
     pub language: String,
+    /// A font file (.ttf/.otf/.ttc) for the letters egui's own font lacks; empty: the OS's.
+    pub font: String,
 }
 
 impl Default for Interface {
     fn default() -> Interface {
-        Interface { language: "auto".into() }
+        Interface { language: "auto".into(), font: String::new() }
     }
 }
 
