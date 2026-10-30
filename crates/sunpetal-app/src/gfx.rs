@@ -538,7 +538,12 @@ impl Gfx {
                 self.surface.configure(&self.device, &self.config);
                 return;
             }
-            _ => return,
+            _ => {
+                // the window cannot be shown (hidden, covered, the screen locked): the uploads of this frame
+                // are still queued, and without a submit they pile up (B-06, gigabytes in a minute)
+                self.queue.submit(std::iter::empty());
+                return;
+            }
         };
         let (w, h) = self.window_size();
         let rects = layout.fit(self.size());
