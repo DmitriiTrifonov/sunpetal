@@ -12,7 +12,7 @@ target/release/sunpetal-debug "$ROM" --save /tmp/work.sav --goto C18_01 --autopl
     --dialogue-log out/log.jsonl --out out/png --state
 ```
 
-Сохранение: 64 КиБ EEPROM, нужен слот, где запросы уже открыты (путь к началу главы идёт через меню «Request»). Без `--save` берётся новое сохранение: запросов в нём нет, `--goto` не дойдёт.
+Сохранение: 64 КиБ EEPROM, нужен слот, где запросы уже открыты (проверено 2026-10-30: подходят `build/full100.sav` в репозитории и `fsar-ru/build/full/fsar-gfx16.sav`; `fsar-ru/build/fsar-*.sav`, `rebuilt.sav`, `dumps/emu/user.sav` и сохранение рядом с ROM — нет, `--goto` отвечает «never read») (путь к началу главы идёт через меню «Request»). Без `--save` берётся новое сохранение: запросов в нём нет, `--goto` не дойдёт.
 
 Игра идёт по кадрам, время виртуальное: те же флаги дают те же кадры. Строки stderr (звук, VRAM) — журнал рантайма, на stdout только JSON.
 
