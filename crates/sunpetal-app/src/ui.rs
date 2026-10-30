@@ -154,6 +154,15 @@ impl Menu {
                 });
                 ui.checkbox(&mut s.video.wide, tx("Widen the 3D view to the window (one screen)", "Расширять 3D под окно (один экран)"));
                 ui.checkbox(&mut s.video.bars_match, tx("Bars take the picture's edge colour (logos)", "Полосы цвета края картинки (логотипы)"));
+                // window sizes (logical pixels); the window is also free to drag, and the menu then shows "own"
+                const SIZES: [[u32; 2]; 8] = [[512, 384], [768, 576], [1024, 768], [1280, 720], [1600, 900], [1920, 1080], [2560, 1440], [512, 768]];
+                let own = tx("own (dragged)", "своё (по перетаскиванию)").to_string();
+                let now = SIZES.iter().find(|z| **z == s.video.window).map_or(own, |z| format!("{} × {}", z[0], z[1]));
+                egui::ComboBox::from_label(tx("Window size", "Размер окна")).selected_text(now).show_ui(ui, |ui| {
+                    for z in SIZES {
+                        ui.selectable_value(&mut s.video.window, z, format!("{} × {}", z[0], z[1]));
+                    }
+                });
                 ui.checkbox(&mut s.video.fullscreen, tx("Full screen (F11)", "Полный экран (F11)"));
                 // the texture sets beside the file in use (data files with pictures), switched at once
                 {

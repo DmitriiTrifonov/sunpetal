@@ -346,6 +346,12 @@ impl App {
             g.background = s.video.background == "glow";
             g.edge_bars = s.video.background == "edge";
         }
+        // a window size picked in the menu (logical pixels); the saved size follows the window itself
+        if s.video.window != a.video.window && !s.video.fullscreen && self.menu.open {
+            if let Some(w) = &self.window {
+                let _ = w.request_inner_size(LogicalSize::new(s.video.window[0], s.video.window[1]));
+            }
+        }
         if s.video.fullscreen != a.video.fullscreen {
             if let Some(w) = &self.window {
                 w.set_fullscreen(s.video.fullscreen.then(|| Fullscreen::Borderless(None)));
