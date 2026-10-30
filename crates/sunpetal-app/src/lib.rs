@@ -77,6 +77,23 @@ enum Hold {
 
 /// The hold after a picture that wants the lower screen (`wants`) or not, `settled` when it has
 /// wanted so for the moment a change of screen takes.
+/// The dialogue line over the upper screen's `r` (widened by `wide` DS pixels each side): the lines the game broke, in the
+/// window's resolution, in the text area beside the portrait, centred on the band (DS pixels: x 58..243 with the portrait on
+/// the left, 10..195 on the right; the band is y 144..191).
+fn paint_dialogue(ctx: &egui::Context, r: layout::Rect, wide: f32, left: bool, text: &str) {
+    const PITCH: f32 = 14.0;
+    const SIZE: f32 = 13.0;
+    let (kx, ky) = (r.w / (256.0 + 2.0 * wide), r.h / 192.0);
+    let x0 = r.x + (wide + if left { 58.0 } else { 10.0 }) * kx;
+    let lines: Vec<&str> = text.split('\n').map(|l| l.trim_end_matches('\r')).collect();
+    let top = 168.0 - lines.len() as f32 * PITCH / 2.0;
+    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("dialogue")));
+    for (i, l) in lines.iter().enumerate() {
+        let at = egui::pos2(x0, r.y + (top + i as f32 * PITCH) * ky);
+        p.text(at, egui::Align2::LEFT_TOP, l, egui::FontId::proportional(SIZE * ky), egui::Color32::from_rgb(16, 16, 24));
+    }
+}
+
 fn next_hold(hold: Option<Hold>, wants: bool, settled: bool) -> Option<Hold> {
     match hold {
         Some(Hold::Waiting(_)) if wants => Some(Hold::Seen),
@@ -154,6 +171,9 @@ struct App {
     edo_seen: bool,
     /// Frames since Edo's screen was last seen: the flag goes off only after `EDO_HOLD` of them (B-05).
     edo_off: u32,
+    /// Crisp dialogue text (9в.10, `SUNPETAL_VTEXT=1`), and the side of the portrait last seen (`layout::portrait_left`).
+    vtext: bool,
+    portrait_left: bool,
     /// The title's "Press START" box (`layout::prompt_box`).
     prompt: Option<layout::Rect>,
     /// A page of paper over both screens is shown (`layout::paper_in`, settled), and how far it is scrolled.
@@ -711,6 +731,9 @@ impl ApplicationHandler for App {
                         self.edo_seen = self.edo_off < EDO_HOLD;
                     }
                     self.prompt = layout::prompt_box(*scale, rgba);
+                    if let Some(left) = layout::portrait_left(*scale, rgba) {
+                        self.portrait_left = left;
+                    }
                     let paper = layout::paper_in(*scale, rgba);
                     if paper && !self.paper {
                         self.scroll = 0.0;
@@ -760,7 +783,7 @@ impl ApplicationHandler for App {
                 let fade = self.skip_fade;
                 let mut action = None;
                 {
-                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, hint_seen, puzzle_hold, puzzle_side, coll_seen, coll_card, pending_capture, edo_seen, prompt, bar_color, auto_lower, hold, wide_now, paper, scroll, .. } = self;
+                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, hint_seen, puzzle_hold, puzzle_side, coll_seen, coll_card, pending_capture, edo_seen, prompt, bar_color, auto_lower, hold, wide_now, paper, scroll, vtext, portrait_left, .. } = self;
                     let live = layout::Live { vblank: shared.vblank.load(Ordering::Relaxed), counter_seen: *counter_seen, hint_seen: *hint_seen, both: *puzzle_hold > 0, both_side: *puzzle_side, collection: coll_seen.then(|| coll_card.get()), lower: *auto_lower || hold.is_some(), edo: *edo_seen, prompt: *prompt, wide: *wide_now as f32, scroll: (*paper && *auto_lower).then_some(*scroll) };
                     if let Some(g) = gfx {
                         let layout = layout::find(layouts, &settings.video, &live);
@@ -787,13 +810,20 @@ impl ApplicationHandler for App {
                         let corner_on = cfg!(target_os = "android") && !pad_on;
                         // the touch panel and the Android corner show the speed figures themselves; elsewhere they go over the picture
                         let stats_on = settings.video.show_stats && !pad_on && !corner_on;
-                        if menu.open || pad_on || corner_on || stats_on || fade > 0.0 {
+                        // the dialogue line, drawn here in the window's resolution (the game's raster text is hidden)
+                        let vline = if *vtext { shared.dialogue_text.lock().unwrap().clone() } else { None };
+                        let vrect = layout.fit(g.size())[0];
+                        let vwide = *wide_now as f32;
+                        if menu.open || pad_on || corner_on || stats_on || fade > 0.0 || vline.is_some() {
                             let held = touch_held.clone();
                             let mut f = |ctx: &egui::Context| {
                                 if fade > 0.0 {
                                     // first, so that the buttons stay on top of it and can cancel the skip
                                     let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("skipfade")));
                                     p.rect_filled(ctx.content_rect(), 0.0, egui::Color32::from_black_alpha((fade * 255.0) as u8));
+                                }
+                                if let (Some(text), Some(r)) = (&vline, vrect) {
+                                    paint_dialogue(ctx, r, vwide, *portrait_left, text);
                                 }
                                 if corner_on {
                                     let info = match stopped_msg {
@@ -1011,6 +1041,8 @@ pub fn run(o: Options, el: EventLoop<()>) {
         swallow_b: std::cell::Cell::new(false),
         edo_seen: false,
         edo_off: 0,
+        vtext: std::env::var_os("SUNPETAL_VTEXT").is_some_and(|v| v == "1"),
+        portrait_left: true,
         paper: false,
         bar_ask: (None, 0),
         scroll: 0.0,

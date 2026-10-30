@@ -139,6 +139,29 @@ pub fn hint_in(scale: usize, rgba: &[u8]) -> bool {
     n > 0 && red * 100 >= n * 8
 }
 
+/// Which side the dialogue window's portrait is on (the game's setting): the window's red divider is a column
+/// of the upper screen's band (x 48-49 with the portrait on the left, 206-207 on the right); `None` if neither is there.
+pub fn portrait_left(scale: usize, rgba: &[u8]) -> Option<bool> {
+    let w = 256 * scale;
+    let red_at = |x: usize| {
+        let mut n = 0;
+        let mut y = 150 * scale;
+        while y < 186 * scale {
+            let o = (y * w + x * scale) * 4;
+            if let Some(p) = rgba.get(o..o + 3) {
+                n += (p[0] > 170 && p[1] < 90 && p[2] < 90) as usize;
+            }
+            y += scale.max(1);
+        }
+        n >= 30
+    };
+    match (red_at(48), red_at(206)) {
+        (true, false) => Some(true),
+        (false, true) => Some(false),
+        _ => None,
+    }
+}
+
 /// Whether the picture is the collection's list: a black header band on the upper screen (the card above) and the list's
 /// yellow squares down the lower screen's left side (56 rows lit on the game's frames, none on any other screen).
 pub fn collection_in(scale: usize, rgba: &[u8]) -> bool {
