@@ -27,8 +27,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use wgpu::util::DeviceExt;
 
 /// What a frame makes and uploads, counted under `SUNPETAL_GPU_TIMING` (этап 9.0.2):
-/// textures, their bytes, buffers, their bytes, bind groups, bytes written by the queue.
-static MADE: [std::sync::atomic::AtomicU64; 6] = [const { std::sync::atomic::AtomicU64::new(0) }; 6];
+/// textures, their bytes, buffers, their bytes, bind groups, bytes written by the queue, attachments taken from the pool.
+static MADE: [std::sync::atomic::AtomicU64; 7] = [const { std::sync::atomic::AtomicU64::new(0) }; 7];
 
 fn made(i: usize, n: u64) {
     MADE[i].fetch_add(n, std::sync::atomic::Ordering::Relaxed);
@@ -60,7 +60,7 @@ fn made_bind_group(device: &wgpu::Device, d: &wgpu::BindGroupDescriptor) -> wgpu
 }
 
 /// The counters, read and zeroed.
-fn take_made() -> [u64; 6] {
+fn take_made() -> [u64; 7] {
     std::array::from_fn(|i| MADE[i].swap(0, std::sync::atomic::Ordering::Relaxed))
 }
 
@@ -91,6 +91,8 @@ struct Ctx {
     resolve_pipeline: wgpu::RenderPipeline,
     bgl_resolve: wgpu::BindGroupLayout,
     bgl_mask: wgpu::BindGroupLayout,
+    /// The attachments the frames are done with, to be taken again (этап 9.1.1).
+    pool: Mutex<Vec<(PoolKey, wgpu::Texture)>>,
 }
 
 static CTX: OnceLock<Option<Ctx>> = OnceLock::new();
@@ -575,7 +577,7 @@ fn make_ctx() -> Result<Ctx, String> {
         multiview_mask: None,
         cache: None,
     });
-    Ok(Ctx { device, queue, pipeline, bgl, rear_pipeline, bgl_rear, fog_pipeline, bgl_fog, outline_pipeline, bgl_outline, shade_pipeline, bgl_shade, rows_pipeline, bgl_rows, skyrow_pipeline, bgl_skyrow, extend_pipeline, bgl_extend, blend_pipeline, bgl_blend, mask_pipeline, bgl_mask, resolve_pipeline, bgl_resolve })
+    Ok(Ctx { device, queue, pipeline, bgl, rear_pipeline, bgl_rear, fog_pipeline, bgl_fog, outline_pipeline, bgl_outline, shade_pipeline, bgl_shade, rows_pipeline, bgl_rows, skyrow_pipeline, bgl_skyrow, extend_pipeline, bgl_extend, blend_pipeline, bgl_blend, mask_pipeline, bgl_mask, resolve_pipeline, bgl_resolve, pool: Mutex::new(Vec::new()) })
 }
 
 /// Where a texture's picture sits in the frame's atlas, and how its coordinates map onto it.
@@ -1052,7 +1054,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
         | wgpu::TextureUsages::COPY_SRC
         | wgpu::TextureUsages::COPY_DST;
     let pair = |fmt: wgpu::TextureFormat| {
-        [attach(device, w, h, fmt, ping), attach(device, w, h, fmt, ping)]
+        [attach(c, w, h, fmt, ping), attach(c, w, h, fmt, ping)]
     };
     let word = pair(wgpu::TextureFormat::R32Uint);
     let id = pair(wgpu::TextureFormat::R32Uint);
@@ -1061,9 +1063,9 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
     let oid = pair(wgpu::TextureFormat::R32Uint);
     let cover = pair(wgpu::TextureFormat::R32Uint);
     let trans = pair(wgpu::TextureFormat::R32Uint);
-    let fog = attach(device, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC);
-    let depth_stencil = attach(device, w, h, wgpu::TextureFormat::Depth32Float, wgpu::TextureUsages::RENDER_ATTACHMENT);
-    let fin = attach(device, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING);
+    let fog = attach(c, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC);
+    let depth_stencil = attach(c, w, h, wgpu::TextureFormat::Depth32Float, wgpu::TextureUsages::RENDER_ATTACHMENT);
+    let fin = attach(c, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING);
     let mut cur = 0usize;
     let t_res = t0.elapsed();
     let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
@@ -1428,8 +1430,8 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
     // row's first far column). Three passes: the source per row and side, the nearest sky rows,
     // and the fill over the whole picture (the untouched pixels carry over).
     if job.width > 256 && std::env::var_os("SUNPETAL_NO_EXTEND").is_none() {
-        let src0 = attach(device, 2, h, wgpu::TextureFormat::Rgba32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
-        let src1 = attach(device, 2, h, wgpu::TextureFormat::Rgba32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
+        let src0 = attach(c, 2, h, wgpu::TextureFormat::Rgba32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
+        let src1 = attach(c, 2, h, wgpu::TextureFormat::Rgba32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
         // pass 1: per row and side the first sky column in from the inner edge, else the first far
         {
             let dv = depth[cur].create_view(&Default::default());
@@ -1494,7 +1496,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
         }
         // pass 3: the fill into the other ping-pong buffer (the fog through a copy, it has no pair)
         let next = 1 - cur;
-        let fog_src = attach(device, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING);
+        let fog_src = attach(c, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING);
         enc.copy_texture_to_texture(
             wgpu::TexelCopyTextureInfo { texture: &fog, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
             wgpu::TexelCopyTextureInfo { texture: &fog_src, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
@@ -1557,7 +1559,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
     }
     // the outline (этап 7.1): the software engine's `outline_pass` over the finished picture, a
     // line level (0-15) per pixel, before the fog changes the alpha
-    let outline_tex = attach(device, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
+    let outline_tex = attach(c, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
     {
         let ov = outline_tex.create_view(&Default::default());
         let wv = word[cur].create_view(&Default::default());
@@ -1597,7 +1599,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
         rp.draw(0..3, 0..1);
     }
     // the shading (этап 7.2): the software engine's `shade_pass`, a shade level (0-15) per pixel
-    let shade_tex = attach(device, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
+    let shade_tex = attach(c, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
     {
         let sv = shade_tex.create_view(&Default::default());
         let wv = word[cur].create_view(&Default::default());
@@ -1678,7 +1680,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
     // the picture back: copy each attachment to a mappable buffer, then read the rows
     let (ow, oh) = (w / k, h / k);
     let res = (k > 1).then(|| {
-        let res = attach(device, ow, oh, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC);
+        let res = attach(c, ow, oh, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC);
         let kb = made_buffer_init(device, &wgpu::util::BufferInitDescriptor {
             label: Some("3d resolve k"),
             contents: &[k as u32, 0, 0, 0].iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>(),
@@ -1743,7 +1745,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
         eprintln!("gpu frame {w}x{h}: atlas {:.2}, build {:.2}, resources {:.2}, encode {:.2}, gpu {:.2}, readback done {:.2} ms", ms(t_atlas), ms(t_build), ms(t_res), ms(t_enc), ms(t_gpu), ms(t0.elapsed()));
         eprintln!("  serial passes: {n_blend} blend, {n_mask} mask (of {} polygons), {n_skipped} off-picture; {:.1}% of the picture copied per polygon on average", built.serial.len(), if n_blend + n_mask > 0 { px_copied as f64 / (built.serial.len() as f64 * (w * h) as f64) * 100.0 } else { 0.0 });
         let m = take_made();
-        eprintln!("  made: {} textures ({:.1} MB), {} buffers ({:.1} MB), {} bind groups; {:.2} MB written by the queue", m[0], m[1] as f64 / 1e6, m[2], m[3] as f64 / 1e6, m[4], m[5] as f64 / 1e6);
+        eprintln!("  made: {} textures ({:.1} MB; {} from the pool), {} buffers ({:.1} MB), {} bind groups; {:.2} MB written by the queue", m[0], m[1] as f64 / 1e6, m[6], m[2], m[3] as f64 / 1e6, m[4], m[5] as f64 / 1e6);
     }
     let (mut oid_px, mut cover_px, mut trans_px, mut depth_px) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     if let Some([bo, bc, bt, bd]) = &aux {
@@ -1755,9 +1757,58 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
     Ok(Rendered { words, oid: oid_px, cover: cover_px, trans: trans_px, depth: depth_px, notes })
 }
 
-/// A 2D texture of the picture's size for one of the passes' attachments.
-fn attach(device: &wgpu::Device, w: usize, h: usize, format: wgpu::TextureFormat, usage: wgpu::TextureUsages) -> wgpu::Texture {
-    made_texture(device, &wgpu::TextureDescriptor {
+type PoolKey = (u32, u32, wgpu::TextureFormat, wgpu::TextureUsages);
+
+/// What the pool may hold: attachments of the sizes the last frames used (a change of the scale or the width
+/// leaves the old sizes to be dropped first), at most this many bytes and entries (этап 9.1.3).
+const POOL_MAX_BYTES: u64 = 192 << 20;
+const POOL_MAX_ENTRIES: usize = 64;
+
+fn key_bytes(k: &PoolKey) -> u64 {
+    k.0 as u64 * k.1 as u64 * k.2.block_copy_size(None).unwrap_or(4) as u64
+}
+
+/// An attachment on loan from the pool: it goes back when the frame lets it go. It holds what the last frame
+/// left in it, so a pass that reads it must have written all of it first (the passes clear or copy over).
+struct Pooled {
+    tex: Option<wgpu::Texture>,
+    key: PoolKey,
+    ctx: &'static Ctx,
+}
+
+impl std::ops::Deref for Pooled {
+    type Target = wgpu::Texture;
+    fn deref(&self) -> &wgpu::Texture {
+        self.tex.as_ref().unwrap()
+    }
+}
+
+impl Drop for Pooled {
+    fn drop(&mut self) {
+        let Some(tex) = self.tex.take() else { return };
+        let mut pool = self.ctx.pool.lock().unwrap();
+        pool.push((self.key, tex));
+        let mut bytes: u64 = pool.iter().map(|(k, _)| key_bytes(k)).sum();
+        // the oldest go first: they are the sizes the frames stopped asking for
+        while pool.len() > POOL_MAX_ENTRIES || bytes > POOL_MAX_BYTES {
+            let (k, _) = pool.remove(0);
+            bytes -= key_bytes(&k);
+        }
+    }
+}
+
+/// A 2D texture of the picture's size for one of the passes' attachments: one the pool has of that kind,
+/// or a new one.
+fn attach(c: &'static Ctx, w: usize, h: usize, format: wgpu::TextureFormat, usage: wgpu::TextureUsages) -> Pooled {
+    let key = (w as u32, h as u32, format, usage);
+    let mut pool = c.pool.lock().unwrap();
+    if let Some(i) = pool.iter().position(|(k, _)| *k == key) {
+        let (_, tex) = pool.swap_remove(i);
+        made(6, 1);
+        return Pooled { tex: Some(tex), key, ctx: c };
+    }
+    drop(pool);
+    let tex = made_texture(&c.device, &wgpu::TextureDescriptor {
         label: Some("3d attachment"),
         size: wgpu::Extent3d { width: w as u32, height: h as u32, depth_or_array_layers: 1 },
         mip_level_count: 1,
@@ -1766,7 +1817,14 @@ fn attach(device: &wgpu::Device, w: usize, h: usize, format: wgpu::TextureFormat
         format,
         usage,
         view_formats: &[],
-    })
+    });
+    Pooled { tex: Some(tex), key, ctx: c }
+}
+
+/// How many attachments the pool holds (for the tests).
+#[cfg(test)]
+fn pool_len() -> usize {
+    ctx().map_or(0, |c| c.pool.lock().unwrap().len())
 }
 
 /// A mappable buffer a picture-sized attachment is copied into (rows padded to 256 bytes), to be
@@ -3775,6 +3833,30 @@ mod tests {
                 println!("scale {scale} msaa {msaa}: gpu {gpu:.1} ms, software {soft:.1} ms");
             }
         }
+    }
+
+    /// The pooled attachments (этап 9.1.1-9.1.3): the frames of the dumps drawn one after the other in
+    /// one order, in the reverse one and with the scale changing 1, 2, 1 must all be the software engine's
+    /// words (a frame never inherits the last one's contents), and the pool stays within its limits.
+    #[test]
+    fn pooled_attachments_do_not_leak_between_frames() {
+        let Some(dir) = std::env::var_os("SUNPETAL_JOB_DUMPS") else { return };
+        let mut files: Vec<_> = std::fs::read_dir(&dir).unwrap().filter_map(|e| Some(e.ok()?.path())).filter(|p| p.extension().is_some_and(|e| e == "spjob")).collect();
+        files.sort();
+        let jobs: Vec<_> = files.iter().map(|f| super::super::jobdump::read(f).unwrap()).collect();
+        let mut ran = 0;
+        for order in [(0..jobs.len()).collect::<Vec<_>>(), (0..jobs.len()).rev().collect::<Vec<_>>()] {
+            for scale_step in [1usize, 2, 1] {
+                for &i in &order {
+                    let job = stage7w_job(&jobs[i].job);
+                    if both(&job, scale_step).is_some() {
+                        ran += 1;
+                    }
+                    assert!(pool_len() <= POOL_MAX_ENTRIES);
+                }
+            }
+        }
+        println!("{ran} frames in two orders and three scales, pool {} entries", pool_len());
     }
 
     /// The supersampling on real frames (этап 6.2.1): every `*.spjob` in `SUNPETAL_JOB_DUMPS`,
