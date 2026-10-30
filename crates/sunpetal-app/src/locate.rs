@@ -74,7 +74,7 @@ pub fn classify(path: &Path) -> Result<Picked, String> {
 
 /// The language of a translation in the data file that is the system's (`ru` for `ru_RU.UTF-8`
 /// or `ru-RU`); none if the file has none such or cannot be read.
-#[cfg_attr(any(target_os = "android", target_os = "ios"), allow(dead_code))]
+#[cfg_attr(target_os = "ios", allow(dead_code))]
 pub fn language_for(path: &Path, locale: &str) -> Option<String> {
     let want = locale.split(['-', '_', '.']).next()?.to_ascii_lowercase();
     let c = sunpetal_data::container::Container::read_only(path, |t| t == b"TRAN").ok()?;

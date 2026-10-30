@@ -1204,7 +1204,8 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
     let named = dir.join("rom.nds");
     let rom = Some(named).filter(|r| r.is_file() && locate::check_rom(r).is_ok()).or_else(|| locate::find_rom(&dirs));
     let (rom, pack) = match rom {
-        Some(rom) => (rom, None),
+        // a ROM and a data file together: the ROM runs, the data file brings its pictures and translations
+        Some(rom) => (rom, locate::find_data(&dirs).filter(|p| locate::check_data(p).is_ok())),
         None => match locate::find_data(&dirs).filter(|p| sunpetal_data::dsrom::has_rom(p)) {
             Some(data) => match locate::check_data(&data) {
                 Ok(()) => (PathBuf::new(), Some(data)),
@@ -1219,6 +1220,22 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
             }
         },
     };
+    // once, the first time a data file starts the game: its translation in the system's language
+    // is the game's language (as the desktop's file dialog does); the menu changes it after
+    if let Some(data) = &pack {
+        let marker = private.join("config").join("language-chosen");
+        if !marker.exists() {
+            let mut s = config::load();
+            if s.game.language.is_empty() {
+                if let Some(l) = sys_locale::get_locale().and_then(|loc| locate::language_for(data, &loc)) {
+                    s.game.language = l;
+                    config::save(&s);
+                }
+            }
+            let _ = std::fs::create_dir_all(marker.parent().unwrap());
+            let _ = std::fs::write(&marker, b"");
+        }
+    }
     run(Options { rom, out: Some(dir), save: None, mute: false, res: Some(1), menu: false, dump: None, pack, lang: None, wide: None, renderer: None }, el);
 }
 

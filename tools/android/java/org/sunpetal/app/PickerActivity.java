@@ -16,24 +16,27 @@ import java.io.InputStream;
 import java.io.OutputStream;
 
 /**
- * The launcher: if the app has no ROM yet, asks for one with the system's file picker and copies
- * it into the app's own folder (where the native code looks: files/rom.nds), then starts the game.
+ * The launcher: if the app has no game yet (files/rom.nds or files/sunpetal.data), asks for one with
+ * the system's file picker and copies it into the app's own folder (where the native code looks),
+ * then starts the game. A data file (made by sunpetal-build) is told from a ROM by its first bytes.
  */
 public class PickerActivity extends Activity {
     private static final int PICK = 1;
     private TextView text;
     private Button button;
 
-    private File rom() {
+    private File dir() {
         File dir = getExternalFilesDir(null);
         if (dir == null) dir = getFilesDir();
-        return new File(dir, "rom.nds");
+        return dir;
     }
+
+    private static final byte[] DATA_MAGIC = {'S', 'P', 'D', 'A', 'T', 'A', 0, 1};
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
-        if (rom().isFile()) {
+        if (new File(dir(), "rom.nds").isFile() || new File(dir(), "sunpetal.data").isFile()) {
             start();
             return;
         }
@@ -44,9 +47,9 @@ public class PickerActivity extends Activity {
         text = new TextView(this);
         text.setTextSize(18);
         text.setGravity(Gravity.CENTER);
-        text.setText("Sunpetal needs the game's ROM file (.nds). It is copied into the app and stays on this phone.");
+        text.setText("Sunpetal needs the game: the ROM file (.nds) or a sunpetal.data made on a computer. It is copied into the app and stays on this phone.");
         button = new Button(this);
-        button.setText("Choose ROM");
+        button.setText("Choose the game file");
         button.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 pick();
@@ -91,19 +94,21 @@ public class PickerActivity extends Activity {
         }).start();
     }
 
-    /** Copies the chosen file to rom.nds (through a temporary name); null on success. */
+    /** Copies the chosen file to rom.nds or sunpetal.data (through a temporary name); null on success. */
     private String copy(Uri uri) {
-        File out = rom();
-        File tmp = new File(out.getParentFile(), "rom.nds.part");
-        out.getParentFile().mkdirs();
+        File folder = dir();
+        File tmp = new File(folder, "picked.part");
+        folder.mkdirs();
         try {
             InputStream in = getContentResolver().openInputStream(uri);
             if (in == null) return "cannot open it";
             OutputStream os = new FileOutputStream(tmp);
             byte[] buf = new byte[1 << 16];
+            byte[] head = new byte[8];
             long n = 0;
             int k;
             while ((k = in.read(buf)) > 0) {
+                if (n < 8) System.arraycopy(buf, 0, head, (int) n, (int) Math.min(k, 8 - n));
                 os.write(buf, 0, k);
                 n += k;
             }
@@ -111,8 +116,9 @@ public class PickerActivity extends Activity {
             in.close();
             if (n < 0x200) {
                 tmp.delete();
-                return "that is not a DS ROM (too small)";
+                return "that is not a DS ROM or a data file (too small)";
             }
+            File out = new File(folder, java.util.Arrays.equals(head, DATA_MAGIC) ? "sunpetal.data" : "rom.nds");
             if (!tmp.renameTo(out)) return "cannot save it";
             return null;
         } catch (Exception e) {
