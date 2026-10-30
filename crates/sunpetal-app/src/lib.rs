@@ -1126,6 +1126,36 @@ pub fn desktop_main() {
                     PathBuf::new()
                 }
                 None => {
+                    // desktop: ask the player for the game (a ROM or a data file) and remember it
+                    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                    if let Some((picked, path)) = pick_game() {
+                        let mut s = config::load();
+                        match picked {
+                            locate::Picked::Rom => s.game.rom = path.display().to_string(),
+                            locate::Picked::Data => {
+                                s.video.texture_pack = path.display().to_string();
+                                // a translation in the file that is the system's language is the game's, unless one is set
+                                if s.game.language.is_empty() {
+                                    if let Some(l) = sys_locale::get_locale().and_then(|loc| locate::language_for(&path, &loc)) {
+                                        s.game.language = l;
+                                    }
+                                }
+                            }
+                        }
+                        config::save(&s);
+                        match picked {
+                            locate::Picked::Rom => {
+                                o.rom = path;
+                                run(o, EventLoop::new().expect("an event loop"));
+                            }
+                            locate::Picked::Data => {
+                                o.pack = Some(path);
+                                o.rom = PathBuf::new();
+                                run(o, EventLoop::new().expect("an event loop"));
+                            }
+                        }
+                        return;
+                    }
                     eprintln!("usage: sunpetal-app [ROM.nds] [--out DIR] [--save FILE] [--mute] [--res N] [--menu] [--texture-pack FILE] [--lang ru|none] [--renderer software|gpu]");
                     eprintln!("{}", locate::no_game(&dirs));
                     std::process::exit(2);
@@ -1135,6 +1165,24 @@ pub fn desktop_main() {
     };
     o.rom = rom;
     run(o, EventLoop::new().expect("an event loop"));
+}
+
+/// No game to play: the file dialog asks for a ROM or a data file until a good one is picked (the
+/// message says why a bad one is not) or the player cancels. The one picked is checked as the
+/// start checks it.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn pick_game() -> Option<(locate::Picked, PathBuf)> {
+    loop {
+        let path = rfd::FileDialog::new()
+            .set_title("Sunpetal: pick the game's ROM (.nds) or sunpetal.data")
+            .pick_file()?;
+        match locate::classify(&path) {
+            Ok(p) => return Some((p, path)),
+            Err(e) => {
+                rfd::MessageDialog::new().set_title("Sunpetal").set_description(e).set_level(rfd::MessageLevel::Error).show();
+            }
+        }
+    }
 }
 
 /// The Android entry point: the ROM is `rom.nds` in the app's folder on shared storage

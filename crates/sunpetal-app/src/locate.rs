@@ -47,6 +47,38 @@ pub fn check_data(path: &Path) -> Result<(), String> {
     sunpetal_data::container::verify_file(path).map(|_| ())
 }
 
+/// What the player picked in the file dialog.
+#[derive(Debug, PartialEq)]
+pub enum Picked {
+    /// A ROM of the supported dump: goes to `[game] rom`.
+    Rom,
+    /// A data file that holds the game: goes to the texture setting, where the data file lives.
+    Data,
+}
+
+/// Tells what a picked file is, or why it is no game: the message for the player.
+pub fn classify(path: &Path) -> Result<Picked, String> {
+    if !path.is_file() {
+        return Err(format!("{}: not a file", path.display()));
+    }
+    if sunpetal_data::dsrom::has_rom(path) {
+        check_data(path)?;
+        return Ok(Picked::Data);
+    }
+    check_rom(path).map(|_| Picked::Rom).map_err(|e| {
+        format!("{}\n\nPick the European release's .nds, or a sunpetal.data that holds the game (made by sunpetal-build).", e)
+    })
+}
+
+/// The language of a translation in the data file that is the system's (`ru` for `ru_RU.UTF-8`
+/// or `ru-RU`); none if the file has none such or cannot be read.
+pub fn language_for(path: &Path, locale: &str) -> Option<String> {
+    let want = locale.split(['-', '_', '.']).next()?.to_ascii_lowercase();
+    let c = sunpetal_data::container::Container::read_only(path, |t| t == b"TRAN").ok()?;
+    let found = c.all(b"TRAN").filter_map(|s| sunpetal_data::translate::Translation::from_bytes(&s.data).ok()).map(|t| t.lang).find(|l| l.eq_ignore_ascii_case(&want));
+    found
+}
+
 /// The one supported ROM among the `.nds` files of `dirs`; none if there is none.
 pub fn find_rom(dirs: &[PathBuf]) -> Option<PathBuf> {
     dirs.iter().find_map(|d| {
@@ -116,6 +148,51 @@ mod tests {
         assert!(check_data(&f).unwrap_err().contains("damaged"));
         fs::write(&f, b"not a data file at all").unwrap();
         assert!(check_data(&f).is_err());
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn it_tells_a_rom_from_a_data_file_and_from_anything_else() {
+        let d = dir("classify");
+        fs::write(d.join("game.nds"), rom(b"YHNP")).unwrap();
+        fs::write(d.join("other.nds"), rom(b"ABCD")).unwrap();
+        fs::write(d.join("notes.txt"), b"hello").unwrap();
+        assert_eq!(classify(&d.join("game.nds")), Ok(Picked::Rom));
+        assert!(classify(&d.join("other.nds")).unwrap_err().contains("ABCD"));
+        assert!(classify(&d.join("notes.txt")).is_err());
+        assert!(classify(&d.join("missing")).unwrap_err().contains("not a file"));
+        // a data file with the ROM in it
+        let mut image = rom(b"YHNP");
+        image.resize(0x400, 0);
+        let mut c = sunpetal_data::container::Container::new();
+        c.add(sunpetal_data::dsrom::TAG, sunpetal_data::dsrom::pack(&image).unwrap());
+        c.set_rom(*b"YHNP", 1);
+        c.write(&d.join("sunpetal.data")).unwrap();
+        assert_eq!(classify(&d.join("sunpetal.data")), Ok(Picked::Data));
+        // the same file damaged is refused with the reason
+        let mut b = fs::read(d.join("sunpetal.data")).unwrap();
+        let last = b.len() - 1;
+        b[last] ^= 1;
+        fs::write(d.join("bad.data"), b).unwrap();
+        assert!(classify(&d.join("bad.data")).unwrap_err().contains("damaged"));
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn it_picks_the_translation_that_is_the_systems_language() {
+        let d = dir("lang");
+        let mut c = sunpetal_data::container::Container::new();
+        let tr = sunpetal_data::translate::Translation { lang: "ru".into(), base: "ue".into(), rom_crc: 1, ..Default::default() };
+        c.add(b"TRAN", tr.to_bytes().unwrap());
+        c.set_rom(*b"YHNP", 1);
+        let f = d.join("ru.data");
+        c.write(&f).unwrap();
+        assert_eq!(language_for(&f, "ru_RU.UTF-8"), Some("ru".into()));
+        assert_eq!(language_for(&f, "ru-RU"), Some("ru".into()));
+        assert_eq!(language_for(&f, "RU"), Some("ru".into()));
+        assert_eq!(language_for(&f, "en-US"), None);
+        assert_eq!(language_for(&f, ""), None);
+        assert_eq!(language_for(&d.join("missing"), "ru"), None);
         fs::remove_dir_all(&d).unwrap();
     }
 
