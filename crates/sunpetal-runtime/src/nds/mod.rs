@@ -1359,6 +1359,62 @@ pub fn dialogue_text() -> Option<(u32, String)> {
     })?
 }
 
+/// What `dialogue` tells: the window's text and whether the game has begun to draw it (its letters are in the window's canvas).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Dialogue {
+    pub text: String,
+    pub drawn: bool,
+}
+
+thread_local! {
+    /// The line the window showed at the last `dialogue` call (its pointer), and the canvas's sum then: the line is
+    /// drawn once the canvas has changed (and has ink).
+    static DIALOGUE_SEEN: std::cell::Cell<(u32, u64, bool)> = const { std::cell::Cell::new((0, 0, false)) };
+}
+
+/// The text object's canvas (4 bits a pixel, 30 by 6 tiles): the writer draws the dialogue's letters into it
+/// (`0229E590 + 4` holds its address, `0xFACC` in the dump).
+const TEXT_OBJECT_CANVAS: u32 = 0x0229_E594;
+const TEXT_CANVAS_BYTES: usize = 0x1680;
+
+/// The sum (FNV) of the dialogue canvas's bytes and whether any is set.
+fn dialogue_canvas() -> Option<(u64, bool)> {
+    crate::machine::machine(|m| {
+        let mut w = [0u8; 4];
+        if !m.mem.read_bytes(9, TEXT_OBJECT_CANVAS, &mut w) {
+            return None;
+        }
+        let at = u32::from_le_bytes(w);
+        if at % 4 != 0 || !(0x0200_0000..0x0240_0000 - TEXT_CANVAS_BYTES as u32).contains(&at) {
+            return None;
+        }
+        let mut buf = vec![0u8; TEXT_CANVAS_BYTES];
+        if !m.mem.read_bytes(9, at, &mut buf) {
+            return None;
+        }
+        let sum = buf.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ *b as u64).wrapping_mul(0x100_0000_01b3));
+        Some((sum, buf.iter().any(|b| *b != 0)))
+    })
+}
+
+/// The line the dialogue window shows, with whether its letters are being drawn: the pointer changes about 25 frames
+/// before the game draws the line (docs/PLAN.md, 9в.9.4), and the old letters stay in the canvas till then; so the
+/// line counts as drawn when the canvas has changed since the pointer did and has ink. Call it once a frame.
+pub fn dialogue() -> Option<Dialogue> {
+    let Some((ptr, text)) = dialogue_text() else {
+        DIALOGUE_SEEN.with(|c| c.set((0, 0, false)));
+        return None;
+    };
+    let (sum, ink) = dialogue_canvas().unwrap_or((0, false));
+    let drawn = DIALOGUE_SEEN.with(|c| {
+        let (seen, base, drawn) = c.get();
+        let now = if seen != ptr { (ptr, sum, false) } else if !drawn && ink && sum != base { (seen, base, true) } else { (seen, base, drawn) };
+        c.set(now);
+        now.2
+    });
+    Some(Dialogue { text, drawn })
+}
+
 /// Whether the game's script is at a `WAIT`, a command that waits for the player's A (a line of speech is
 /// followed by one), by the command the runner holds (`0207596C + 0x1C`); `None` as `script_idle`.
 pub fn script_waits() -> Option<bool> {

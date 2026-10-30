@@ -98,6 +98,8 @@ pub struct Shared {
     pub dump_meta: Mutex<String>,
     /// A dialogue box is on the screen (set by the emulation each frame).
     pub dialogue: AtomicBool,
+    /// The text of the dialogue line the game has begun to draw (set with the picture, `None` when the window shows none).
+    pub dialogue_text: Mutex<Option<String>>,
     /// The game says when its script runs, so a skip can go through dialogues (set by the emulation).
     pub marks: AtomicBool,
     /// The script is idle (the player has the control): there is nothing to skip (set by the emulation).
@@ -140,6 +142,7 @@ impl Shared {
             fast: AtomicBool::new(false),
             skip: AtomicBool::new(false),
             dialogue: AtomicBool::new(false),
+            dialogue_text: Mutex::new(None),
             marks: AtomicBool::new(false),
             idle: AtomicBool::new(false),
             waiting: AtomicBool::new(false),
@@ -254,6 +257,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         if draw {
             let picture = nds::screens_rgba();
             shared.dialogue.store(dialogue_shown(picture.0, &picture.1), Ordering::Relaxed);
+            let dialogue_line = nds::dialogue().filter(|d| d.drawn).map(|d| d.text);
             if skipping {
                 let print = fingerprint(&picture.1);
                 still = if print == last_print { still + 1 } else { 0 };
@@ -271,6 +275,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             // both under the picture's lock, so the window takes the pair or neither
             let mut slot = shared.frame.lock().unwrap();
             *shared.wide_frame.lock().unwrap() = wide;
+            *shared.dialogue_text.lock().unwrap() = dialogue_line;
             *slot = Some(picture);
             drop(slot);
         }
