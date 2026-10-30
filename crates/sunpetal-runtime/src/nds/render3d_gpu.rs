@@ -947,6 +947,25 @@ pub(super) fn render_maps(job: &Job, scale: usize) -> Result<(Vec<u32>, Vec<u8>,
 /// `k` > 1: `scale` is already the supersampled one (s·k) and the words come back resolved to the
 /// size of `scale / k` (the GPU averages the k x k samples, этап 6.2.1); `maps` must be off then.
 fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered, String> {
+    finish(submit(job, scale, maps, k)?)
+}
+
+/// A frame the GPU has been given and not yet read back (этап 9.2.2): the buffers its picture will be
+/// copied into and what `finish` needs to read them. The attachments the frame drew in are back in the
+/// pool already; the queue keeps them in order, so the next frame may use them.
+pub(super) struct Pending {
+    c: &'static Ctx,
+    buf_word: PooledBuf,
+    aux: Option<[PooledBuf; 4]>,
+    size: (usize, usize),
+    out: (usize, usize),
+    notes: u32,
+    /// `SUNPETAL_GPU_TIMING`: the frame's report so far and when the frame began
+    report: Option<(String, std::time::Instant)>,
+}
+
+/// Records and submits a frame; see `render_all` for the arguments.
+fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, String> {
     let t0 = std::time::Instant::now();
     let c = ctx()?;
     let s = scale.max(1);
@@ -1923,15 +1942,29 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
         let _ = c.device.poll(wgpu::PollType::wait_indefinitely()); // the GPU's work alone
     }
     let t_gpu = t0.elapsed();
-    let words = readback_words(&c.device, &buf_word, ow, oh)?;
-    if timing {
+    let report = timing.then(|| {
         // cumulative ms: textures decoded and uploaded, polygons built, resources made, commands
-        // recorded, the GPU's work (waited for alone), then the readback
+        // recorded, the GPU's work (waited for alone), then the readback (added by `finish`)
         let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0;
-        eprintln!("gpu frame {w}x{h}: atlas {:.2}, build {:.2}, resources {:.2}, encode {:.2}, gpu {:.2}, readback done {:.2} ms", ms(t_atlas), ms(t_build), ms(t_res), ms(t_enc), ms(t_gpu), ms(t0.elapsed()));
-        eprintln!("  serial passes: {n_blend} blend, {n_mask} mask (of {} polygons), {n_skipped} off-picture; {:.1}% of the picture copied per polygon on average", built.serial.len(), if n_blend + n_mask > 0 { px_copied as f64 / (built.serial.len() as f64 * (w * h) as f64) * 100.0 } else { 0.0 });
         let m = take_made();
-        eprintln!("  made: {} textures ({:.1} MB; {} from the pool), {} buffers ({:.1} MB), {} bind groups; {:.2} MB written by the queue; atlas {}", m[0], m[1] as f64 / 1e6, m[6], m[2], m[3] as f64 / 1e6, m[4], m[5] as f64 / 1e6, if m[7] > 0 { "kept" } else { "made" });
+        let mut r = format!("gpu frame {w}x{h}: atlas {:.2}, build {:.2}, resources {:.2}, encode {:.2}, gpu {:.2}", ms(t_atlas), ms(t_build), ms(t_res), ms(t_enc), ms(t_gpu));
+        r += &format!("|  serial passes: {n_blend} blend, {n_mask} mask (of {} polygons), {n_skipped} off-picture; {:.1}% of the picture copied per polygon on average", built.serial.len(), if n_blend + n_mask > 0 { px_copied as f64 / (built.serial.len() as f64 * (w * h) as f64) * 100.0 } else { 0.0 });
+        r += &format!("|  made: {} textures ({:.1} MB; {} from the pool), {} buffers ({:.1} MB), {} bind groups; {:.2} MB written by the queue; atlas {}", m[0], m[1] as f64 / 1e6, m[6], m[2], m[3] as f64 / 1e6, m[4], m[5] as f64 / 1e6, if m[7] > 0 { "kept" } else { "made" });
+        (r, t0)
+    });
+    Ok(Pending { c, buf_word, aux, size: (w, h), out: (ow, oh), notes, report })
+}
+
+/// Waits for a submitted frame and reads its picture back as the words the software renderer returns.
+pub(super) fn finish(p: Pending) -> Result<Rendered, String> {
+    let Pending { c, buf_word, aux, size: (w, h), out: (ow, oh), notes, report } = p;
+    let words = readback_words(&c.device, &buf_word, ow, oh)?;
+    if let Some((r, t0)) = report {
+        let mut lines = r.split('|');
+        eprintln!("{}, readback done {:.2} ms", lines.next().unwrap_or(""), t0.elapsed().as_secs_f64() * 1000.0);
+        for l in lines {
+            eprintln!("{l}");
+        }
     }
     let (mut oid_px, mut cover_px, mut trans_px, mut depth_px) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     if let Some([bo, bc, bt, bd]) = &aux {
