@@ -177,6 +177,8 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     // the side of the dialogue portrait and the panel's middle, last seen (the window draws the text with them)
     let mut portrait_left = true;
     let mut middle: Option<f32> = None;
+    // the raster text was hidden for the frame being drawn (the decision of the frame before)
+    let mut hide_now = false;
     let (mut counted, mut since) = (0u32, Instant::now());
     let (mut shown, mut shown_since) = (0u32, Instant::now());
     let (mut t_run, mut t_grab) = (Duration::ZERO, Duration::ZERO);
@@ -271,9 +273,13 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
                 middle = Some(m);
             }
             let dialogue = nds::dialogue();
-            // the game's raster text is hidden from the moment a line is set, before its letters come; ours shows when they do
-            nds::hide_dialogue_raster(shared.crisp_text.load(Ordering::Relaxed) && dialogue.as_ref().is_some_and(|d| d.coming));
-            let dialogue_line = dialogue.filter(|d| d.drawn).map(|d| (d.text, middle));
+            // the game's raster text is hidden from the moment a line is set, before its letters come; ours shows when they do.
+            // The window gets the line only for a picture that was drawn with the raster hidden (a menu that pauses the game
+            // changes the setting before the picture can follow)
+            let rendered_hidden = hide_now;
+            hide_now = shared.crisp_text.load(Ordering::Relaxed) && dialogue.as_ref().is_some_and(|d| d.coming);
+            nds::hide_dialogue_raster(hide_now);
+            let dialogue_line = dialogue.filter(|d| d.drawn && rendered_hidden).map(|d| (d.text, middle));
             if skipping {
                 let print = fingerprint(&picture.1);
                 still = if print == last_print { still + 1 } else { 0 };

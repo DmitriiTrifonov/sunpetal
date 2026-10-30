@@ -822,7 +822,8 @@ impl ApplicationHandler for App {
                             _ => vrect.is_some_and(|r| r.h / 192.0 >= 2.0),
                         };
                         shared.crisp_text.store(crisp, Ordering::Relaxed);
-                        let vline = if crisp { shared.dialogue_text.lock().unwrap().clone() } else { None };
+                        // the line goes with the picture it was made for (empty when that picture has the game's own letters)
+                        let vline = shared.dialogue_text.lock().unwrap().clone();
                         let vwide = *wide_now as f32;
                         if menu.open || pad_on || corner_on || stats_on || fade > 0.0 || vline.is_some() {
                             let held = touch_held.clone();
