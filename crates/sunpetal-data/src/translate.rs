@@ -11,6 +11,9 @@ use crate::{lz10, nitrofs::NitroFs, script};
 /// Folders whose files are one text each (ID `-` in the table).
 const RAW_DIRS: [&str; 3] = ["2D", "EdoComment", "Profile"];
 
+/// The font the dialogue window and the game's menus draw with.
+pub const DIALOGUE_FONT: &str = "Chapter/Pack/Common/font.nftr";
+
 /// The table: (chapter or folder, scene) → ID → text.
 #[derive(Default)]
 pub struct Table {
@@ -208,6 +211,19 @@ impl Translation {
         }
         // files the table made but the translated ROM keeps as in the ROM are not changes
         Ok((Translation { lang: lang.into(), base: base.into(), rom_crc: crc32(rom), table, deltas }, problems))
+    }
+
+    /// Puts `font` (an NFTR) in place of the dialogue font of the ROM, as a delta; one the
+    /// translated ROM brought is replaced. The ROM must be the one the translation is for.
+    pub fn set_font(&mut self, rom: &[u8], font: &[u8]) -> Result<(), String> {
+        crate::nftr::Nftr::parse(font).map_err(|e| format!("the font: {}", e))?;
+        if crc32(rom) != self.rom_crc {
+            return Err(format!("the translation `{}` is for another ROM", self.lang));
+        }
+        let orig = NitroFs::parse(rom)?.file(rom, DIALOGUE_FONT).ok_or_else(|| format!("{} is not in the ROM", DIALOGUE_FONT))?.to_vec();
+        self.deltas.retain(|(p, _)| p != DIALOGUE_FONT);
+        self.deltas.push((DIALOGUE_FONT.to_string(), diff_file(DIALOGUE_FONT, &orig, font)?));
+        Ok(())
     }
 
     /// The overlay of this translation for `rom` (`nitrofs::apply_overlay`): the files of the

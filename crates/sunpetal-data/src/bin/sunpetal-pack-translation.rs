@@ -3,7 +3,10 @@
 //! gets the data file and never needs the translated ROM.
 //!
 //!     sunpetal-pack-translation --rom ORIGINAL.nds [--translated TRANSLATED.nds] --table text/ru.csv \
-//!         --lang ru [--column Русский] [--base ue] --out sunpetal.data [--merge OTHER.spdata]
+//!         --lang ru [--column Русский] [--base ue] [--font font.nftr] --out sunpetal.data [--merge OTHER.spdata]
+//!
+//! `--font` puts a ready font (`sunpetal-font`) in place of the ROM's dialogue font; it wins over
+//! the font of the translated ROM.
 //!
 //! With `--merge` the sections of that file are kept (the pictures), the translation of the same
 //! language in it is replaced.
@@ -25,7 +28,7 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), String> {
     let mut args = std::env::args().skip(1);
-    let (mut rom, mut done, mut table, mut out, mut merge) = (None, None, None, None, None);
+    let (mut rom, mut done, mut table, mut out, mut merge, mut font) = (None, None, None, None, None, None);
     let (mut lang, mut column, mut base) = ("ru".to_string(), "Русский".to_string(), "ue".to_string());
     while let Some(a) = args.next() {
         let mut v = || args.next().ok_or_else(|| format!("{} wants a value", a));
@@ -34,6 +37,7 @@ fn run() -> Result<(), String> {
             "--translated" => done = Some(PathBuf::from(v()?)),
             "--table" => table = Some(PathBuf::from(v()?)),
             "--out" => out = Some(PathBuf::from(v()?)),
+            "--font" => font = Some(PathBuf::from(v()?)),
             "--merge" => merge = Some(PathBuf::from(v()?)),
             "--lang" => lang = v()?,
             "--column" => column = v()?,
@@ -53,11 +57,14 @@ fn run() -> Result<(), String> {
         Some(p) => read(p)?,
         None => rom.clone(),
     };
-    let (tr, problems) = Translation::make(&rom, &done, table, &lang, &base)?;
+    let (mut tr, problems) = Translation::make(&rom, &done, table, &lang, &base)?;
     // with no translated ROM there is nothing to compare the texts with
     let problems = if compare { problems } else { Vec::new() };
     for p in &problems {
         eprintln!("warning: {}", p);
+    }
+    if let Some(f) = &font {
+        tr.set_font(&rom, &read(f)?)?;
     }
     let bytes = tr.to_bytes()?;
     let mut c = match &merge {

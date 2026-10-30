@@ -25,3 +25,34 @@ fn every_font_of_the_rom_is_written_back_byte_for_byte() {
     }
     assert!(n >= 4, "fonts found: {}", n);
 }
+
+/// A pack with a made font: it survives the container and, applied to the ROM, gives the font the
+/// measuring parser reads (the width check counts by it). Needs SUNPETAL_ROM.
+#[test]
+fn a_font_in_the_pack_replaces_the_roms_dialogue_font() {
+    use sunpetal_data::fontgen::{self, Params};
+    use sunpetal_data::translate::{Table, Translation, DIALOGUE_FONT};
+    let Some(rom) = std::env::var_os("SUNPETAL_ROM") else {
+        eprintln!("skipped: no SUNPETAL_ROM");
+        return;
+    };
+    let rom = std::fs::read(rom).unwrap();
+    let fs = NitroFs::parse(&rom).unwrap();
+    let base = Nftr::parse(fs.file(&rom, DIALOGUE_FONT).unwrap()).unwrap();
+    let ubuntu = epaint_default_fonts::UBUNTU_LIGHT;
+    let chars = fontgen::charset(["Привет, мир"]);
+    let font = fontgen::build(&base, ubuntu, &chars, &Params::default()).unwrap().write();
+    assert!(!Font::parse(fs.file(&rom, DIALOGUE_FONT).unwrap()).unwrap().has('П'));
+
+    let (mut tr, _) = Translation::make(&rom, &rom, Table::default(), "ru", "ue").unwrap();
+    assert!(tr.deltas.is_empty());
+    tr.set_font(&rom, &font).unwrap();
+    tr.set_font(&rom, &font).unwrap(); // twice: replaced, not added
+    assert_eq!(tr.deltas.len(), 1);
+    let back = Translation::from_bytes(&tr.to_bytes().unwrap()).unwrap();
+    let files = back.overlay(&rom).unwrap();
+    let made = &files.iter().find(|f| f.0 == DIALOGUE_FONT).expect("the font is in the overlay").1;
+    assert_eq!(made, &font);
+    assert!(Font::parse(made).unwrap().has('П'));
+    assert!(tr.set_font(&rom, b"not a font").is_err());
+}
