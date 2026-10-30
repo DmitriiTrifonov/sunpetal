@@ -117,7 +117,10 @@ pub fn build(base: &Nftr, ttf: &[u8], chars: &BTreeSet<char>, p: &Params) -> Res
     if chars.iter().any(|c| *c as u32 > 0xFFFF) {
         return Err("a character outside the first 65536 does not fit the font's 16-bit codes".into());
     }
-    let alt = chars.iter().position(|c| *c == '?').unwrap() as u16;
+    // a code the font lacks draws nothing (the game's own font does the same), not a stray `?`
+    glyphs.push(pack(&vec![0u8; cw * ch], base.depth, base.cell_size as usize));
+    widths.push((0, 0, 0));
+    let alt = (glyphs.len() - 1) as u16;
     let mut out = base.clone();
     out.glyphs = glyphs;
     out.first_width = 0;
