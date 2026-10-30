@@ -100,6 +100,8 @@ pub struct Shared {
     pub dialogue: AtomicBool,
     /// The text of the dialogue line the game has begun to draw (set with the picture, `None` when the window shows none).
     pub dialogue_text: Mutex<Option<(String, Option<f32>)>>,
+    /// The window draws the dialogue text itself (set by the window each frame): the game's raster text is hidden.
+    pub crisp_text: AtomicBool,
     /// The game says when its script runs, so a skip can go through dialogues (set by the emulation).
     pub marks: AtomicBool,
     /// The script is idle (the player has the control): there is nothing to skip (set by the emulation).
@@ -143,6 +145,7 @@ impl Shared {
             skip: AtomicBool::new(false),
             dialogue: AtomicBool::new(false),
             dialogue_text: Mutex::new(None),
+            crisp_text: AtomicBool::new(false),
             marks: AtomicBool::new(false),
             idle: AtomicBool::new(false),
             waiting: AtomicBool::new(false),
@@ -171,10 +174,9 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     let frame = Duration::from_secs_f64(1.0 / FRAME_RATE);
     let mut next = Instant::now();
     let stats = std::env::var_os("SUNPETAL_STATS").is_some();
-    // 9в.10: crisp dialogue text (behind a flag until the menu setting)
+    // the side of the dialogue portrait and the panel's middle, last seen (the window draws the text with them)
     let mut portrait_left = true;
     let mut middle: Option<f32> = None;
-    let vtext = std::env::var_os("SUNPETAL_VTEXT").is_some_and(|v| v == "1");
     let (mut counted, mut since) = (0u32, Instant::now());
     let (mut shown, mut shown_since) = (0u32, Instant::now());
     let (mut t_run, mut t_grab) = (Duration::ZERO, Duration::ZERO);
@@ -270,7 +272,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             }
             let dialogue = nds::dialogue();
             // the game's raster text is hidden from the moment a line is set, before its letters come; ours shows when they do
-            nds::hide_dialogue_raster(vtext && dialogue.as_ref().is_some_and(|d| d.coming));
+            nds::hide_dialogue_raster(shared.crisp_text.load(Ordering::Relaxed) && dialogue.as_ref().is_some_and(|d| d.coming));
             let dialogue_line = dialogue.filter(|d| d.drawn).map(|d| (d.text, middle));
             if skipping {
                 let print = fingerprint(&picture.1);

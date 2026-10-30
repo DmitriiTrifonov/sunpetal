@@ -42,6 +42,9 @@ pub struct Video {
     /// The dial puzzle, which is read above and worked below: `inset` (the upper screen whole, the lower a panel in
     /// its corner, as on the PS2) or `side` (both screens side by side).
     pub puzzle: String,
+    /// The dialogue lines: `crisp` (the app draws them in the window's resolution), `pixel` (the game's own raster text)
+    /// or `auto` (crisp from 2 window pixels to a DS pixel).
+    pub dialogue_text: String,
     pub fullscreen: bool,
     /// Behind the screens: "edge" (a lone screen's edge rows run on), "glow" (their colours, blurred) or "black".
     pub background: String,
@@ -74,7 +77,7 @@ pub fn parse_renderer(name: &str) -> Option<nds::Renderer> {
 
 impl Default for Video {
     fn default() -> Video {
-        Video { res: 2, linear: true, layout: "stacked".into(), lower: false, panel: false, counter: true, auto: true, wide: true, bars_match: true, fit: "fit".into(), pixel_aspect: 1.0, logos_in_turn: true, puzzle: "inset".into(), fullscreen: false, background: "edge".into(), show_stats: false, texture_pack: String::new(), renderer: default_renderer().into(), window: [512, 768] }
+        Video { res: 2, linear: true, layout: "stacked".into(), lower: false, panel: false, counter: true, auto: true, wide: true, bars_match: true, fit: "fit".into(), pixel_aspect: 1.0, logos_in_turn: true, puzzle: "inset".into(), dialogue_text: "auto".into(), fullscreen: false, background: "edge".into(), show_stats: false, texture_pack: String::new(), renderer: default_renderer().into(), window: [512, 768] }
     }
 }
 
@@ -263,6 +266,9 @@ impl Settings {
         }
         if !matches!(self.interface.language.as_str(), "auto" | "en" | "ru") {
             self.interface.language = "auto".into();
+        }
+        if !matches!(self.video.dialogue_text.as_str(), "auto" | "pixel" | "crisp") {
+            self.video.dialogue_text = "auto".into();
         }
         self.video.res = self.video.res.clamp(1, 8);
         if !matches!(self.video.background.as_str(), "edge" | "glow" | "black") {

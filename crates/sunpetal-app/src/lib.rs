@@ -176,8 +176,7 @@ struct App {
     edo_seen: bool,
     /// Frames since Edo's screen was last seen: the flag goes off only after `EDO_HOLD` of them (B-05).
     edo_off: u32,
-    /// Crisp dialogue text (9в.10, `SUNPETAL_VTEXT=1`), and the side of the portrait last seen (`layout::portrait_left`).
-    vtext: bool,
+    /// The side of the portrait last seen (`layout::portrait_left`).
     portrait_left: bool,
     /// The title's "Press START" box (`layout::prompt_box`).
     prompt: Option<layout::Rect>,
@@ -788,7 +787,7 @@ impl ApplicationHandler for App {
                 let fade = self.skip_fade;
                 let mut action = None;
                 {
-                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, hint_seen, puzzle_hold, puzzle_side, coll_seen, coll_card, pending_capture, edo_seen, prompt, bar_color, auto_lower, hold, wide_now, paper, scroll, vtext, portrait_left, .. } = self;
+                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, hint_seen, puzzle_hold, puzzle_side, coll_seen, coll_card, pending_capture, edo_seen, prompt, bar_color, auto_lower, hold, wide_now, paper, scroll, portrait_left, .. } = self;
                     let live = layout::Live { vblank: shared.vblank.load(Ordering::Relaxed), counter_seen: *counter_seen, hint_seen: *hint_seen, both: *puzzle_hold > 0, both_side: *puzzle_side, collection: coll_seen.then(|| coll_card.get()), lower: *auto_lower || hold.is_some(), edo: *edo_seen, prompt: *prompt, wide: *wide_now as f32, scroll: (*paper && *auto_lower).then_some(*scroll) };
                     if let Some(g) = gfx {
                         let layout = layout::find(layouts, &settings.video, &live);
@@ -816,8 +815,14 @@ impl ApplicationHandler for App {
                         // the touch panel and the Android corner show the speed figures themselves; elsewhere they go over the picture
                         let stats_on = settings.video.show_stats && !pad_on && !corner_on;
                         // the dialogue line, drawn here in the window's resolution (the game's raster text is hidden)
-                        let vline = if *vtext { shared.dialogue_text.lock().unwrap().clone() } else { None };
                         let vrect = layout.fit(g.size())[0];
+                        let crisp = match settings.video.dialogue_text.as_str() {
+                            "pixel" => false,
+                            "crisp" => vrect.is_some(),
+                            _ => vrect.is_some_and(|r| r.h / 192.0 >= 2.0),
+                        };
+                        shared.crisp_text.store(crisp, Ordering::Relaxed);
+                        let vline = if crisp { shared.dialogue_text.lock().unwrap().clone() } else { None };
                         let vwide = *wide_now as f32;
                         if menu.open || pad_on || corner_on || stats_on || fade > 0.0 || vline.is_some() {
                             let held = touch_held.clone();
@@ -1046,7 +1051,6 @@ pub fn run(o: Options, el: EventLoop<()>) {
         swallow_b: std::cell::Cell::new(false),
         edo_seen: false,
         edo_off: 0,
-        vtext: std::env::var_os("SUNPETAL_VTEXT").is_some_and(|v| v == "1"),
         portrait_left: true,
         paper: false,
         bar_ask: (None, 0),

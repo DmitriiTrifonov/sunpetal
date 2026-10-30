@@ -120,6 +120,15 @@ impl Menu {
                     }));
                 }
                 ui.checkbox(&mut s.video.counter, tx("Counter on the upper screen when it is alone", "Счётчик на верхнем экране, когда он один"));
+                egui::ComboBox::from_label(tx("Dialogue text", "Текст реплик")).selected_text(match s.video.dialogue_text.as_str() {
+                    "pixel" => tx("pixel (the game's)", "пиксельный (как в игре)"),
+                    "crisp" => tx("crisp", "чёткий"),
+                    _ => tx("auto (crisp from 2x)", "авто (чёткий от 2x)"),
+                }).show_ui(ui, |ui| {
+                    ui.selectable_value(&mut s.video.dialogue_text, "auto".to_string(), tx("auto (crisp from 2x)", "авто (чёткий от 2x)"));
+                    ui.selectable_value(&mut s.video.dialogue_text, "crisp".to_string(), tx("crisp", "чёткий"));
+                    ui.selectable_value(&mut s.video.dialogue_text, "pixel".to_string(), tx("pixel (the game's)", "пиксельный (как в игре)"));
+                });
                 ui.checkbox(&mut s.video.logos_in_turn, tx("Logos in turn when one screen is shown", "Логотипы по очереди, когда виден один экран"));
                 if matches!(s.video.layout.as_str(), "single" | "overlay") && s.video.auto {
                     egui::ComboBox::from_label(tx("Dial puzzle (both screens)", "Головоломка с диском (оба экрана)")).selected_text(match s.video.puzzle.as_str() {
