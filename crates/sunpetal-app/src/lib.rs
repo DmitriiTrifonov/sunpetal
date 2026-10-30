@@ -915,6 +915,18 @@ pub fn run(o: Options, el: EventLoop<()>) {
             None
         }
     });
+    // a data file is checked whole before the game starts from it: a damaged one is no game, and
+    // beside a ROM it is only left out
+    if let Some(p) = cfg.texture_pack.clone().filter(|p| p.is_file()) {
+        if let Err(e) = locate::check_data(&p) {
+            eprintln!("{}", e);
+            if rom.as_os_str().is_empty() {
+                std::process::exit(2);
+            }
+            eprintln!("the game starts from the ROM without it");
+            cfg.texture_pack = None;
+        }
+    }
     // the pack in use is the texture setting (the menu's list of sets starts from its folder)
     if let Some(p) = cfg.texture_pack.as_ref().filter(|p| p.is_file()) {
         settings.video.texture_pack = p.display().to_string();

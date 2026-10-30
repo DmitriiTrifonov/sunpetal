@@ -41,6 +41,12 @@ pub fn check_rom(path: &Path) -> Result<(), String> {
     }
 }
 
+/// Whether a data file holds as `META` records it (the check `sunpetal-check` makes): the message
+/// if it is damaged, cut short, or not a data file. A file made before `META` passes unchecked.
+pub fn check_data(path: &Path) -> Result<(), String> {
+    sunpetal_data::container::verify_file(path).map(|_| ())
+}
+
 /// The one supported ROM among the `.nds` files of `dirs`; none if there is none.
 pub fn find_rom(dirs: &[PathBuf]) -> Option<PathBuf> {
     dirs.iter().find_map(|d| {
@@ -91,6 +97,25 @@ mod tests {
         assert_eq!(find_rom(&[d.clone()]), Some(d.join("game.nds")));
         assert!(check_rom(&d.join("other.nds")).unwrap_err().contains("ABCD"));
         assert!(check_rom(&d.join("notes.txt")).unwrap_err().contains("too short"));
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn it_refuses_a_damaged_data_file_with_the_reason() {
+        let d = dir("data");
+        let mut c = sunpetal_data::container::Container::new();
+        c.add(b"TRAN", b"part".to_vec());
+        c.set_rom(*b"YHNP", 7);
+        let f = d.join(DATA_NAME);
+        c.write(&f).unwrap();
+        assert!(check_data(&f).is_ok());
+        let mut b = fs::read(&f).unwrap();
+        let last = b.len() - 1;
+        b[last] ^= 1;
+        fs::write(&f, b).unwrap();
+        assert!(check_data(&f).unwrap_err().contains("damaged"));
+        fs::write(&f, b"not a data file at all").unwrap();
+        assert!(check_data(&f).is_err());
         fs::remove_dir_all(&d).unwrap();
     }
 
