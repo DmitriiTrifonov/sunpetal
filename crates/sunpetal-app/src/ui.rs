@@ -201,7 +201,7 @@ impl Menu {
                         ui.selectable_value(&mut e.msaa, 4, "4x4");
                     });
                 if e.msaa > 0 {
-                    let used = crate::effects::effective_msaa(video_res, e.msaa);
+                    let used = crate::effects::effective_msaa(video_res, e.msaa, s.video.renderer == "gpu");
                     if used != e.msaa {
                         ui.colored_label(egui::Color32::from_rgb(230, 160, 40), if used == 0 {
                             tx("too heavy at this 3D resolution: not drawn (lower the 3D resolution or use 2x2)", "слишком тяжело при таком разрешении 3D: не включено (уменьшите разрешение 3D или возьмите 2x2)").to_string()

@@ -211,8 +211,8 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         nds::set_renderer(if shared.renderer.load(Ordering::Relaxed) == 1 { nds::Renderer::Gpu } else { nds::Renderer::Software });
         nds::set_scale(if skipping_now { 1 } else { shared.scale.load(Ordering::Relaxed) });
         let mut extras = *shared.extras.lock().unwrap();
-        // the window's 3D is drawn at scale x samples at most (`effects::MSAA_BUDGET`): more would not keep up
-        extras.msaa = crate::effects::effective_msaa(shared.scale.load(Ordering::Relaxed) as u32, extras.msaa);
+        // the window's 3D is drawn at scale x samples at most (`effects::MSAA_BUDGET`, the video card's is larger): more would not keep up
+        extras.msaa = crate::effects::effective_msaa(shared.scale.load(Ordering::Relaxed) as u32, extras.msaa, shared.renderer.load(Ordering::Relaxed) == 1);
         nds::set_extras(extras);
         if let Some(pack) = shared.pack_swap.lock().unwrap().take() {
             if let Err(e) = nds::set_texture_pack(pack.as_deref()) {

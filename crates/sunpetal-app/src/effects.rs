@@ -60,11 +60,16 @@ pub const PRESETS: [&str; 6] = ["none", "sharp", "lcd", "crt", "vivid", "glow"];
 /// `sunpetal-headless` has no such limit.
 pub const MSAA_BUDGET: u32 = 4;
 
+/// The same for the video card's engine. Its time grew about 1 ms per doubling of the size up to 4, then jumped
+/// (18 ms at 4, 35 ms at 8: 2x with 4x4), so it stays 4 until the jump is explained (docs/GPU-BACKEND.md, 6.3).
+pub const MSAA_BUDGET_GPU: u32 = 4;
+
 /// The samples per side the window really uses: the asked ones, brought down (4 to 2 to none) until scale times
-/// samples is within `MSAA_BUDGET`.
-pub fn effective_msaa(scale: u32, msaa: u8) -> u8 {
+/// samples is within the budget of the engine (`gpu`: the video card's).
+pub fn effective_msaa(scale: u32, msaa: u8, gpu: bool) -> u8 {
+    let budget = if gpu { MSAA_BUDGET_GPU } else { MSAA_BUDGET };
     let mut m = msaa;
-    while m > 0 && scale * m as u32 > MSAA_BUDGET {
+    while m > 0 && scale * m as u32 > budget {
         m = if m >= 4 { 2 } else { 0 };
     }
     m
@@ -172,11 +177,19 @@ mod msaa_tests {
 
     #[test]
     fn the_window_keeps_the_supersampling_within_its_budget() {
-        assert_eq!(effective_msaa(1, 4), 4);
-        assert_eq!(effective_msaa(2, 4), 2);
-        assert_eq!(effective_msaa(2, 2), 2);
-        assert_eq!(effective_msaa(3, 2), 0);
-        assert_eq!(effective_msaa(4, 4), 0);
-        assert_eq!(effective_msaa(5, 0), 0);
+        assert_eq!(effective_msaa(1, 4, false), 4);
+        assert_eq!(effective_msaa(2, 4, false), 2);
+        assert_eq!(effective_msaa(2, 2, false), 2);
+        assert_eq!(effective_msaa(3, 2, false), 0);
+        assert_eq!(effective_msaa(4, 4, false), 0);
+        assert_eq!(effective_msaa(5, 0, false), 0);
+    }
+
+    #[test]
+    fn the_video_card_has_its_own_budget() {
+        assert_eq!(effective_msaa(2, 4, true), 2);
+        assert_eq!(effective_msaa(1, 4, true), 4);
+        assert_eq!(effective_msaa(2, 2, true), 2);
+        assert_eq!(effective_msaa(4, 2, true), 0);
     }
 }
