@@ -93,6 +93,8 @@ struct Ctx {
     bgl_mask: wgpu::BindGroupLayout,
     /// The attachments the frames are done with, to be taken again (этап 9.1.1).
     pool: Mutex<Vec<(PoolKey, wgpu::Texture)>>,
+    /// The small per-frame buffers (uniforms, the full-screen triangle, the resolve factor) the same way (этап 9.1.4).
+    buf_pool: Mutex<Vec<(BufKey, wgpu::Buffer)>>,
 }
 
 static CTX: OnceLock<Option<Ctx>> = OnceLock::new();
@@ -577,7 +579,7 @@ fn make_ctx() -> Result<Ctx, String> {
         multiview_mask: None,
         cache: None,
     });
-    Ok(Ctx { device, queue, pipeline, bgl, rear_pipeline, bgl_rear, fog_pipeline, bgl_fog, outline_pipeline, bgl_outline, shade_pipeline, bgl_shade, rows_pipeline, bgl_rows, skyrow_pipeline, bgl_skyrow, extend_pipeline, bgl_extend, blend_pipeline, bgl_blend, mask_pipeline, bgl_mask, resolve_pipeline, bgl_resolve, pool: Mutex::new(Vec::new()) })
+    Ok(Ctx { device, queue, pipeline, bgl, rear_pipeline, bgl_rear, fog_pipeline, bgl_fog, outline_pipeline, bgl_outline, shade_pipeline, bgl_shade, rows_pipeline, bgl_rows, skyrow_pipeline, bgl_skyrow, extend_pipeline, bgl_extend, blend_pipeline, bgl_blend, mask_pipeline, bgl_mask, resolve_pipeline, bgl_resolve, pool: Mutex::new(Vec::new()), buf_pool: Mutex::new(Vec::new()) })
 }
 
 /// Where a texture's picture sits in the frame's atlas, and how its coordinates map onto it.
@@ -1031,22 +1033,14 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
     for f in job.fog_table {
         uni.extend_from_slice(&(f as u32).to_le_bytes());
     }
-    let ub = made_buffer_init(device, &wgpu::util::BufferInitDescriptor {
-        label: Some("3d uniforms"),
-        contents: &uni,
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
+    let ub = frame_buffer(c, "3d uniforms", &uni, wgpu::BufferUsages::UNIFORM);
     // a full-screen triangle (big enough to cover the viewport) for the rear plane and the fog
     let mut qp = Vec::with_capacity(24);
     for v in [(0.0f32, h as f32), (2.0 * w as f32, h as f32), (0.0f32, -(h as f32))] {
         qp.extend_from_slice(&v.0.to_le_bytes());
         qp.extend_from_slice(&v.1.to_le_bytes());
     }
-    let quad = made_buffer_init(device, &wgpu::util::BufferInitDescriptor {
-        label: Some("3d fullscreen"),
-        contents: &qp,
-        usage: wgpu::BufferUsages::VERTEX,
-    });
+    let quad = frame_buffer(c, "3d fullscreen", &qp, wgpu::BufferUsages::VERTEX);
     // the accumulated picture, ping-ponged between the translucent polygons: the word (colour and
     // alpha), the polygon ID, the shadow mask and the depth; the fog flag is written straight
     let ping = wgpu::TextureUsages::RENDER_ATTACHMENT
@@ -1681,11 +1675,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
     let (ow, oh) = (w / k, h / k);
     let res = (k > 1).then(|| {
         let res = attach(c, ow, oh, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC);
-        let kb = made_buffer_init(device, &wgpu::util::BufferInitDescriptor {
-            label: Some("3d resolve k"),
-            contents: &[k as u32, 0, 0, 0].iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>(),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let kb = frame_buffer(c, "3d resolve k", &[k as u32, 0, 0, 0].iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>(), wgpu::BufferUsages::UNIFORM);
         let fiv = fin.create_view(&Default::default());
         let bind = made_bind_group(device, &wgpu::BindGroupDescriptor {
             label: Some("3d resolve"),
@@ -1719,15 +1709,15 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
         res
     });
     let buf_word = match &res {
-        Some(r) => readback_buf(device, &mut enc, r, ow as u32, oh as u32),
-        None => readback_buf(device, &mut enc, &fin, w as u32, h as u32),
+        Some(r) => readback_buf(c, &mut enc, r, ow as u32, oh as u32),
+        None => readback_buf(c, &mut enc, &fin, w as u32, h as u32),
     };
     let aux = maps.then(|| {
         [
-            readback_buf(device, &mut enc, &oid[cur], w as u32, h as u32),
-            readback_buf(device, &mut enc, &cover[cur], w as u32, h as u32),
-            readback_buf(device, &mut enc, &trans[cur], w as u32, h as u32),
-            readback_buf(device, &mut enc, &depth[cur], w as u32, h as u32),
+            readback_buf(c, &mut enc, &oid[cur], w as u32, h as u32),
+            readback_buf(c, &mut enc, &cover[cur], w as u32, h as u32),
+            readback_buf(c, &mut enc, &trans[cur], w as u32, h as u32),
+            readback_buf(c, &mut enc, &depth[cur], w as u32, h as u32),
         ]
     });
     let t_enc = t0.elapsed();
@@ -1797,6 +1787,49 @@ impl Drop for Pooled {
     }
 }
 
+type BufKey = (u64, wgpu::BufferUsages);
+
+const BUF_POOL_MAX_ENTRIES: usize = 32;
+
+/// A small buffer on loan from the pool, written with `queue.write_buffer` each frame instead of made anew.
+struct PooledBuf {
+    buf: Option<wgpu::Buffer>,
+    key: BufKey,
+    ctx: &'static Ctx,
+}
+
+impl std::ops::Deref for PooledBuf {
+    type Target = wgpu::Buffer;
+    fn deref(&self) -> &wgpu::Buffer {
+        self.buf.as_ref().unwrap()
+    }
+}
+
+impl Drop for PooledBuf {
+    fn drop(&mut self) {
+        let Some(buf) = self.buf.take() else { return };
+        let mut pool = self.ctx.buf_pool.lock().unwrap();
+        pool.push((self.key, buf));
+        while pool.len() > BUF_POOL_MAX_ENTRIES {
+            pool.remove(0);
+        }
+    }
+}
+
+/// A buffer of `contents`' size (a multiple of 4) holding them: from the pool and written by the queue, or new.
+/// `usage` has COPY_DST added.
+fn frame_buffer(c: &'static Ctx, label: &str, contents: &[u8], usage: wgpu::BufferUsages) -> PooledBuf {
+    let usage = usage | wgpu::BufferUsages::COPY_DST;
+    let key = (contents.len() as u64, usage);
+    let mut pool = c.buf_pool.lock().unwrap();
+    let taken = pool.iter().position(|(k, _)| *k == key).map(|i| pool.swap_remove(i).1);
+    drop(pool);
+    let buf = taken.unwrap_or_else(|| made_buffer(&c.device, &wgpu::BufferDescriptor { label: Some(label), size: key.0, usage, mapped_at_creation: false }));
+    made(5, contents.len() as u64);
+    c.queue.write_buffer(&buf, 0, contents);
+    PooledBuf { buf: Some(buf), key, ctx: c }
+}
+
 /// A 2D texture of the picture's size for one of the passes' attachments: one the pool has of that kind,
 /// or a new one.
 fn attach(c: &'static Ctx, w: usize, h: usize, format: wgpu::TextureFormat, usage: wgpu::TextureUsages) -> Pooled {
@@ -1829,14 +1862,15 @@ fn pool_len() -> usize {
 
 /// A mappable buffer a picture-sized attachment is copied into (rows padded to 256 bytes), to be
 /// read back by `readback_words`/`readback_bytes` after the submit.
-fn readback_buf(device: &wgpu::Device, enc: &mut wgpu::CommandEncoder, tex: &wgpu::Texture, w: u32, h: u32) -> wgpu::Buffer {
+fn readback_buf(c: &'static Ctx, enc: &mut wgpu::CommandEncoder, tex: &wgpu::Texture, w: u32, h: u32) -> PooledBuf {
     let row = ((w * 4).div_ceil(256) * 256) as u64;
-    let buf = made_buffer(device, &wgpu::BufferDescriptor {
-        label: Some("3d readback"),
-        size: row * h as u64,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
+    let usage = wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST;
+    let key = (row * h as u64, usage);
+    let mut pool = c.buf_pool.lock().unwrap();
+    let taken = pool.iter().position(|(k, _)| *k == key).map(|i| pool.swap_remove(i).1);
+    drop(pool);
+    // a read-back buffer comes back unmapped (`readback_*` unmap it) and is copied over whole
+    let buf = taken.unwrap_or_else(|| made_buffer(&c.device, &wgpu::BufferDescriptor { label: Some("3d readback"), size: key.0, usage, mapped_at_creation: false }));
     enc.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo { texture: tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
         wgpu::TexelCopyBufferInfo {
@@ -1845,7 +1879,7 @@ fn readback_buf(device: &wgpu::Device, enc: &mut wgpu::CommandEncoder, tex: &wgp
         },
         wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
     );
-    buf
+    PooledBuf { buf: Some(buf), key, ctx: c }
 }
 
 /// Reads a mapped readback buffer's words (`w` words a row, rows padded to 256 bytes).
