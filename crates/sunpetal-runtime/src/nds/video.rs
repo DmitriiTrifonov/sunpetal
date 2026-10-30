@@ -313,6 +313,20 @@ impl Nds {
         v
     }
 
+    /// `N` bytes of an area from `off` as `vram_r8` reads them, the page looked up once (they must lie in one 16 KB page).
+    pub(super) fn vram_bytes<const N: usize>(&self, area: usize, off: u32) -> [u8; N] {
+        let p = self.area_page(area, off);
+        let o = (off & 0x3FFF) as usize;
+        let mut v = [0u8; N];
+        for k in 0..p.n {
+            let q = &self.video.vram[p.p[k] + o..p.p[k] + o + N];
+            for i in 0..N {
+                v[i] |= q[i];
+            }
+        }
+        v
+    }
+
     pub(super) fn vram_r16(&self, area: usize, off: u32) -> u16 {
         let p = self.area_page(area, off);
         let o = (off & 0x3FFE) as usize;

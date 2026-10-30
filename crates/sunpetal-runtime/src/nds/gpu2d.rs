@@ -217,16 +217,34 @@ impl Nds {
         let ext = c256 && l.dispcnt & 0x4000_0000 != 0;
         let slot = bg as u32 + if bg < 2 && cnt & 0x2000 != 0 { 2 } else { 0 };
         let rowblock = (yy >> 8) * if w == 512 { 2 } else { 1 };
+        // a tile's map entry and its row of the character data are fetched once for its 8 pixels
+        let (mut tile_x, mut pal, mut flip_x) = (u32::MAX, 0u32, 0u32);
+        let mut row = [0u8; 8];
+        let mut colours = [0u32; 16];
         for x in 0..256u32 {
             let xx = (x + hofs) & (w - 1);
-            let se = screenbase + (rowblock + (xx >> 8)) * 0x800 + ((yy & 0xFF) >> 3) * 64 + ((xx & 0xFF) >> 3) * 2;
-            let entry = self.vram_r16(l.abg, se) as u32;
-            let tile = entry & 0x3FF;
-            let px = (xx & 7) ^ if entry & 0x400 != 0 { 7 } else { 0 };
-            let py = (yy & 7) ^ if entry & 0x800 != 0 { 7 } else { 0 };
-            let pal = entry >> 12;
+            if xx >> 3 != tile_x {
+                tile_x = xx >> 3;
+                let se = screenbase + (rowblock + (xx >> 8)) * 0x800 + ((yy & 0xFF) >> 3) * 64 + ((xx & 0xFF) >> 3) * 2;
+                let entry = self.vram_r16(l.abg, se) as u32;
+                let tile = entry & 0x3FF;
+                flip_x = if entry & 0x400 != 0 { 7 } else { 0 };
+                let py = (yy & 7) ^ if entry & 0x800 != 0 { 7 } else { 0 };
+                pal = entry >> 12;
+                if c256 {
+                    row = self.vram_bytes::<8>(l.abg, charbase + tile * 64 + py * 8);
+                } else {
+                    let b = self.vram_bytes::<4>(l.abg, charbase + tile * 32 + py * 4);
+                    row[..4].copy_from_slice(&b);
+                    // the 16 colours of the tile's palette, once
+                    for (i, c) in colours.iter_mut().enumerate().skip(1) {
+                        *c = c666(self.pal16(l.e, pal * 16 + i as u32)) | PX_OPAQUE;
+                    }
+                }
+            }
+            let px = (xx & 7) ^ flip_x;
             if c256 {
-                let idx = self.vram_r8(l.abg, charbase + tile * 64 + py * 8 + px) as u32;
+                let idx = row[px as usize] as u32;
                 if idx == 0 {
                     out[x as usize] = 0;
                     continue;
@@ -234,13 +252,9 @@ impl Nds {
                 let c = if ext { self.vram_r16(l.abgext, slot * 0x2000 + pal * 512 + idx * 2) } else { self.pal16(l.e, idx) };
                 out[x as usize] = c666(c) | PX_OPAQUE;
             } else {
-                let b = self.vram_r8(l.abg, charbase + tile * 32 + py * 4 + px / 2);
-                let idx = if px & 1 != 0 { b >> 4 } else { b & 15 } as u32;
-                if idx == 0 {
-                    out[x as usize] = 0;
-                    continue;
-                }
-                out[x as usize] = c666(self.pal16(l.e, pal * 16 + idx)) | PX_OPAQUE;
+                let b = row[(px / 2) as usize];
+                let idx = if px & 1 != 0 { b >> 4 } else { b & 15 } as usize;
+                out[x as usize] = if idx == 0 { 0 } else { colours[idx] };
             }
         }
     }
