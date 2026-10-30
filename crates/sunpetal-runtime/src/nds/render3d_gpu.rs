@@ -2378,12 +2378,19 @@ struct FMask {
   @location(0) stencil: vec4u,
 };
 
+// a zero the compiler cannot see: `fma(a, b, 0.0)` is the product rounded on its own only while the
+// compiler leaves it be, and one that folds it to `a * b` may fuse that with the next add (Xclipse
+// did, B-03); a runtime value (the scale is never near 2^30) cannot be folded away
+fn zero() -> f32 {
+  return f32(g.scale >> 30u);
+}
+
 fn edge(p: vec2f, q: vec2f, t: vec2f) -> f32 {
   // each product rounded on its own, like the software engine's: a compiler fusing `a*b - c*d`
   // into one fma would shift the difference by ulps where the products cancel (the parity tests
   // caught a 4-ulp shift right there)
-  let a = fma(q.x - p.x, t.y - p.y, 0.0);
-  let b = fma(q.y - p.y, t.x - p.x, 0.0);
+  let a = fma(q.x - p.x, t.y - p.y, zero());
+  let b = fma(q.y - p.y, t.x - p.x, zero());
   return a - b;
 }
 
@@ -2473,9 +2480,9 @@ fn tex_bilinear(t: Tri, s: f32, tt: f32) -> vec4u {
   for (var i = 0u; i < 4u; i++) {
     let c = tap(t, x0 + i32(i & 1u), y0 + i32(i >> 1u));
     let k = ws[i] * f32((c.w * 31u + 127u) / 255u);
-    r = r + fma(k, f32(c.x >> 2u), 0.0);
-    g = g + fma(k, f32(c.y >> 2u), 0.0);
-    b = b + fma(k, f32(c.z >> 2u), 0.0);
+    r = r + fma(k, f32(c.x >> 2u), zero());
+    g = g + fma(k, f32(c.y >> 2u), zero());
+    b = b + fma(k, f32(c.z >> 2u), zero());
     a = a + k;
     wa = wa + ws[i];
   }
@@ -2527,10 +2534,10 @@ fn bary(t: Tri, pt: vec2f) -> vec3f {
 // the depth at a pixel (its barycentric weights in l), exactly as the software engine has it
 fn depth_at(t: Tri, l: vec3f) -> f32 {
   if (g.wbuffer != 0u) {
-    let den = (fma(l.x, t.iw0, 0.0) + fma(l.y, t.iw1, 0.0)) + fma(l.z, t.iw2, 0.0);
+    let den = (fma(l.x, t.iw0, zero()) + fma(l.y, t.iw1, zero())) + fma(l.z, t.iw2, zero());
     return div(div(1.0, den), 16777215.0);
   }
-  return (fma(l.x, t.d0, 0.0) + fma(l.y, t.d1, 0.0)) + fma(l.z, t.d2, 0.0);
+  return (fma(l.x, t.d0, zero()) + fma(l.y, t.d1, zero())) + fma(l.z, t.d2, zero());
 }
 
 // the shaded colour and alpha of a pixel: (r6, g6, b6, oa); a transparent texel is gone (alpha 0 comes
@@ -2545,13 +2552,13 @@ fn shade_try(t: Tri, l: vec3f) -> vec4u {
   let q0 = div(p0, den);
   let q1 = div(p1, den);
   let q2 = div(p2, den);
-  let vr = (fma(q0, t.r0, 0.0) + fma(q1, t.r1, 0.0)) + fma(q2, t.r2, 0.0);
-  let vg = (fma(q0, t.g0, 0.0) + fma(q1, t.g1, 0.0)) + fma(q2, t.g2, 0.0);
-  let vb = (fma(q0, t.b0, 0.0) + fma(q1, t.b1, 0.0)) + fma(q2, t.b2, 0.0);
+  let vr = (fma(q0, t.r0, zero()) + fma(q1, t.r1, zero())) + fma(q2, t.r2, zero());
+  let vg = (fma(q0, t.g0, zero()) + fma(q1, t.g1, zero())) + fma(q2, t.g2, zero());
+  let vb = (fma(q0, t.b0, zero()) + fma(q1, t.b1, zero())) + fma(q2, t.b2, zero());
   // the texture coordinates, the same weights (the software engine interpolates them like the
   // colour)
-  let s_ = (fma(q0, t.s0, 0.0) + fma(q1, t.s1, 0.0)) + fma(q2, t.s2, 0.0);
-  let tt = (fma(q0, t.t0, 0.0) + fma(q1, t.t1, 0.0)) + fma(q2, t.t2, 0.0);
+  let s_ = (fma(q0, t.s0, zero()) + fma(q1, t.s1, zero())) + fma(q2, t.s2, zero());
+  let tt = (fma(q0, t.t0, zero()) + fma(q1, t.t1, zero())) + fma(q2, t.t2, zero());
   var r6 = to6(vr);
   var g6 = to6(vg);
   var b6 = to6(vb);
