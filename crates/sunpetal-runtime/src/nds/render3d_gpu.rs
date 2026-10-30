@@ -26,6 +26,44 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use wgpu::util::DeviceExt;
 
+/// What a frame makes and uploads, counted under `SUNPETAL_GPU_TIMING` (этап 9.0.2):
+/// textures, their bytes, buffers, their bytes, bind groups, bytes written by the queue.
+static MADE: [std::sync::atomic::AtomicU64; 6] = [const { std::sync::atomic::AtomicU64::new(0) }; 6];
+
+fn made(i: usize, n: u64) {
+    MADE[i].fetch_add(n, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn made_texture(device: &wgpu::Device, d: &wgpu::TextureDescriptor) -> wgpu::Texture {
+    let px = d.format.block_copy_size(None).unwrap_or(4) as u64;
+    made(0, 1);
+    made(1, d.size.width as u64 * d.size.height as u64 * d.size.depth_or_array_layers as u64 * px);
+    device.create_texture(d)
+}
+
+fn made_buffer(device: &wgpu::Device, d: &wgpu::BufferDescriptor) -> wgpu::Buffer {
+    made(2, 1);
+    made(3, d.size);
+    device.create_buffer(d)
+}
+
+fn made_buffer_init(device: &wgpu::Device, d: &wgpu::util::BufferInitDescriptor) -> wgpu::Buffer {
+    made(2, 1);
+    made(3, d.contents.len() as u64);
+    made(5, d.contents.len() as u64);
+    device.create_buffer_init(d)
+}
+
+fn made_bind_group(device: &wgpu::Device, d: &wgpu::BindGroupDescriptor) -> wgpu::BindGroup {
+    made(4, 1);
+    device.create_bind_group(d)
+}
+
+/// The counters, read and zeroed.
+fn take_made() -> [u64; 6] {
+    std::array::from_fn(|i| MADE[i].swap(0, std::sync::atomic::Ordering::Relaxed))
+}
+
 /// A wgpu device of the process, made on first use and kept (the parity harness renders many
 /// frames; the game loop will too).
 struct Ctx {
@@ -901,12 +939,13 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
         row_h = row_h.max(ph);
     }
     let atlas_h = (y + row_h).max(1);
+    take_made(); // this frame's counts only
     let device = &c.device;
     let max_dim = device.limits().max_texture_dimension_2d;
     if atlas_w > max_dim || atlas_h > max_dim {
         return Err(format!("the frame's textures make a {atlas_w}x{atlas_h} atlas, over the device's {max_dim}"));
     }
-    let atlas = device.create_texture(&wgpu::TextureDescriptor {
+    let atlas = made_texture(device, &wgpu::TextureDescriptor {
         label: Some("3d texture atlas"),
         size: wgpu::Extent3d { width: atlas_w, height: atlas_h, depth_or_array_layers: 1 },
         mip_level_count: 1,
@@ -918,6 +957,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
     });
     for ((tex, pal), img, _, _, _) in &pics {
         let r = regions[&(*tex, *pal)];
+        made(5, img.rgba.len() as u64);
         c.queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &atlas,
@@ -989,7 +1029,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
     for f in job.fog_table {
         uni.extend_from_slice(&(f as u32).to_le_bytes());
     }
-    let ub = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let ub = made_buffer_init(device, &wgpu::util::BufferInitDescriptor {
         label: Some("3d uniforms"),
         contents: &uni,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
@@ -1000,7 +1040,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
         qp.extend_from_slice(&v.0.to_le_bytes());
         qp.extend_from_slice(&v.1.to_le_bytes());
     }
-    let quad = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let quad = made_buffer_init(device, &wgpu::util::BufferInitDescriptor {
         label: Some("3d fullscreen"),
         contents: &qp,
         usage: wgpu::BufferUsages::VERTEX,
@@ -1028,7 +1068,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
     let t_res = t0.elapsed();
     let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     let rear_bind = rear.as_ref().map(|data| {
-        let rt = device.create_texture(&wgpu::TextureDescriptor {
+        let rt = made_texture(device, &wgpu::TextureDescriptor {
             label: Some("3d rear bitmap"),
             size: wgpu::Extent3d { width: 256, height: 256, depth_or_array_layers: 1 },
             mip_level_count: 1,
@@ -1038,6 +1078,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
+        made(5, data.len() as u64);
         c.queue.write_texture(
             wgpu::TexelCopyTextureInfo { texture: &rt, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
             data,
@@ -1045,7 +1086,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
             wgpu::Extent3d { width: 256, height: 256, depth_or_array_layers: 1 },
         );
         let rv = rt.create_view(&Default::default());
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
+        made_bind_group(device, &wgpu::BindGroupDescriptor {
             label: Some("3d rear"),
             layout: &c.bgl_rear,
             entries: &[
@@ -1136,17 +1177,17 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
         }
         let nvert = (built.opaque_verts.len() / 8) as u32;
         if nvert > 0 {
-            let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            let vb = made_buffer_init(device, &wgpu::util::BufferInitDescriptor {
                 label: Some("3d verts"),
                 contents: &built.opaque_verts,
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             });
-            let tb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            let tb = made_buffer_init(device, &wgpu::util::BufferInitDescriptor {
                 label: Some("3d tris"),
                 contents: &built.opaque_tris,
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             });
-            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            let bind = made_bind_group(device, &wgpu::BindGroupDescriptor {
                 label: Some("3d"),
                 layout: &c.bgl,
                 entries: &[
@@ -1228,12 +1269,12 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
             continue; // off the picture: it changes nothing
         }
         px_copied += ((x1 - x0) * (y1 - y0)) as u64;
-        let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let vb = made_buffer_init(device, &wgpu::util::BufferInitDescriptor {
             label: Some("3d trans verts"),
             contents: verts,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
-        let tb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let tb = made_buffer_init(device, &wgpu::util::BufferInitDescriptor {
             label: Some("3d trans tris"),
             contents: tris,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
@@ -1270,7 +1311,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
             let binds: Vec<wgpu::BindGroup> = batch
                 .iter()
                 .map(|it| {
-                    device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    made_bind_group(device, &wgpu::BindGroupDescriptor {
                         label: Some("3d mask"),
                         layout: &c.bgl_mask,
                         entries: &[
@@ -1322,7 +1363,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
             let binds: Vec<wgpu::BindGroup> = batch
                 .iter()
                 .map(|it| {
-                    device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    made_bind_group(device, &wgpu::BindGroupDescriptor {
                         label: Some("3d blend"),
                         layout: &c.bgl_blend,
                         entries: &[
@@ -1393,7 +1434,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
         {
             let dv = depth[cur].create_view(&Default::default());
             let s0v = src0.create_view(&Default::default());
-            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            let bind = made_bind_group(device, &wgpu::BindGroupDescriptor {
                 label: Some("3d wide rows"),
                 layout: &c.bgl_rows,
                 entries: &[
@@ -1424,7 +1465,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
         {
             let s0v = src0.create_view(&Default::default());
             let s1v = src1.create_view(&Default::default());
-            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            let bind = made_bind_group(device, &wgpu::BindGroupDescriptor {
                 label: Some("3d wide sky rows"),
                 layout: &c.bgl_skyrow,
                 entries: &[
@@ -1475,7 +1516,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
             let oc = oid[cur].create_view(&Default::default());
             let coc = cover[cur].create_view(&Default::default());
             let trc = trans[cur].create_view(&Default::default());
-            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            let bind = made_bind_group(device, &wgpu::BindGroupDescriptor {
                 label: Some("3d wide"),
                 layout: &c.bgl_extend,
                 entries: &[
@@ -1524,7 +1565,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
         let oiv = oid[cur].create_view(&Default::default());
         let cov = cover[cur].create_view(&Default::default());
         let trv = trans[cur].create_view(&Default::default());
-        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let bind = made_bind_group(device, &wgpu::BindGroupDescriptor {
             label: Some("3d outline"),
             layout: &c.bgl_outline,
             entries: &[
@@ -1563,7 +1604,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
         let dv = depth[cur].create_view(&Default::default());
         let cov = cover[cur].create_view(&Default::default());
         let trv = trans[cur].create_view(&Default::default());
-        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let bind = made_bind_group(device, &wgpu::BindGroupDescriptor {
             label: Some("3d shade"),
             layout: &c.bgl_shade,
             entries: &[
@@ -1602,7 +1643,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
         let iv = id[cur].create_view(&Default::default());
         let ov = outline_tex.create_view(&Default::default());
         let sv = shade_tex.create_view(&Default::default());
-        let fog_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let fog_bind = made_bind_group(device, &wgpu::BindGroupDescriptor {
             label: Some("3d fog"),
             layout: &c.bgl_fog,
             entries: &[
@@ -1638,13 +1679,13 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
     let (ow, oh) = (w / k, h / k);
     let res = (k > 1).then(|| {
         let res = attach(device, ow, oh, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC);
-        let kb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let kb = made_buffer_init(device, &wgpu::util::BufferInitDescriptor {
             label: Some("3d resolve k"),
             contents: &[k as u32, 0, 0, 0].iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>(),
             usage: wgpu::BufferUsages::UNIFORM,
         });
         let fiv = fin.create_view(&Default::default());
-        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let bind = made_bind_group(device, &wgpu::BindGroupDescriptor {
             label: Some("3d resolve"),
             layout: &c.bgl_resolve,
             entries: &[
@@ -1701,6 +1742,8 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
         let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0;
         eprintln!("gpu frame {w}x{h}: atlas {:.2}, build {:.2}, resources {:.2}, encode {:.2}, gpu {:.2}, readback done {:.2} ms", ms(t_atlas), ms(t_build), ms(t_res), ms(t_enc), ms(t_gpu), ms(t0.elapsed()));
         eprintln!("  serial passes: {n_blend} blend, {n_mask} mask (of {} polygons), {n_skipped} off-picture; {:.1}% of the picture copied per polygon on average", built.serial.len(), if n_blend + n_mask > 0 { px_copied as f64 / (built.serial.len() as f64 * (w * h) as f64) * 100.0 } else { 0.0 });
+        let m = take_made();
+        eprintln!("  made: {} textures ({:.1} MB), {} buffers ({:.1} MB), {} bind groups; {:.2} MB written by the queue", m[0], m[1] as f64 / 1e6, m[2], m[3] as f64 / 1e6, m[4], m[5] as f64 / 1e6);
     }
     let (mut oid_px, mut cover_px, mut trans_px, mut depth_px) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     if let Some([bo, bc, bt, bd]) = &aux {
@@ -1714,7 +1757,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
 
 /// A 2D texture of the picture's size for one of the passes' attachments.
 fn attach(device: &wgpu::Device, w: usize, h: usize, format: wgpu::TextureFormat, usage: wgpu::TextureUsages) -> wgpu::Texture {
-    device.create_texture(&wgpu::TextureDescriptor {
+    made_texture(device, &wgpu::TextureDescriptor {
         label: Some("3d attachment"),
         size: wgpu::Extent3d { width: w as u32, height: h as u32, depth_or_array_layers: 1 },
         mip_level_count: 1,
@@ -1730,7 +1773,7 @@ fn attach(device: &wgpu::Device, w: usize, h: usize, format: wgpu::TextureFormat
 /// read back by `readback_words`/`readback_bytes` after the submit.
 fn readback_buf(device: &wgpu::Device, enc: &mut wgpu::CommandEncoder, tex: &wgpu::Texture, w: u32, h: u32) -> wgpu::Buffer {
     let row = ((w * 4).div_ceil(256) * 256) as u64;
-    let buf = device.create_buffer(&wgpu::BufferDescriptor {
+    let buf = made_buffer(device, &wgpu::BufferDescriptor {
         label: Some("3d readback"),
         size: row * h as u64,
         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
