@@ -29,6 +29,25 @@
 - **Подозрение:** ближайшие изменения 2D/сборки экранов: правки 2D для широкого режима (`layout`, короткие полоски не выносятся в колонки) или путь `frame3d` в `gpu2d.rs`. Проверить откатом по коммитам не пробовал.
 - **Статус:** открыт, **требуется проверка** (дамп кадра и паритет софт/GPU, см. выше), вернёмся позже.
 
+### B-03. GPU на Exynos 2500 (Xclipse, Vulkan) не совпадает с софтом слово в слово
+
+- **Где:** Galaxy Z Flip7 (SM-F766B, Android 16, Exynos 2500, GPU Xclipse), Vulkan через wgpu; тесты рантайма с фичей `gpu`, собранные для `aarch64-linux-android` и запущенные в `adb shell` (`/data/local/tmp/sp`, дампы `build/gpu-parity/dumps/*.spjob`). Найдено 2026-10-30 при замере 9.6.2.
+- **Как повторить:**
+  ```sh
+  SDK=$HOME/Library/Android/sdk; export ANDROID_NDK_HOME=$(ls -d $SDK/ndk/27.* | tail -1)
+  cargo ndk -t arm64-v8a -P 26 test --release -p sunpetal-runtime --features gpu --lib --no-run   # бинарь в target/aarch64-linux-android/release/deps/sunpetal_runtime-*
+  adb push <бинарь> /data/local/tmp/sp/rt_tests; adb push build/gpu-parity/dumps/. /data/local/tmp/sp/dumps/
+  adb shell "cd /data/local/tmp/sp && SUNPETAL_JOB_DUMPS=/data/local/tmp/sp/dumps ./rt_tests"
+  adb shell "cd /data/local/tmp/sp && SUNPETAL_JOB_DUMPS=/data/local/tmp/sp/dumps ./rt_tests --ignored supersampling_on_dumps --nocapture"
+  ```
+- **Что видно:** на Mac (Metal) 61/61 и `supersampling_on_dumps` 32/32; на телефоне 44 из 61, 17 красных (3 из них `texpack::tests::*` — не баг GPU: на телефоне нет файлов-образцов `tests/data/tiny.spdata`). 14 красных GPU-тестов: `a_pack_picture_replaces_the_texture_over_the_same_coordinates`, `a_translucent_polygon_blends_over_what_is_there`, `a_vertex_at_the_near_plane_and_a_degenerate_w_match_the_software`, `equal_depth_keeps_the_first_polygon_in_the_job_order`, `pooled_attachments_do_not_leak_between_frames`, `texture_coordinates_wrap_repeat_and_flip_like_the_software`, `the_auxiliary_maps_follow_the_opaque_and_translucent_polygons`, `the_bilinear_filter_blends_by_alpha_and_matches_the_software`, `the_edge_marking_colours_a_polygon_border_by_its_id`, `the_outline_matches_the_software_on_jumps_silhouettes_and_cover`, `the_shading_matches_the_software_behind_an_occluder`, `the_widened_view_fills_the_sides_from_the_far_plane`, `the_widened_view_fills_the_sides_from_the_nearest_sky_row`, `translucent_polygons_at_equal_depth_follow_the_job_order_unless_eq_depth`.
+- **Размер расхождений:** синтетика — от 5 до 1621 пикселя (например, непрозрачный красный квадрат и полупрозрачный синий той же глубины: пиксели в шахматном порядке то синие, то красные: `0x007df01f` против `0x007c003f`); реальные кадры — 107 пикселей из 49 152 (`pooled_attachments_do_not_leak_between_frames`) и 347 пикселей (`supersampling_on_dumps`, первый красный дамп). То есть доля ≈ 0,2–0,7 %; как это выглядит на экране, не проверено.
+- **Подозрение (не проверено):** сравнение глубины в шейдере (`behind = depth >= old_depth`, допуск `eq_depth`) и барицентрики/интерполяция глубины на Xclipse считаются с другим округлением или слиянием умножение-сложение, чем на Metal, поэтому при равной глубине решение «спереди или сзади» случайно в каждом пикселе. Это не связано с тайлами: с `SUNPETAL_TILED=0` результат тот же (17 красных).
+- **Что проверить:** (1) показать расхождение на реальном кадре в окне телефона (дамп кадра F10 + сравнение с софтом на том же кадре); (2) в `edge()` уже стоит защита от слияния (`fma(a, b, 0.0)`), та же защита нужна в `depth_at`, `bary`, интерполяции текстурных координат и цвета; проверить, какие функции содержат произведение с последующим сложением без защиты; (3) прогнать тест на синтетике после каждой правки.
+- **Влияние:** для игры, вероятно, незаметно или едва заметно (шахматные пиксели на границе наложений); для паритета «слово в слово» критично. Не блокирует 9.6.2 (замер скорости), но влияет на 9.6.3 (какой рендерер по умолчанию на телефонах).
+- **Версия:** `1adf302`, рендерер 3D: видеокарта; `SUNPETAL_TILED` по умолчанию.
+- **Статус:** открыт, не разбирался.
+
 ## Закрытые
 
 Раньше исправленное записано в `artifacts/README.md` (таблица «Итог») и в `docs/STATUS.md`.
