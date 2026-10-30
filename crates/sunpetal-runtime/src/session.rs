@@ -286,7 +286,8 @@ impl Session {
         for _ in 0..n {
             debug::log_calls(4_000_000);
             let r = self.run(1);
-            found.extend(debug::take_calls().into_iter().filter(|c| c.args.iter().any(|a| debug::peek(*a, prefix.len()).as_deref() == Some(prefix))));
+            let wide: Vec<u8> = prefix.iter().flat_map(|b| [*b, 0]).collect();
+            found.extend(debug::take_calls().into_iter().filter(|c| c.args.iter().any(|a| debug::peek(*a, prefix.len()).as_deref() == Some(prefix) || debug::peek(*a, wide.len()).as_deref() == Some(&wide[..]))));
             debug::log_calls(0);
             r?;
         }

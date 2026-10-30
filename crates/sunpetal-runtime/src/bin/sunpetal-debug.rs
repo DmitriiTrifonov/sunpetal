@@ -270,6 +270,17 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             std::fs::write(path, text).map_err(|e| format!("{}: {}", path, e))?;
             done(json!({"functions": rows.len()}))
         }
+        "glyphs" => {
+            // the canvases the game draws glyphs into (`020338E0`, first argument), summed from the first call of this command
+            thread_local! { static SEEN: std::rc::Rc<std::cell::RefCell<std::collections::BTreeMap<u32, u64>>> = Default::default(); static ON: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+            if !ON.with(|o| o.replace(true)) {
+                let sink = SEEN.with(|s| s.clone());
+                debug::watch(9, 0x0203_38E0, move |c| *sink.borrow_mut().entry(c.r[0]).or_default() += 1);
+            }
+            s.run(number(w.first(), "FRAMES", Some(0))?)?;
+            let rows: Vec<Value> = SEEN.with(|m| m.borrow().iter().map(|(k, n)| json!({"canvas": format!("{:08X}", k), "glyphs": n})).collect());
+            done(json!({"canvases": rows}))
+        }
         "quit" => Ok(None),
         _ => Err(format!("{}: no such command", name)),
     }
