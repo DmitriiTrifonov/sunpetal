@@ -56,10 +56,11 @@ pub struct Video {
     pub window: [u32; 2],
 }
 
-/// The engine a fresh setting names: the graphics card on Android (faster in every measured setting
-/// on the phone, `docs/GPU-BACKEND.md` 9.6), the processor elsewhere until B-03 is settled.
+/// The engine a fresh setting names: the graphics card everywhere (faster in every measured setting
+/// on the phone and the Mac, parity with the software engine on both, `docs/GPU-BACKEND.md` 9.6);
+/// the software engine stays the reference and the fallback.
 pub fn default_renderer() -> &'static str {
-    if cfg!(target_os = "android") { "gpu" } else { "software" }
+    "gpu"
 }
 
 /// The 3D engine a setting or `--renderer` names (`software` or `gpu`, any case).
