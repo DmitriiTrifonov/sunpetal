@@ -1366,7 +1366,7 @@ pub fn dialogue_text() -> Option<(u32, String)> {
 }
 
 /// Frames a set line is awaited without its letters coming (`dialogue`).
-const COMING_FRAMES: u32 = 90;
+const COMING_FRAMES: u32 = 300;
 
 /// What `dialogue` tells: the window's text and whether the game has begun to draw it (its letters are in the window's canvas).
 #[derive(Clone, Debug, PartialEq)]
