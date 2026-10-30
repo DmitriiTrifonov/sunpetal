@@ -88,6 +88,8 @@ fn next_hold(hold: Option<Hold>, wants: bool, settled: bool) -> Option<Hold> {
 }
 
 /// Frames a button pressed by the app stays down, and the frames the menu may take to show.
+/// Frames Edo's screen may go unseen before its hint patch is dropped (B-05; about 0.5 s at 60 frames a second).
+const EDO_HOLD: u32 = 30;
 const TAP_FRAMES: u32 = 8;
 const HOLD_FRAMES: u32 = 1800;
 
@@ -150,6 +152,8 @@ struct App {
     swallow_b: std::cell::Cell<bool>,
     /// The upper screen is Edo's (`layout::edo_in`).
     edo_seen: bool,
+    /// Frames since Edo's screen was last seen: the flag goes off only after `EDO_HOLD` of them (B-05).
+    edo_off: u32,
     /// The title's "Press START" box (`layout::prompt_box`).
     prompt: Option<layout::Rect>,
     /// A page of paper over both screens is shown (`layout::paper_in`, settled), and how far it is scrolled.
@@ -697,7 +701,15 @@ impl ApplicationHandler for App {
                         self.coll_card.set(false);
                         self.coll_seen = coll;
                     }
-                    self.edo_seen = layout::edo_in(*scale, rgba) && !layout::edo_title_in_hint(*scale, rgba);
+                    // a pink flash of the screen's own art can take the sign off for a few frames (the hint blinked on the
+                    // option screen, B-05): it goes off only when it has been missing for `EDO_HOLD` frames
+                    if layout::edo_in(*scale, rgba) && !layout::edo_title_in_hint(*scale, rgba) {
+                        self.edo_seen = true;
+                        self.edo_off = 0;
+                    } else if self.edo_seen {
+                        self.edo_off += 1;
+                        self.edo_seen = self.edo_off < EDO_HOLD;
+                    }
                     self.prompt = layout::prompt_box(*scale, rgba);
                     let paper = layout::paper_in(*scale, rgba);
                     if paper && !self.paper {
@@ -998,6 +1010,7 @@ pub fn run(o: Options, el: EventLoop<()>) {
         keys_before: std::cell::Cell::new(0),
         swallow_b: std::cell::Cell::new(false),
         edo_seen: false,
+        edo_off: 0,
         paper: false,
         bar_ask: (None, 0),
         scroll: 0.0,
