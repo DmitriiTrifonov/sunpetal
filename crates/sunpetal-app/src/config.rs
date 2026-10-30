@@ -56,6 +56,12 @@ pub struct Video {
     pub window: [u32; 2],
 }
 
+/// The engine a fresh setting names: the graphics card on Android (faster in every measured setting
+/// on the phone, `docs/GPU-BACKEND.md` 9.6), the processor elsewhere until B-03 is settled.
+pub fn default_renderer() -> &'static str {
+    if cfg!(target_os = "android") { "gpu" } else { "software" }
+}
+
 /// The 3D engine a setting or `--renderer` names (`software` or `gpu`, any case).
 pub fn parse_renderer(name: &str) -> Option<nds::Renderer> {
     match name.to_ascii_lowercase().as_str() {
@@ -67,7 +73,7 @@ pub fn parse_renderer(name: &str) -> Option<nds::Renderer> {
 
 impl Default for Video {
     fn default() -> Video {
-        Video { res: 2, linear: true, layout: "stacked".into(), lower: false, panel: false, counter: true, auto: true, wide: true, bars_match: true, fit: "fit".into(), pixel_aspect: 1.0, logos_in_turn: true, puzzle: "inset".into(), fullscreen: false, background: "edge".into(), show_stats: false, texture_pack: String::new(), renderer: "software".into(), window: [512, 768] }
+        Video { res: 2, linear: true, layout: "stacked".into(), lower: false, panel: false, counter: true, auto: true, wide: true, bars_match: true, fit: "fit".into(), pixel_aspect: 1.0, logos_in_turn: true, puzzle: "inset".into(), fullscreen: false, background: "edge".into(), show_stats: false, texture_pack: String::new(), renderer: default_renderer().into(), window: [512, 768] }
     }
 }
 
@@ -248,7 +254,7 @@ impl Settings {
             self.video.fit = "fit".into();
         }
         if parse_renderer(&self.video.renderer).is_none() {
-            self.video.renderer = "software".into();
+            self.video.renderer = default_renderer().into();
         }
         if !matches!(self.interface.language.as_str(), "auto" | "en" | "ru") {
             self.interface.language = "auto".into();
@@ -380,9 +386,9 @@ mod tests {
     }
 
     #[test]
-    fn the_renderer_setting_defaults_to_software_and_parses() {
+    fn the_renderer_setting_defaults_per_platform_and_parses() {
         let s: Settings = toml::from_str("[video]\nres = 4\n").unwrap();
-        assert_eq!(s.video.renderer, "software");
+        assert_eq!(s.video.renderer, default_renderer());
         assert_eq!(parse_renderer("gpu"), Some(nds::Renderer::Gpu));
         assert_eq!(parse_renderer("software"), Some(nds::Renderer::Software));
         assert_eq!(parse_renderer("GPU"), Some(nds::Renderer::Gpu));
@@ -404,7 +410,7 @@ mod tests {
         let mut s: Settings = toml::from_str("[video]\nres = 99\n[audio]\nvolume = 7.0\n[input.keys]\nA = \"NoSuchKey\"\n").unwrap();
         s.sanitize();
         assert_eq!(s.video.res, 8);
-        assert_eq!(s.video.renderer, "software");
+        assert_eq!(s.video.renderer, default_renderer());
         assert_eq!(s.audio.volume, 1.0);
         assert_eq!(s.input.keys["A"], "KeyZ");
         assert_eq!(parse_key(&s.input.keys["START"]), Some(KeyCode::Enter));
