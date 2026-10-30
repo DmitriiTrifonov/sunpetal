@@ -938,7 +938,7 @@ pub fn run(o: Options, el: EventLoop<()>) {
     }
     if rom.as_os_str().is_empty() {
         cfg.data = cfg.texture_pack.clone();
-    } else if !settings.game.language.is_empty() {
+    } else if cfg.data.is_none() && !settings.game.language.is_empty() {
         eprintln!("the game language `{}` is set, but there is no data file to take it from (the texture setting or --texture-pack); the ROM's own text is used", settings.game.language);
     }
     let shared = Shared::new();
@@ -1198,27 +1198,29 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
     std::env::set_var("SUNPETAL_CONFIG", private.join("config"));
     eprintln!("sunpetal: files folder {}", dir.display());
     let el = EventLoop::builder().with_android_app(app).build().expect("an event loop");
-    // the game in the app's folder: `rom.nds`, any other ROM of the supported dump, or a data file
-    // that holds one (`sunpetal.data`, made on a computer by sunpetal-build)
+    // the game in the app's folder. A data file that holds the ROM is the whole game (the ROM in it
+    // is the one its pictures and translations were made for) and goes first; else `rom.nds`, or any
+    // other ROM of the supported dump, with a data file beside it if there is one
     let dirs = [dir.clone()];
-    let named = dir.join("rom.nds");
-    let rom = Some(named).filter(|r| r.is_file() && locate::check_rom(r).is_ok()).or_else(|| locate::find_rom(&dirs));
-    let (rom, pack) = match rom {
-        // a ROM and a data file together: the ROM runs, the data file brings its pictures and translations
-        Some(rom) => (rom, locate::find_data(&dirs).filter(|p| locate::check_data(p).is_ok())),
-        None => match locate::find_data(&dirs).filter(|p| sunpetal_data::dsrom::has_rom(p)) {
-            Some(data) => match locate::check_data(&data) {
-                Ok(()) => (PathBuf::new(), Some(data)),
-                Err(e) => {
-                    eprintln!("{}", e);
-                    return;
-                }
-            },
+    let data = locate::find_data(&dirs);
+    let whole = data.clone().filter(|p| sunpetal_data::dsrom::has_rom(p));
+    let (rom, pack) = if let Some(data) = whole {
+        match locate::check_data(&data) {
+            Ok(()) => (PathBuf::new(), Some(data)),
+            Err(e) => {
+                eprintln!("{}", e);
+                return;
+            }
+        }
+    } else {
+        let named = dir.join("rom.nds");
+        match Some(named).filter(|r| r.is_file() && locate::check_rom(r).is_ok()).or_else(|| locate::find_rom(&dirs)) {
+            Some(rom) => (rom, data.filter(|p| locate::check_data(p).is_ok())),
             None => {
                 eprintln!("{}", locate::no_game(&dirs));
                 return;
             }
-        },
+        }
     };
     // once, the first time a data file starts the game: its translation in the system's language
     // is the game's language (as the desktop's file dialog does); the menu changes it after
