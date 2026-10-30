@@ -23,6 +23,7 @@ mod locate;
 mod post;
 mod touchpad;
 mod ui;
+mod uitext;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -1082,6 +1083,10 @@ pub fn desktop_main() {
             // the speed figures and the skip's marks on the terminal each two seconds (as SUNPETAL_STATS=1)
             "--stats" => std::env::set_var("SUNPETAL_STATS", "1"),
             "--menu" => o.menu = true,
+            "--dump-ui-strings" => {
+                print!("{}", uitext::dump());
+                std::process::exit(0);
+            }
             "--dump-textures" => o.dump = args.next().map(PathBuf::from),
             "--texture-pack" => o.pack = args.next().map(PathBuf::from),
             "--lang" => o.lang = args.next(),

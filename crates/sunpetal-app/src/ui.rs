@@ -41,21 +41,38 @@ impl Menu {
     /// Draws the menu; changes go straight into `s`.
     pub fn show(&mut self, ctx: &egui::Context, s: &mut Settings, layouts: &[&str], internal: (u32, u32)) -> Option<Action> {
         let lang = Lang::resolve(&s.interface.language);
-        let tx = move |en: &'static str, ru: &'static str| if lang == Lang::Ru { ru } else { en };
+        // a table in `ui/<code>.toml` (uitext.rs) translates text by text over the built-in two
+        let table = crate::uitext::table(&crate::uitext::code_of(&s.interface.language));
+        let tl = {
+            let table = table.clone();
+            move |en: &str| -> String { table.as_ref().and_then(|t| t.get(en)).cloned().unwrap_or_else(|| en.to_string()) }
+        };
+        let tx = {
+            let table = table.clone();
+            move |en: &'static str, ru: &'static str| -> String {
+                table.as_ref().and_then(|t| t.get(en)).cloned().unwrap_or_else(|| if lang == Lang::Ru { ru } else { en }.to_string())
+            }
+        };
+        let custom = crate::uitext::codes();
         let mut action = None;
         let video_res = s.video.res as u32;
         let mut open = self.open;
         egui::Window::new(tx("Sunpetal: settings", "Sunpetal: настройки")).open(&mut open).resizable(false).collapsible(false).vscroll(true).max_height((ctx.content_rect().height() - 48.0).max(120.0)).show(ctx, |ui| {
             egui::ComboBox::from_label("Language / Язык")
                 .selected_text(match s.interface.language.as_str() {
-                    "en" => "English",
-                    "ru" => "Русский",
-                    _ => tx("system language", "язык системы"),
+                    "en" => "English".to_string(),
+                    "ru" => "Русский".to_string(),
+                    "auto" => tx("system language", "язык системы"),
+                    other => other.to_string(),
                 })
                 .show_ui(ui, |ui| {
                     ui.selectable_value(&mut s.interface.language, "auto".to_string(), tx("system language", "язык системы"));
                     ui.selectable_value(&mut s.interface.language, "en".to_string(), "English");
                     ui.selectable_value(&mut s.interface.language, "ru".to_string(), "Русский");
+                    // the tables in ui/ (pl.toml...): the code is the name
+                    for c in custom.iter().filter(|c| !matches!(c.as_str(), "en" | "ru")) {
+                        ui.selectable_value(&mut s.interface.language, c.clone(), c.as_str());
+                    }
                 });
             egui::CollapsingHeader::new(tx("Video", "Графика")).default_open(true).show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -70,14 +87,14 @@ impl Menu {
                     }
                 });
                 ui.checkbox(&mut s.video.linear, tx("Smooth when stretched (linear filter)", "Сглаживание при растяжении (линейный фильтр)"));
-                egui::ComboBox::from_label(tx("Screen layout", "Раскладка экранов")).selected_text(layout_label(&s.video.layout, lang)).show_ui(ui, |ui| {
+                egui::ComboBox::from_label(tx("Screen layout", "Раскладка экранов")).selected_text(tl(layout_label(&s.video.layout, lang))).show_ui(ui, |ui| {
                     for l in layouts {
-                        ui.selectable_value(&mut s.video.layout, l.to_string(), layout_label(l, lang));
+                        ui.selectable_value(&mut s.video.layout, l.to_string(), tl(layout_label(l, lang)));
                     }
                 });
-                egui::ComboBox::from_label(tx("Picture in the window", "Картинка в окне")).selected_text(fit_label(&s.video.fit, lang)).show_ui(ui, |ui| {
+                egui::ComboBox::from_label(tx("Picture in the window", "Картинка в окне")).selected_text(tl(fit_label(&s.video.fit, lang))).show_ui(ui, |ui| {
                     for m in ["fit", "integer", "fill", "stretch"] {
-                        ui.selectable_value(&mut s.video.fit, m.to_string(), fit_label(m, lang));
+                        ui.selectable_value(&mut s.video.fit, m.to_string(), tl(fit_label(m, lang)));
                     }
                 });
                 ui.horizontal(|ui| {
@@ -138,7 +155,7 @@ impl Menu {
                     ui.colored_label(egui::Color32::LIGHT_RED, tx("not found", "не найдено"));
                 }
                 egui::ComboBox::from_label(tx("Game language (needs the data file)", "Язык игры (нужен файл данных)")).selected_text(match s.game.language.as_str() {
-                    "ru" => "Русский",
+                    "ru" => "Русский".to_string(),
                     _ => tx("the ROM's own", "как в ROM"),
                 }).show_ui(ui, |ui| {
                     ui.selectable_value(&mut s.game.language, String::new(), tx("the ROM's own", "как в ROM"));
@@ -167,7 +184,7 @@ impl Menu {
                 };
                 egui::ComboBox::from_label(tx("Preset (F6)", "Пресет (F6)")).selected_text(label(&s.effects.preset)).show_ui(ui, |ui| {
                     for p in crate::effects::PRESETS {
-                        if ui.selectable_label(s.effects.preset == p, label(p)).clicked() {
+                        if ui.selectable_label(s.effects.preset == p, tl(label(p))).clicked() {
                             s.effects = crate::effects::Effects::preset(p);
                         }
                     }
@@ -194,7 +211,7 @@ impl Menu {
                     }
                 });
                 egui::ComboBox::from_label(tx("3D edge anti-aliasing", "Сглаживание краёв 3D"))
-                    .selected_text(match e.msaa { 2 => "2x2", 4 => "4x4", _ => tx("off", "выкл") })
+                    .selected_text(match e.msaa { 2 => "2x2".to_string(), 4 => "4x4".to_string(), _ => tx("off", "выкл") })
                     .show_ui(ui, |ui| {
                         ui.selectable_value(&mut e.msaa, 0, tx("off", "выкл"));
                         ui.selectable_value(&mut e.msaa, 2, "2x2");

@@ -202,7 +202,9 @@ impl Lang {
         match setting {
             "ru" => Lang::Ru,
             "en" => Lang::En,
-            _ => sys_locale::get_locale().map_or(Lang::En, |l| Lang::from_locale(&l)),
+            "auto" => sys_locale::get_locale().map_or(Lang::En, |l| Lang::from_locale(&l)),
+            // a language that has a table in ui/ (uitext.rs): English underneath
+            _ => Lang::En,
         }
     }
 }
