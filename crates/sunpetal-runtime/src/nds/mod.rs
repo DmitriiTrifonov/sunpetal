@@ -470,6 +470,12 @@ pub fn hide_dialogue_raster(on: bool) {
     nds(|n| n.gpu.hide_dialogue = on);
 }
 
+/// Where the game's raster text sits in the band as the last drawn frame had it (x0, y0, x1, y1 in DS pixels), the
+/// portrait on the left or on the right: the app puts its own text there.
+pub fn dialogue_raster_box(portrait_left: bool) -> Option<[u32; 4]> {
+    nds(|n| n.gpu.text_box[!portrait_left as usize])
+}
+
 pub use input::KEY_NAMES;
 
 /// Live input for the next frame: the buttons held (bit i of `KEY_NAMES`) and the stylus on the
@@ -1370,11 +1376,14 @@ pub fn dialogue_text() -> Option<(u32, String)> {
 pub struct Dialogue {
     pub text: String,
     pub drawn: bool,
+    /// A line was set and its letters are on the way or on the screen: the app can hide the game's raster text already.
+    pub coming: bool,
 }
 
 thread_local! {
     /// The line the window showed at the last `dialogue` call (its pointer), and the canvas's sum then: the line is
     /// drawn once the canvas has changed (and has ink).
+    static COMING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static DIALOGUE_SEEN: std::cell::Cell<(u32, u64, bool)> = const { std::cell::Cell::new((0, 0, false)) };
 }
 
@@ -1409,20 +1418,34 @@ fn dialogue_canvas() -> Option<(u64, bool)> {
 pub fn dialogue() -> Option<Dialogue> {
     let Some((ptr, text)) = dialogue_text() else {
         DIALOGUE_SEEN.with(|c| c.set((0, 0, false)));
+        COMING.with(|a| a.set(false));
         return None;
     };
-    // the raster text the 2D engine drew in the band, when frames are drawn; else the text object's canvas
-    let (sum, ink) = match nds(|n| n.gpu.on.then_some(n.gpu.band)) {
-        Some((h, n)) => (h, n > 0),
+    // the raster text the 2D engine drew in the band, when frames are drawn (its dark letters are the ink); else the
+    // text object's canvas
+    let (sum, ink) = match nds(|n| n.gpu.on.then(|| (n.gpu.band.0, n.gpu.text_box.iter().any(|b| b.is_some())))) {
+        Some(r) => r,
         None => dialogue_canvas().unwrap_or((0, false)),
     };
+    // a new line is a new pointer or new letters at the same pointer (the intro's lines share one)
+    let key = text.bytes().fold(ptr as u64, |h, b| (h ^ b as u64).wrapping_mul(0x100_0000_01b3)) as u32;
     let drawn = DIALOGUE_SEEN.with(|c| {
         let (seen, base, drawn) = c.get();
-        let now = if seen != ptr { (ptr, sum, false) } else if !drawn && ink && sum != base { (seen, base, true) } else { (seen, base, drawn) };
+        COMING.with(|a| a.set(if !ink { false } else { a.get() || seen != key }));
+        let now = if seen != key {
+            (key, sum, false)
+        } else if !ink {
+            // the window is gone (or not yet written): nothing is drawn, whatever the pointer still says
+            (seen, sum, false)
+        } else if !drawn && sum != base {
+            (seen, base, true)
+        } else {
+            (seen, base, drawn)
+        };
         c.set(now);
         now.2
     });
-    Some(Dialogue { text, drawn })
+    Some(Dialogue { text, drawn, coming: COMING.with(|a| a.get()) })
 }
 
 /// Whether the game's script is at a `WAIT`, a command that waits for the player's A (a line of speech is

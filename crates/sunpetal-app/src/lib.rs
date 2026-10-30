@@ -80,16 +80,21 @@ enum Hold {
 /// The dialogue line over the upper screen's `r` (widened by `wide` DS pixels each side): the lines the game broke, in the
 /// window's resolution, in the text area beside the portrait, centred on the band (DS pixels: x 58..243 with the portrait on
 /// the left, 10..195 on the right; the band is y 144..191).
-fn paint_dialogue(ctx: &egui::Context, r: layout::Rect, wide: f32, left: bool, text: &str) {
+fn paint_dialogue(ctx: &egui::Context, r: layout::Rect, wide: f32, left: bool, text: &str, raster: Option<[u32; 4]>) {
     const PITCH: f32 = 14.0;
     const SIZE: f32 = 13.0;
     // the layout's rectangles are in the window's pixels, egui's coordinates in points
     let ppp = ctx.pixels_per_point();
     let r = layout::Rect { x: r.x / ppp, y: r.y / ppp, w: r.w / ppp, h: r.h / ppp };
     let (kx, ky) = (r.w / (256.0 + 2.0 * wide), r.h / 192.0);
-    let x0 = r.x + (wide + if left { 58.0 } else { 10.0 }) * kx;
+    // where the game's own letters were (DS pixels), else the usual text area beside the portrait
+    let (ds_x, ds_cy) = match raster {
+        Some(b) => (b[0] as f32, (b[1] + b[3] + 1) as f32 / 2.0),
+        None => (if left { 58.0 } else { 10.0 }, 168.0),
+    };
+    let x0 = r.x + (wide + ds_x) * kx;
     let lines: Vec<&str> = text.split('\n').map(|l| l.trim_end_matches('\r')).collect();
-    let top = 168.0 - lines.len() as f32 * PITCH / 2.0;
+    let top = ds_cy - lines.len() as f32 * PITCH / 2.0;
     let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("dialogue")));
     for (i, l) in lines.iter().enumerate() {
         let at = egui::pos2(x0, r.y + (top + i as f32 * PITCH) * ky);
@@ -826,7 +831,7 @@ impl ApplicationHandler for App {
                                     p.rect_filled(ctx.content_rect(), 0.0, egui::Color32::from_black_alpha((fade * 255.0) as u8));
                                 }
                                 if let (Some(text), Some(r)) = (&vline, vrect) {
-                                    paint_dialogue(ctx, r, vwide, *portrait_left, text);
+                                    paint_dialogue(ctx, r, vwide, *portrait_left, &text.0, text.1);
                                 }
                                 if corner_on {
                                     let info = match stopped_msg {

@@ -41,11 +41,14 @@ pub(super) struct Gpu2d {
     /// The game's raster text in the band as the last frame drew it (BG3 of the upper screen, lines 144..191, also
     /// when it is hidden): a hash of its pixels, and how many are opaque.
     pub(super) band: (u64, u32),
+    /// The box of the dark pixels of that text (x0, y0, x1, y1, inclusive), without the portrait's side: [0] the
+    /// left 50 columns left out (the portrait is on the left), [1] the right 50 (it is on the right).
+    pub(super) text_box: [Option<[u32; 4]>; 2],
 }
 
 impl Gpu2d {
     pub(super) fn new() -> Gpu2d {
-        Gpu2d { px: vec![0; 2 * 192 * 256 * 2], refs: [[[0; 2]; 2]; 2], on: true, mosaic: vec![[0; 256]; 8], hide_dialogue: false, band: (0, 0) }
+        Gpu2d { px: vec![0; 2 * 192 * 256 * 2], refs: [[[0; 2]; 2]; 2], on: true, mosaic: vec![[0; 256]; 8], hide_dialogue: false, band: (0, 0), text_box: [None; 2] }
     }
 
     fn at(e: usize, y: usize) -> usize {
@@ -707,11 +710,22 @@ impl Nds {
                 if e == 0 && bg == 3 && y >= 144 {
                     if y == 144 {
                         self.gpu.band = (0xcbf2_9ce4_8422_2325, 0);
+                        self.gpu.text_box = [None; 2];
                     }
                     for x in 0..256 {
                         if buf[x] & PX_OPAQUE != 0 {
                             self.gpu.band.0 = (self.gpu.band.0 ^ (buf[x] as u64 | (x as u64) << 32 | (y as u64) << 48)).wrapping_mul(0x100_0000_01b3);
                             self.gpu.band.1 += 1;
+                            // the game's text is near black; the panel and the portrait are not (the portrait's side is left out)
+                            if buf[x] & 63 < 16 && buf[x] >> 6 & 63 < 16 && buf[x] >> 12 & 63 < 16 {
+                                for (k, skip) in [(0usize, x < 50), (1, x >= 206)] {
+                                    if !skip {
+                                        let (x, y) = (x as u32, y as u32);
+                                        let b = self.gpu.text_box[k].get_or_insert([x, y, x, y]);
+                                        *b = [b[0].min(x), b[1].min(y), b[2].max(x), b[3].max(y)];
+                                    }
+                                }
+                            }
                         }
                     }
                     if self.gpu.hide_dialogue {
