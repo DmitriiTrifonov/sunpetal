@@ -27,8 +27,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use wgpu::util::DeviceExt;
 
 /// What a frame makes and uploads, counted under `SUNPETAL_GPU_TIMING` (этап 9.0.2):
-/// textures, their bytes, buffers, their bytes, bind groups, bytes written by the queue, attachments taken from the pool.
-static MADE: [std::sync::atomic::AtomicU64; 7] = [const { std::sync::atomic::AtomicU64::new(0) }; 7];
+/// textures, their bytes, buffers, their bytes, bind groups, bytes written by the queue, attachments taken from the pool, atlases kept from the last frame.
+static MADE: [std::sync::atomic::AtomicU64; 8] = [const { std::sync::atomic::AtomicU64::new(0) }; 8];
 
 fn made(i: usize, n: u64) {
     MADE[i].fetch_add(n, std::sync::atomic::Ordering::Relaxed);
@@ -60,7 +60,7 @@ fn made_bind_group(device: &wgpu::Device, d: &wgpu::BindGroupDescriptor) -> wgpu
 }
 
 /// The counters, read and zeroed.
-fn take_made() -> [u64; 7] {
+fn take_made() -> [u64; 8] {
     std::array::from_fn(|i| MADE[i].swap(0, std::sync::atomic::Ordering::Relaxed))
 }
 
@@ -95,6 +95,17 @@ struct Ctx {
     pool: Mutex<Vec<(PoolKey, wgpu::Texture)>>,
     /// The small per-frame buffers (uniforms, the full-screen triangle, the resolve factor) the same way (этап 9.1.4).
     buf_pool: Mutex<Vec<(BufKey, wgpu::Buffer)>>,
+    /// The last frame's texture atlas (этап 9.1.6).
+    atlas_cache: Mutex<Option<Arc<AtlasEntry>>>,
+}
+
+/// The atlas of a frame's textures with where each picture sits in it; `_pics` keep the pictures alive, so
+/// that the addresses in `key` are never another picture's.
+struct AtlasEntry {
+    key: Vec<(u32, u32, usize, u32, u32, u32)>,
+    tex: wgpu::Texture,
+    regions: HashMap<(u32, u32), TexInfo>,
+    _pics: Vec<Arc<Image>>,
 }
 
 static CTX: OnceLock<Option<Ctx>> = OnceLock::new();
@@ -579,7 +590,7 @@ fn make_ctx() -> Result<Ctx, String> {
         multiview_mask: None,
         cache: None,
     });
-    Ok(Ctx { device, queue, pipeline, bgl, rear_pipeline, bgl_rear, fog_pipeline, bgl_fog, outline_pipeline, bgl_outline, shade_pipeline, bgl_shade, rows_pipeline, bgl_rows, skyrow_pipeline, bgl_skyrow, extend_pipeline, bgl_extend, blend_pipeline, bgl_blend, mask_pipeline, bgl_mask, resolve_pipeline, bgl_resolve, pool: Mutex::new(Vec::new()), buf_pool: Mutex::new(Vec::new()) })
+    Ok(Ctx { device, queue, pipeline, bgl, rear_pipeline, bgl_rear, fog_pipeline, bgl_fog, outline_pipeline, bgl_outline, shade_pipeline, bgl_shade, rows_pipeline, bgl_rows, skyrow_pipeline, bgl_skyrow, extend_pipeline, bgl_extend, blend_pipeline, bgl_blend, mask_pipeline, bgl_mask, resolve_pipeline, bgl_resolve, pool: Mutex::new(Vec::new()), buf_pool: Mutex::new(Vec::new()), atlas_cache: Mutex::new(None) })
 }
 
 /// Where a texture's picture sits in the frame's atlas, and how its coordinates map onto it.
@@ -923,59 +934,76 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
     }
     // a shelf: one row at a time, the tallest pictures first
     pics.sort_by(|a, b| b.1.h.cmp(&a.1.h).then(b.1.w.cmp(&a.1.w)));
-    let atlas_w = pics.iter().map(|p| p.1.w as u32).max().unwrap_or(1).max(1);
-    let mut regions: HashMap<(u32, u32), TexInfo> = HashMap::new();
-    let (mut x, mut y, mut row_h) = (0u32, 0u32, 0u32);
-    for ((tex, pal), img, ow, oh, scaled) in &pics {
-        let (pw, ph) = (img.w as u32, img.h as u32);
-        if x + pw > atlas_w {
-            y += row_h;
-            x = 0;
-            row_h = 0;
-        }
-        let flags = *scaled
-            | ((tex & 0x10000 != 0) as u32) * F_REPEAT_S
-            | ((tex & 0x20000 != 0) as u32) * F_REPEAT_T
-            | ((tex & 0x40000 != 0) as u32) * F_FLIP_S
-            | ((tex & 0x80000 != 0) as u32) * F_FLIP_T;
-        regions.insert((*tex, *pal), TexInfo { ux: x, uy: y, w: pw, h: ph, ow: *ow, oh: *oh, flags });
-        x += pw;
-        row_h = row_h.max(ph);
-    }
-    let atlas_h = (y + row_h).max(1);
     take_made(); // this frame's counts only
     let device = &c.device;
-    let max_dim = device.limits().max_texture_dimension_2d;
-    if atlas_w > max_dim || atlas_h > max_dim {
-        return Err(format!("the frame's textures make a {atlas_w}x{atlas_h} atlas, over the device's {max_dim}"));
-    }
-    let atlas = made_texture(device, &wgpu::TextureDescriptor {
-        label: Some("3d texture atlas"),
-        size: wgpu::Extent3d { width: atlas_w, height: atlas_h, depth_or_array_layers: 1 },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Uint,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
-    for ((tex, pal), img, _, _, _) in &pics {
-        let r = regions[&(*tex, *pal)];
-        made(5, img.rgba.len() as u64);
-        c.queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &atlas,
-                mip_level: 0,
-                origin: wgpu::Origin3d { x: r.ux, y: r.uy, z: 0 },
-                aspect: wgpu::TextureAspect::All,
-            },
-            &img.rgba,
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(r.w * 4), rows_per_image: None },
-            wgpu::Extent3d { width: r.w, height: r.h, depth_or_array_layers: 1 },
-        );
-    }
+    // the same pictures in the same order make the same atlas as the last frame's: it is kept (этап 9.1.6)
+    let atlas_key: Vec<(u32, u32, usize, u32, u32, u32)> = pics.iter().map(|((tex, pal), img, ow, oh, scaled)| (*tex, *pal, Arc::as_ptr(img) as usize, ow.to_bits(), oh.to_bits(), *scaled)).collect();
+    let cached = c.atlas_cache.lock().unwrap().as_ref().filter(|e| e.key == atlas_key).cloned();
+    let atlas: Arc<AtlasEntry> = match cached {
+        Some(e) => {
+            made(7, 1);
+            e
+        }
+        None => {
+        let atlas_w = pics.iter().map(|p| p.1.w as u32).max().unwrap_or(1).max(1);
+        let mut regions: HashMap<(u32, u32), TexInfo> = HashMap::new();
+        let (mut x, mut y, mut row_h) = (0u32, 0u32, 0u32);
+        for ((tex, pal), img, ow, oh, scaled) in &pics {
+            let (pw, ph) = (img.w as u32, img.h as u32);
+            if x + pw > atlas_w {
+                y += row_h;
+                x = 0;
+                row_h = 0;
+            }
+            let flags = *scaled
+                | ((tex & 0x10000 != 0) as u32) * F_REPEAT_S
+                | ((tex & 0x20000 != 0) as u32) * F_REPEAT_T
+                | ((tex & 0x40000 != 0) as u32) * F_FLIP_S
+                | ((tex & 0x80000 != 0) as u32) * F_FLIP_T;
+            regions.insert((*tex, *pal), TexInfo { ux: x, uy: y, w: pw, h: ph, ow: *ow, oh: *oh, flags });
+            x += pw;
+            row_h = row_h.max(ph);
+        }
+        let atlas_h = (y + row_h).max(1);
+
+        let max_dim = device.limits().max_texture_dimension_2d;
+        if atlas_w > max_dim || atlas_h > max_dim {
+            return Err(format!("the frame's textures make a {atlas_w}x{atlas_h} atlas, over the device's {max_dim}"));
+        }
+        let atlas = made_texture(device, &wgpu::TextureDescriptor {
+            label: Some("3d texture atlas"),
+            size: wgpu::Extent3d { width: atlas_w, height: atlas_h, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Uint,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        for ((tex, pal), img, _, _, _) in &pics {
+            let r = regions[&(*tex, *pal)];
+            made(5, img.rgba.len() as u64);
+            c.queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &atlas,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d { x: r.ux, y: r.uy, z: 0 },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &img.rgba,
+                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(r.w * 4), rows_per_image: None },
+                wgpu::Extent3d { width: r.w, height: r.h, depth_or_array_layers: 1 },
+            );
+        }
+
+            let e = Arc::new(AtlasEntry { key: atlas_key, tex: atlas, regions, _pics: pics.iter().map(|p| p.1.clone()).collect() });
+            *c.atlas_cache.lock().unwrap() = Some(e.clone());
+            e
+        }
+    };
+    let regions = &atlas.regions;
     let t_atlas = t0.elapsed();
-    let built = build(job, s, &regions);
+    let built = build(job, s, regions);
     let t_build = t0.elapsed();
     let rear = rear_data(job);
     // the uniforms: sizes, the clear word, the modes, the scale, the rear plane's origin, the fog,
@@ -1091,7 +1119,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
             ],
         })
     });
-    let atlas_view = atlas.create_view(&Default::default());
+    let atlas_view = atlas.tex.create_view(&Default::default());
     // the clear plane and the opaque polygons, one pass with the hardware depth test
     {
         let wv = word[0].create_view(&Default::default());
@@ -1735,7 +1763,7 @@ fn render_all(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Rendered,
         eprintln!("gpu frame {w}x{h}: atlas {:.2}, build {:.2}, resources {:.2}, encode {:.2}, gpu {:.2}, readback done {:.2} ms", ms(t_atlas), ms(t_build), ms(t_res), ms(t_enc), ms(t_gpu), ms(t0.elapsed()));
         eprintln!("  serial passes: {n_blend} blend, {n_mask} mask (of {} polygons), {n_skipped} off-picture; {:.1}% of the picture copied per polygon on average", built.serial.len(), if n_blend + n_mask > 0 { px_copied as f64 / (built.serial.len() as f64 * (w * h) as f64) * 100.0 } else { 0.0 });
         let m = take_made();
-        eprintln!("  made: {} textures ({:.1} MB; {} from the pool), {} buffers ({:.1} MB), {} bind groups; {:.2} MB written by the queue", m[0], m[1] as f64 / 1e6, m[6], m[2], m[3] as f64 / 1e6, m[4], m[5] as f64 / 1e6);
+        eprintln!("  made: {} textures ({:.1} MB; {} from the pool), {} buffers ({:.1} MB), {} bind groups; {:.2} MB written by the queue; atlas {}", m[0], m[1] as f64 / 1e6, m[6], m[2], m[3] as f64 / 1e6, m[4], m[5] as f64 / 1e6, if m[7] > 0 { "kept" } else { "made" });
     }
     let (mut oid_px, mut cover_px, mut trans_px, mut depth_px) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     if let Some([bo, bc, bt, bd]) = &aux {
