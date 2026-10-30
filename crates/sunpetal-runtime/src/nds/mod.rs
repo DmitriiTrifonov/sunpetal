@@ -1095,12 +1095,7 @@ pub fn set_renderer(r: Renderer) {
 /// Both screens as RGBA at the current scale, the upper first: 2 x (256 x n) x (192 x n) x 4 bytes.
 /// Returns the scale too.
 pub fn screens_rgba() -> (usize, Vec<u8>) {
-    let (scale, rgb) = nds(|n| (n.scale, n.screens_rgb(n.scale)));
-    let mut out = Vec::with_capacity(rgb.len() / 3 * 4);
-    for p in rgb.chunks_exact(3) {
-        out.extend_from_slice(&[p[0], p[1], p[2], 255]);
-    }
-    (scale, out)
+    nds(|n| (n.scale, n.screens_rgba(n.scale)))
 }
 
 /// The upper screen widened (`set_wide`) as RGBA: `(scale, each side, picture)`, (256 + 2 * each

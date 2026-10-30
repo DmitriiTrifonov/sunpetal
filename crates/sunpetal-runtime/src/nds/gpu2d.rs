@@ -777,9 +777,19 @@ impl Nds {
     /// Both screens as RGB at `scale` (256 x scale by 384 x scale), the upper first: the 2D
     /// layers repeated per pixel, the 3D picture at its own scale (the nearest pixel).
     pub(crate) fn screens_rgb(&self, scale: usize) -> Vec<u8> {
+        self.screens_pixels::<3>(scale)
+    }
+
+    /// As `screens_rgb`, four bytes a pixel, opaque.
+    pub(crate) fn screens_rgba(&self, scale: usize) -> Vec<u8> {
+        self.screens_pixels::<4>(scale)
+    }
+
+    /// The screens with `CH` bytes a pixel: red, green, blue and, for 4, an alpha of 255.
+    fn screens_pixels<const CH: usize>(&self, scale: usize) -> Vec<u8> {
         let s = scale.max(1);
         let (w, h3) = (256 * s, 192 * s);
-        let mut rgb = vec![0u8; w * 2 * h3 * 3];
+        let mut rgb = vec![255u8; w * 2 * h3 * CH];
         let a_top = self.gpu2d_top_is_a();
         let f3 = self.frame3d_scale.max(1);
         // the 3D picture may be wider than the screen: the middle of it is the screen
@@ -790,9 +800,9 @@ impl Nds {
         // rows of the picture, split across threads
         let rows_per = (2 * h3).div_ceil(threads);
         std::thread::scope(|sc| {
-            for (k, chunk) in rgb.chunks_mut(rows_per * w * 3).enumerate() {
+            for (k, chunk) in rgb.chunks_mut(rows_per * w * CH).enumerate() {
                 sc.spawn(move || {
-                    for (r, row) in chunk.chunks_mut(w * 3).enumerate() {
+                    for (r, row) in chunk.chunks_mut(w * CH).enumerate() {
                         let ry = k * rows_per + r;
                         let (screen, y) = (ry / h3, ry % h3);
                         let e = if (screen == 0) == a_top { 0 } else { 1 };
@@ -801,9 +811,9 @@ impl Nds {
                             let i = Gpu2d::at(e, y2) + 2 * (x / s);
                             let p3 = if e == 0 { self.frame3d[y3 * w3 + c3 + x * f3 / s] } else { 0 };
                             let c = compose(&self.gpu.px[i..i + 2], p3);
-                            row[3 * x] = (c >> 16) as u8;
-                            row[3 * x + 1] = (c >> 8) as u8;
-                            row[3 * x + 2] = c as u8;
+                            row[CH * x] = (c >> 16) as u8;
+                            row[CH * x + 1] = (c >> 8) as u8;
+                            row[CH * x + 2] = c as u8;
                         }
                     }
                 });
