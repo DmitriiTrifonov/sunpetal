@@ -48,6 +48,7 @@ pub fn check_data(path: &Path) -> Result<(), String> {
 }
 
 /// What the player picked in the file dialog.
+#[cfg_attr(any(target_os = "android", target_os = "ios"), allow(dead_code))]
 #[derive(Debug, PartialEq)]
 pub enum Picked {
     /// A ROM of the supported dump: goes to `[game] rom`.
@@ -57,6 +58,7 @@ pub enum Picked {
 }
 
 /// Tells what a picked file is, or why it is no game: the message for the player.
+#[cfg_attr(any(target_os = "android", target_os = "ios"), allow(dead_code))]
 pub fn classify(path: &Path) -> Result<Picked, String> {
     if !path.is_file() {
         return Err(format!("{}: not a file", path.display()));
@@ -72,6 +74,7 @@ pub fn classify(path: &Path) -> Result<Picked, String> {
 
 /// The language of a translation in the data file that is the system's (`ru` for `ru_RU.UTF-8`
 /// or `ru-RU`); none if the file has none such or cannot be read.
+#[cfg_attr(any(target_os = "android", target_os = "ios"), allow(dead_code))]
 pub fn language_for(path: &Path, locale: &str) -> Option<String> {
     let want = locale.split(['-', '_', '.']).next()?.to_ascii_lowercase();
     let c = sunpetal_data::container::Container::read_only(path, |t| t == b"TRAN").ok()?;

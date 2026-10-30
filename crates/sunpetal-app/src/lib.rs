@@ -1196,14 +1196,30 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
     let private = app.internal_data_path().unwrap_or_else(|| PathBuf::from("/data/local/tmp"));
     let dir = app.external_data_path().unwrap_or_else(|| private.clone());
     std::env::set_var("SUNPETAL_CONFIG", private.join("config"));
-    let rom = dir.join("rom.nds");
     eprintln!("sunpetal: files folder {}", dir.display());
     let el = EventLoop::builder().with_android_app(app).build().expect("an event loop");
-    if !rom.is_file() {
-        eprintln!("{}: no ROM there", rom.display());
-        return;
-    }
-    run(Options { rom, out: Some(dir), save: None, mute: false, res: Some(1), menu: false, dump: None, pack: None, lang: None, wide: None, renderer: None }, el);
+    // the game in the app's folder: `rom.nds`, any other ROM of the supported dump, or a data file
+    // that holds one (`sunpetal.data`, made on a computer by sunpetal-build)
+    let dirs = [dir.clone()];
+    let named = dir.join("rom.nds");
+    let rom = Some(named).filter(|r| r.is_file() && locate::check_rom(r).is_ok()).or_else(|| locate::find_rom(&dirs));
+    let (rom, pack) = match rom {
+        Some(rom) => (rom, None),
+        None => match locate::find_data(&dirs).filter(|p| sunpetal_data::dsrom::has_rom(p)) {
+            Some(data) => match locate::check_data(&data) {
+                Ok(()) => (PathBuf::new(), Some(data)),
+                Err(e) => {
+                    eprintln!("{}", e);
+                    return;
+                }
+            },
+            None => {
+                eprintln!("{}", locate::no_game(&dirs));
+                return;
+            }
+        },
+    };
+    run(Options { rom, out: Some(dir), save: None, mute: false, res: Some(1), menu: false, dump: None, pack, lang: None, wide: None, renderer: None }, el);
 }
 
 #[cfg(target_os = "android")]
