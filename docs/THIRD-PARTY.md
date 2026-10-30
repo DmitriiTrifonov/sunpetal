@@ -395,6 +395,7 @@
 ## Не из Cargo
 
 - `tools/ndskit`: MIT, © 2026 Samuele Voltan (форк Python-части ndskit, см. `tools/ndskit/LICENSE` и `UPSTREAM.md`).
+- Шрифты чёткого текста реплик (встроены в приложение, `crates/sunpetal-app/fonts/`): Noto Sans (© The Noto Project Authors, SIL OFL 1.1, `NotoSans-OFL.txt`) и Rubik (© The Rubik Project Authors, SIL OFL 1.1, `Rubik-OFL.txt`). Оба вариативные, вес 400 задаётся в коде; скачаны 2026-10-30 из `github.com/google/fonts` (`ofl/notosans`, `ofl/rubik`), файлы не менялись.
 - Шрифт меню: Ubuntu Font (встроен в `egui` через `epaint_default_fonts`; лицензия Ubuntu Font Licence 1.0).
 - Слабый копилефт: `option-ext` (MPL-2.0, через `dirs`), используется без изменений. Двойные лицензии с GPL/LGPL (`self_cell`, `r-efi`) берутся по варианту Apache-2.0/MIT.
 - Код из GPL-проектов (melonDS и др.) в Sunpetal не копировался.

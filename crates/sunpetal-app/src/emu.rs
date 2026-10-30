@@ -245,6 +245,11 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             }
             let _ = nds::screenshot(&std::path::PathBuf::from(format!("{}.png", stem.display())));
             let _ = nds::screenshot_wide_layers(&stem);
+            if std::env::var_os("SUNPETAL_RAM_DUMP").is_some() {
+                if let Some(ram) = nds::main_ram() {
+                    let _ = std::fs::write(format!("{}.ram", stem.display()), ram);
+                }
+            }
             let json = format!(
                 "{{\"vblank\":{},\"scene\":{},\"script\":{{\"idle\":{},\"waits\":{},\"mark\":{},\"step\":{}}},\"frame_scale\":{},{}}}\n",
                 nds::vblanks(),

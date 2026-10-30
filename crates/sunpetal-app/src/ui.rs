@@ -129,6 +129,15 @@ impl Menu {
                     ui.selectable_value(&mut s.video.dialogue_text, "crisp".to_string(), tx("crisp", "чёткий"));
                     ui.selectable_value(&mut s.video.dialogue_text, "pixel".to_string(), tx("pixel (the game's)", "пиксельный (как в игре)"));
                 });
+                egui::ComboBox::from_label(tx("Dialogue font", "Шрифт реплик")).selected_text(match s.video.dialogue_font.as_str() {
+                    "rubik" => "Rubik",
+                    "ubuntu" => "Ubuntu",
+                    _ => "Noto Sans",
+                }).show_ui(ui, |ui| {
+                    ui.selectable_value(&mut s.video.dialogue_font, "noto".to_string(), "Noto Sans");
+                    ui.selectable_value(&mut s.video.dialogue_font, "rubik".to_string(), "Rubik");
+                    ui.selectable_value(&mut s.video.dialogue_font, "ubuntu".to_string(), "Ubuntu");
+                });
                 ui.checkbox(&mut s.video.follow_shape, tx("Window follows the picture's shape", "Окно по форме картинки"));
                 ui.checkbox(&mut s.video.logos_in_turn, tx("Logos in turn when one screen is shown", "Логотипы по очереди, когда виден один экран"));
                 if matches!(s.video.layout.as_str(), "single" | "overlay") && s.video.auto {

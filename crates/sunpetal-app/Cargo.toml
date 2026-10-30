@@ -41,3 +41,4 @@ android_log-sys = "0.3"
 
 [dev-dependencies]
 naga = { version = "30.0.1", default-features = false, features = ["wgsl-in"] }
+ab_glyph = "0.2.32"

@@ -402,6 +402,7 @@ impl Gfx {
         let screens = [make_screen(&device, &bgl, &nearest, &linear, 1, "upper"), make_screen(&device, &bgl, &nearest, &linear, 1, "lower")];
         let glow = make_texture(&device, &bgl, &nearest, &linear, GLOW_W as u32, GLOW_H as u32, "glow");
         let egui_ctx = egui::Context::default();
+        egui_ctx.set_fonts(crate::fonts::definitions(None));
         let egui_state = egui_winit::State::new(
             egui_ctx.clone(),
             egui::ViewportId::ROOT,

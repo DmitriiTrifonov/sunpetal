@@ -1410,6 +1410,12 @@ fn dialogue_canvas() -> Option<(u64, bool)> {
     })
 }
 
+/// The guest's main RAM (4 MiB at 02000000), for dumps by hand.
+pub fn main_ram() -> Option<Vec<u8>> {
+    let mut out = vec![0u8; 0x40_0000];
+    crate::machine::machine(|m| m.mem.read_bytes(9, 0x0200_0000, &mut out)).then_some(out)
+}
+
 /// The line the dialogue window shows, with whether its letters are being drawn: the pointer changes about 25 frames
 /// before the game draws the line (docs/PLAN.md, 9в.9.4), and the old letters stay in the canvas till then; so the
 /// line counts as drawn when the canvas has changed since the pointer did and has ink. Call it once a frame.

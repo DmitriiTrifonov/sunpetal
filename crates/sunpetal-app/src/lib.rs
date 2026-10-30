@@ -80,7 +80,7 @@ enum Hold {
 /// The dialogue line over the upper screen's `r` (widened by `wide` DS pixels each side): the lines the game broke, in the
 /// window's resolution, in the text area beside the portrait, centred on the band (DS pixels: x 58..243 with the portrait on
 /// the left, 10..195 on the right; the band is y 144..191).
-fn paint_dialogue(ctx: &egui::Context, r: layout::Rect, wide: f32, left: bool, text: &str, middle: Option<f32>) {
+fn paint_dialogue(ctx: &egui::Context, r: layout::Rect, wide: f32, left: bool, text: &str, middle: Option<f32>, font: &str) {
     const PITCH: f32 = 14.0;
     const SIZE: f32 = 13.0;
     // the layout's rectangles are in the window's pixels, egui's coordinates in points
@@ -95,7 +95,7 @@ fn paint_dialogue(ctx: &egui::Context, r: layout::Rect, wide: f32, left: bool, t
     let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("dialogue")));
     for (i, l) in lines.iter().enumerate() {
         let at = egui::pos2(x0, r.y + (top + i as f32 * PITCH) * ky);
-        p.text(at, egui::Align2::LEFT_TOP, l, egui::FontId::proportional(SIZE * ky), egui::Color32::from_rgb(16, 16, 24));
+        p.text(at, egui::Align2::LEFT_TOP, l, egui::FontId::new(SIZE * ky, fonts::dialogue_family(font)), egui::Color32::from_rgb(16, 16, 24));
     }
 }
 
@@ -848,7 +848,7 @@ impl ApplicationHandler for App {
                                     p.rect_filled(ctx.content_rect(), 0.0, egui::Color32::from_black_alpha((fade * 255.0) as u8));
                                 }
                                 if let (Some(text), Some(r)) = (&vline, vrect) {
-                                    paint_dialogue(ctx, r, vwide, *portrait_left, &text.0, text.1);
+                                    paint_dialogue(ctx, r, vwide, *portrait_left, &text.0, text.1, &settings.video.dialogue_font);
                                 }
                                 if corner_on {
                                     let info = match stopped_msg {
