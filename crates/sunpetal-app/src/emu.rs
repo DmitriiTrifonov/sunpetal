@@ -102,6 +102,8 @@ pub struct Shared {
     pub dialogue_text: Mutex<Option<(String, Option<f32>)>>,
     /// The window draws the dialogue text itself (set by the window each frame): the game's raster text is hidden.
     pub crisp_text: AtomicBool,
+    /// The command line of the program to start once the machine has stopped (a restart was asked for).
+    pub restart: Mutex<Option<Vec<std::ffi::OsString>>>,
     /// The game says when its script runs, so a skip can go through dialogues (set by the emulation).
     pub marks: AtomicBool,
     /// The script is idle (the player has the control): there is nothing to skip (set by the emulation).
@@ -146,6 +148,7 @@ impl Shared {
             dialogue: AtomicBool::new(false),
             dialogue_text: Mutex::new(None),
             crisp_text: AtomicBool::new(false),
+            restart: Mutex::new(None),
             marks: AtomicBool::new(false),
             idle: AtomicBool::new(false),
             waiting: AtomicBool::new(false),
@@ -389,6 +392,13 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     *shared.stopped.lock().unwrap() = Some(why.to_string());
     nds::report();
     nds::finish();
+    // the process ends here, so the restart is started here too (the window thread would be too late)
+    if let Some(args) = shared.restart.lock().unwrap().take() {
+        match std::env::current_exe().and_then(|exe| std::process::Command::new(exe).args(args).spawn()) {
+            Ok(_) => {}
+            Err(e) => eprintln!("restart: {}", e),
+        }
+    }
     // the guest threads' coroutines are parked: do not unwind them
     std::process::exit(0);
 }

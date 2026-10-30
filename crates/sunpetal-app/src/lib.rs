@@ -911,6 +911,7 @@ impl ApplicationHandler for App {
                 if action == Some(ui::Action::Restart) {
                     self.save();
                     self.restart = true;
+                    *self.shared.restart.lock().unwrap() = Some(restart_args(std::env::args_os().skip(1).collect(), &self.settings.video.texture_pack));
                     el.exit();
                     return;
                 }
@@ -1105,13 +1106,6 @@ pub fn run(o: Options, el: EventLoop<()>) {
     let why = shared.stopped.lock().unwrap().clone();
     if let Some(why) = why {
         eprintln!("stopped: {}", why);
-    }
-    if app.restart {
-        let pack = app.settings.video.texture_pack.clone();
-        match std::env::current_exe().and_then(|exe| std::process::Command::new(exe).args(restart_args(std::env::args_os().skip(1).collect(), &pack)).spawn()) {
-            Ok(_) => {}
-            Err(e) => eprintln!("restart: {}", e),
-        }
     }
 }
 
