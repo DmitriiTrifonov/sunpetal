@@ -9,13 +9,14 @@
 //! already made. Each `--translation` file brings its translations in (they must be for this ROM).
 //! A part left out is not in the file. The result is whole or not there, and carries `META`.
 //! The file holds the game: it is for the machine it is built on and never shared.
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 use std::time::Instant;
 
 use sunpetal_data::container::{verify_file, Container};
 use sunpetal_data::delta::crc32;
 use sunpetal_data::dsrom;
+use sunpetal_data::fingerprint::fingerprint;
 use sunpetal_data::translate::Translation;
 
 fn main() -> ExitCode {
@@ -30,13 +31,6 @@ fn main() -> ExitCode {
 
 fn say(s: &str) {
     println!("{}", s);
-}
-
-/// `name-size-mtime`: what tells a disc or a ROM apart without reading gigabytes.
-fn stamp(p: &Path) -> Result<String, String> {
-    let m = std::fs::metadata(p).map_err(|e| format!("{}: {}", p.display(), e))?;
-    let t = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
-    Ok(format!("{}-{}", m.len(), t))
 }
 
 fn run() -> Result<(), String> {
@@ -83,7 +77,8 @@ fn run() -> Result<(), String> {
     let pack = if let Some(disc) = &disc {
         let cache = cache.clone().unwrap_or_else(|| PathBuf::from("build/cache"));
         std::fs::create_dir_all(&cache).map_err(|e| format!("{}: {}", cache.display(), e))?;
-        let made = cache.join(format!("textures-{:08X}-{}.spdata", crc, stamp(disc)?));
+        let key = fingerprint(disc)?;
+        let made = cache.join(format!("textures-{:08X}-{}.spdata", crc, key));
         if made.is_file() && verify_file(&made).is_ok() {
             say(&format!("PS2 textures: from the cache {}", made.display()));
         } else {
@@ -94,7 +89,7 @@ fn run() -> Result<(), String> {
             }
             let part = made.with_extension("part");
             let mut cmd = Command::new(&python);
-            cmd.arg(&script).arg(&rom_path).arg(disc).arg(&part).arg("--cache").arg(cache.join("disc-index.pickle"));
+            cmd.arg(&script).arg(&rom_path).arg(disc).arg(&part).arg("--cache").arg(cache.join(format!("disc-index-{}.pickle", key)));
             if let Some(d) = &dump {
                 cmd.arg("--dump").arg(d);
             }

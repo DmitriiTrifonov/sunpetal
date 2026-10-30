@@ -13,3 +13,10 @@ This project bundles or builds on:
 
 No game data is included. The game's code and data are never part of this repository;
 a build contains game code only when the user makes it from their own copy of the game.
+
+Translations (the `TRAN` part of a data file). A translation is the work of its author and is
+not covered by the licence of the code unless its own notice says so. It is given as a delta:
+the translated texts and binary changes against the original, with the CRC-32 of the original
+they were made for, and none of the original's text. The data file (`sunpetal.data`) holds the
+game's own data taken from the player's copy and is never distributed; only the code, the
+tools and a translation's delta are.

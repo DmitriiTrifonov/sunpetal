@@ -2,6 +2,7 @@
 //! compression, the dialogue scripts and the translation that goes into them (docs/TRANSLATION-RECON.md).
 pub mod container;
 pub mod delta;
+pub mod fingerprint;
 pub mod dsrom;
 pub mod lz10;
 pub mod nftr;
