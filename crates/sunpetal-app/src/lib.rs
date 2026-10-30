@@ -83,6 +83,9 @@ enum Hold {
 fn paint_dialogue(ctx: &egui::Context, r: layout::Rect, wide: f32, left: bool, text: &str) {
     const PITCH: f32 = 14.0;
     const SIZE: f32 = 13.0;
+    // the layout's rectangles are in the window's pixels, egui's coordinates in points
+    let ppp = ctx.pixels_per_point();
+    let r = layout::Rect { x: r.x / ppp, y: r.y / ppp, w: r.w / ppp, h: r.h / ppp };
     let (kx, ky) = (r.w / (256.0 + 2.0 * wide), r.h / 192.0);
     let x0 = r.x + (wide + if left { 58.0 } else { 10.0 }) * kx;
     let lines: Vec<&str> = text.split('\n').map(|l| l.trim_end_matches('\r')).collect();

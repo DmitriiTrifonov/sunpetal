@@ -38,11 +38,14 @@ pub(super) struct Gpu2d {
     /// The dialogue line is drawn by the app in a crisp font: the game's raster text (BG3 of the
     /// upper screen, lines 144..191) is not drawn.
     pub(super) hide_dialogue: bool,
+    /// The game's raster text in the band as the last frame drew it (BG3 of the upper screen, lines 144..191, also
+    /// when it is hidden): a hash of its pixels, and how many are opaque.
+    pub(super) band: (u64, u32),
 }
 
 impl Gpu2d {
     pub(super) fn new() -> Gpu2d {
-        Gpu2d { px: vec![0; 2 * 192 * 256 * 2], refs: [[[0; 2]; 2]; 2], on: true, mosaic: vec![[0; 256]; 8], hide_dialogue: false }
+        Gpu2d { px: vec![0; 2 * 192 * 256 * 2], refs: [[[0; 2]; 2]; 2], on: true, mosaic: vec![[0; 256]; 8], hide_dialogue: false, band: (0, 0) }
     }
 
     fn at(e: usize, y: usize) -> usize {
@@ -701,8 +704,19 @@ impl Nds {
                         self.gpu.mosaic[e * 4 + bg] = buf;
                     }
                 }
-                if self.gpu.hide_dialogue && e == 0 && bg == 3 && y >= 144 {
-                    continue;
+                if e == 0 && bg == 3 && y >= 144 {
+                    if y == 144 {
+                        self.gpu.band = (0xcbf2_9ce4_8422_2325, 0);
+                    }
+                    for x in 0..256 {
+                        if buf[x] & PX_OPAQUE != 0 {
+                            self.gpu.band.0 = (self.gpu.band.0 ^ (buf[x] as u64 | (x as u64) << 32 | (y as u64) << 48)).wrapping_mul(0x100_0000_01b3);
+                            self.gpu.band.1 += 1;
+                        }
+                    }
+                    if self.gpu.hide_dialogue {
+                        continue;
+                    }
                 }
                 for x in 0..256 {
                     if buf[x] & PX_OPAQUE != 0 && l.win[x] & (1 << bg) != 0 {

@@ -1411,7 +1411,11 @@ pub fn dialogue() -> Option<Dialogue> {
         DIALOGUE_SEEN.with(|c| c.set((0, 0, false)));
         return None;
     };
-    let (sum, ink) = dialogue_canvas().unwrap_or((0, false));
+    // the raster text the 2D engine drew in the band, when frames are drawn; else the text object's canvas
+    let (sum, ink) = match nds(|n| n.gpu.on.then_some(n.gpu.band)) {
+        Some((h, n)) => (h, n > 0),
+        None => dialogue_canvas().unwrap_or((0, false)),
+    };
     let drawn = DIALOGUE_SEEN.with(|c| {
         let (seen, base, drawn) = c.get();
         let now = if seen != ptr { (ptr, sum, false) } else if !drawn && ink && sum != base { (seen, base, true) } else { (seen, base, drawn) };
