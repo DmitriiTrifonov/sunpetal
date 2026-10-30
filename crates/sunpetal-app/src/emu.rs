@@ -99,7 +99,7 @@ pub struct Shared {
     /// A dialogue box is on the screen (set by the emulation each frame).
     pub dialogue: AtomicBool,
     /// The text of the dialogue line the game has begun to draw (set with the picture, `None` when the window shows none).
-    pub dialogue_text: Mutex<Option<(String, Option<[u32; 4]>)>>,
+    pub dialogue_text: Mutex<Option<(String, Option<f32>)>>,
     /// The game says when its script runs, so a skip can go through dialogues (set by the emulation).
     pub marks: AtomicBool,
     /// The script is idle (the player has the control): there is nothing to skip (set by the emulation).
@@ -173,6 +173,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     let stats = std::env::var_os("SUNPETAL_STATS").is_some();
     // 9в.10: crisp dialogue text (behind a flag until the menu setting)
     let mut portrait_left = true;
+    let mut middle: Option<f32> = None;
     let vtext = std::env::var_os("SUNPETAL_VTEXT").is_some_and(|v| v == "1");
     let (mut counted, mut since) = (0u32, Instant::now());
     let (mut shown, mut shown_since) = (0u32, Instant::now());
@@ -263,10 +264,14 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             if let Some(left) = crate::layout::portrait_left(picture.0, &picture.1) {
                 portrait_left = left;
             }
+            // the panel's middle is kept while the red line is out of sight for a frame (the box opens and closes)
+            if let Some(m) = crate::layout::dialogue_panel_middle(picture.0, &picture.1) {
+                middle = Some(m);
+            }
             let dialogue = nds::dialogue();
             // the game's raster text is hidden from the moment a line is set, before its letters come; ours shows when they do
             nds::hide_dialogue_raster(vtext && dialogue.as_ref().is_some_and(|d| d.coming));
-            let dialogue_line = dialogue.filter(|d| d.drawn).map(|d| (d.text, nds::dialogue_raster_box(portrait_left)));
+            let dialogue_line = dialogue.filter(|d| d.drawn).map(|d| (d.text, middle));
             if skipping {
                 let print = fingerprint(&picture.1);
                 still = if print == last_print { still + 1 } else { 0 };

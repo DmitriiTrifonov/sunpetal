@@ -162,6 +162,25 @@ pub fn portrait_left(scale: usize, rgba: &[u8]) -> Option<bool> {
     }
 }
 
+/// The dialogue panel's vertical middle (DS pixels): the panel's top edge is a red line across the upper screen (the
+/// line is at 144 in the usual box, lower in the narrow one for two lines) and the panel runs to the screen's foot.
+pub fn dialogue_panel_middle(scale: usize, rgba: &[u8]) -> Option<f32> {
+    let w = 256 * scale;
+    for y in 140..190usize {
+        let (mut n, mut red) = (0, 0);
+        for x in (20..236usize).step_by(4) {
+            let o = (y * scale * w + x * scale) * 4;
+            let Some(p) = rgba.get(o..o + 3) else { return None };
+            n += 1;
+            red += (p[0] > 200 && p[1] < 60 && p[2] < 60) as usize;
+        }
+        if red * 10 >= n * 8 {
+            return Some((y as f32 + 2.0 + 192.0) / 2.0);
+        }
+    }
+    None
+}
+
 /// Whether the picture is the collection's list: a black header band on the upper screen (the card above) and the list's
 /// yellow squares down the lower screen's left side (56 rows lit on the game's frames, none on any other screen).
 pub fn collection_in(scale: usize, rgba: &[u8]) -> bool {

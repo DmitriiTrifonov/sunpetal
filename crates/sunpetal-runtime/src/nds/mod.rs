@@ -470,12 +470,6 @@ pub fn hide_dialogue_raster(on: bool) {
     nds(|n| n.gpu.hide_dialogue = on);
 }
 
-/// Where the game's raster text sits in the band as the last drawn frame had it (x0, y0, x1, y1 in DS pixels), the
-/// portrait on the left or on the right: the app puts its own text there.
-pub fn dialogue_raster_box(portrait_left: bool) -> Option<[u32; 4]> {
-    nds(|n| n.gpu.text_box[!portrait_left as usize])
-}
-
 pub use input::KEY_NAMES;
 
 /// Live input for the next frame: the buttons held (bit i of `KEY_NAMES`) and the stylus on the

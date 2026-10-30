@@ -80,18 +80,15 @@ enum Hold {
 /// The dialogue line over the upper screen's `r` (widened by `wide` DS pixels each side): the lines the game broke, in the
 /// window's resolution, in the text area beside the portrait, centred on the band (DS pixels: x 58..243 with the portrait on
 /// the left, 10..195 on the right; the band is y 144..191).
-fn paint_dialogue(ctx: &egui::Context, r: layout::Rect, wide: f32, left: bool, text: &str, raster: Option<[u32; 4]>) {
+fn paint_dialogue(ctx: &egui::Context, r: layout::Rect, wide: f32, left: bool, text: &str, middle: Option<f32>) {
     const PITCH: f32 = 14.0;
     const SIZE: f32 = 13.0;
     // the layout's rectangles are in the window's pixels, egui's coordinates in points
     let ppp = ctx.pixels_per_point();
     let r = layout::Rect { x: r.x / ppp, y: r.y / ppp, w: r.w / ppp, h: r.h / ppp };
     let (kx, ky) = (r.w / (256.0 + 2.0 * wide), r.h / 192.0);
-    // where the game's own letters were (DS pixels), else the usual text area beside the portrait
-    let (ds_x, ds_cy) = match raster {
-        Some(b) => (b[0] as f32, (b[1] + b[3] + 1) as f32 / 2.0),
-        None => (if left { 58.0 } else { 10.0 }, 168.0),
-    };
+    // the text starts where the game's letters do, beside the portrait; it is centred on the panel
+    let (ds_x, ds_cy) = (if left { 58.0 } else { 10.0 }, middle.unwrap_or(168.0));
     let x0 = r.x + (wide + ds_x) * kx;
     let lines: Vec<&str> = text.split('\n').map(|l| l.trim_end_matches('\r')).collect();
     let top = ds_cy - lines.len() as f32 * PITCH / 2.0;
