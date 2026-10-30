@@ -921,16 +921,45 @@ struct Rendered {
 /// the shadow mask's mark, then the DS blend `(src*(a+1) + dst*(31-a))/32` over what is there —
 /// then the fog over the finished picture, which also drops the alpha-0 pixels.
 pub(super) fn render(job: &Job, scale: usize) -> Result<(Vec<u32>, u32), String> {
+    end(begin(job, scale)?)
+}
+
+thread_local! {
+    /// For the tests: `end` fails as a lost device would (этап 9.2.5).
+    static FAIL_END: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub(super) fn set_fail_end(on: bool) {
+    FAIL_END.with(|f| f.set(on));
+}
+
+/// A frame given to the GPU (`begin`) and not yet read back (`end`): the frame for the window, which is
+/// read only when the emulation has run on (этап 9.2).
+pub(super) struct Drawing {
+    p: Pending,
+    /// supersampled: the "not antialiased" note does not apply
+    super_sampled: bool,
+}
+
+/// Starts a frame like `render`: the GPU gets it, the picture comes with `end`.
+pub(super) fn begin(job: &Job, scale: usize) -> Result<Drawing, String> {
     let s = scale.max(1);
     // supersampling like the software engine's (этап 6.0): the frame k times as large each way,
     // then the k x k samples of a pixel averaged
     let k = render3d::msaa_factor(job, s);
     if k >= 2 {
-        let r = render_all(job, s * k, false, k)?;
-        return Ok((r.words, r.notes & !(1 << 1)));
+        return Ok(Drawing { p: submit(job, s * k, false, k)?, super_sampled: true });
     }
-    let r = render_all(job, scale, false, 1)?;
-    Ok((r.words, r.notes))
+    Ok(Drawing { p: submit(job, scale, false, 1)?, super_sampled: false })
+}
+
+/// Waits for a frame `begin` started and reads its words and notes.
+pub(super) fn end(d: Drawing) -> Result<(Vec<u32>, u32), String> {
+    if FAIL_END.with(|f| f.get()) {
+        return Err("the GPU failed while the frame was read (forced)".to_string());
+    }
+    let r = finish(d.p)?;
+    Ok((r.words, if d.super_sampled { r.notes & !(1 << 1) } else { r.notes }))
 }
 
 /// Draws a job and reads the auxiliary maps back too (этапы 7.0 и 5.1 of `docs/GPU-BACKEND.md`):
@@ -1956,7 +1985,7 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
 }
 
 /// Waits for a submitted frame and reads its picture back as the words the software renderer returns.
-pub(super) fn finish(p: Pending) -> Result<Rendered, String> {
+fn finish(p: Pending) -> Result<Rendered, String> {
     let Pending { c, buf_word, aux, size: (w, h), out: (ow, oh), notes, report } = p;
     let words = readback_words(&c.device, &buf_word, ow, oh)?;
     if let Some((r, t0)) = report {

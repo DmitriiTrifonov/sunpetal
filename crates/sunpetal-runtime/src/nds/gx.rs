@@ -1221,25 +1221,57 @@ impl Nds {
                 }
             }
         }
-        let (px, notes) = match self.renderer {
+        self.settle_3d();
+        let scale = self.scale;
+        let mut drawing = None;
+        let mut early = None;
+        match self.renderer {
             #[cfg(feature = "gpu")]
-            super::Renderer::Gpu => {
-                let (v, failed) = gpu_or_software(&job, self.scale, || super::render3d_gpu::render(&job, self.scale));
-                if let Some(e) = failed {
-                    // told once per distinct failure
-                    let mut h = 0u32;
-                    for b in e.bytes() {
-                        h = h.wrapping_mul(31).wrapping_add(b as u32);
-                    }
-                    self.once("3d-gpu", h, || format!("GPU renderer failed: {e}; the software one takes over"));
+            super::Renderer::Gpu if !job.polys.is_empty() => match super::render3d_gpu::begin(&job, scale) {
+                Ok(d) => drawing = Some(d),
+                Err(e) => self.gpu_failed(&e),
+            },
+            _ => {}
+        }
+        if drawing.is_none() {
+            early = Some(super::render3d::render(&job, scale));
+        }
+        self.pending3d = Some(Pending3d { job, scale, vblank: self.vblanks, drawing, early });
+    }
+
+    /// The GPU's failure told once per distinct message; the software engine takes over.
+    #[cfg(feature = "gpu")]
+    fn gpu_failed(&mut self, e: &str) {
+        let mut h = 0u32;
+        for b in e.bytes() {
+            h = h.wrapping_mul(31).wrapping_add(b as u32);
+        }
+        self.once("3d-gpu", h, || format!("GPU renderer failed: {e}; the software one takes over"));
+    }
+
+    /// Finishes the frame the rendering engine started (`gx_render_start`): the GPU's picture is waited
+    /// for and read, a failed one is drawn again by the software engine. `run_frame` calls it before it
+    /// returns, so outside the emulation `frame3d` is always the last frame's (этап 9.2).
+    pub(super) fn settle_3d(&mut self) {
+        let Some(p) = self.pending3d.take() else { return };
+        let Pending3d { job, scale, vblank, drawing, early } = p;
+        let mut result = early;
+        #[cfg(feature = "gpu")]
+        if let Some(d) = drawing {
+            result = Some(match super::render3d_gpu::end(d) {
+                Ok(v) => v,
+                Err(e) => {
+                    self.gpu_failed(&e);
+                    super::render3d::render(&job, scale)
                 }
-                v
-            }
-            _ => super::render3d::render(&job, self.scale),
-        };
-        super::jobdump::maybe_dump(&job, self.scale, self.vblanks, &px, notes);
+            });
+        }
+        #[cfg(not(feature = "gpu"))]
+        let _ = drawing;
+        let (px, notes) = result.expect("a frame is either drawn or given to the GPU");
+        super::jobdump::maybe_dump(&job, scale, vblank, &px, notes);
         self.frame3d_wide = (job.width - 256) / 2;
-        self.frame3d_scale = self.scale;
+        self.frame3d_scale = scale;
         self.frame3d = px;
         for (s, text) in super::render3d::NOTE.iter().enumerate() {
             if notes >> s & 1 != 0 {
@@ -1249,13 +1281,27 @@ impl Nds {
     }
 }
 
+/// A 3D frame the rendering engine has started and `settle_3d` has not yet finished: its job (for the
+/// software engine to redraw it if the GPU fails), and either the GPU's drawing in flight or a picture
+/// already made.
+pub(super) struct Pending3d {
+    job: super::render3d::Job,
+    scale: usize,
+    vblank: u64,
+    #[cfg(feature = "gpu")]
+    drawing: Option<super::render3d_gpu::Drawing>,
+    #[cfg(not(feature = "gpu"))]
+    drawing: Option<()>,
+    early: Option<(Vec<u32>, u32)>,
+}
+
 /// Draws a frame with the GPU engine (`gpu`), except one with no polygons (the logos, a menu: only
 /// the clear plane and the fog), which the software engine draws for next to nothing while the
 /// GPU pays its fixed cost (≈ 0.7 ms: the frame's resources and the wait); the two agree word for
 /// word on such frames (the parity dumps `logos_empty_*`). If the GPU fails (no device, a device error) the
 /// software engine draws it instead and the failure comes back as text, for a note. The device is
 /// made once and its failure is kept, so a machine with none pays only for the check each frame.
-#[cfg(feature = "gpu")]
+#[cfg(all(test, feature = "gpu"))]
 fn gpu_or_software(job: &super::render3d::Job, scale: usize, gpu: impl FnOnce() -> Result<(Vec<u32>, u32), String>) -> ((Vec<u32>, u32), Option<String>) {
     if job.polys.is_empty() {
         return (super::render3d::render(job, scale), None);

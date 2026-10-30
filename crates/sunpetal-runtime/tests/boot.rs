@@ -71,6 +71,16 @@ fn reaches_the_save_data_menu() {
 /// frame drawn, its picture saved; in a thread of its own, since the runtime keeps its state per
 /// thread. Returns the picture's bytes.
 fn picture_at(cfg: Config, frames: u64, shot: PathBuf) -> Vec<u8> {
+    picture_with(cfg, frames, shot, nds::Renderer::Software, &[])
+}
+
+/// `picture_at` with the renderer set at the start and switched at the VBlanks in `switches` (to the other one each time).
+fn picture_with(cfg: Config, frames: u64, shot: PathBuf, first: nds::Renderer, switches: &[u64]) -> Vec<u8> {
+    picture_failing(cfg, frames, shot, first, switches, false)
+}
+
+fn picture_failing(cfg: Config, frames: u64, shot: PathBuf, first: nds::Renderer, switches: &[u64], fail: bool) -> Vec<u8> {
+    let switches = switches.to_vec();
     let shot2 = shot.clone();
     std::thread::Builder::new()
         .stack_size(64 << 20)
@@ -79,7 +89,16 @@ fn picture_at(cfg: Config, frames: u64, shot: PathBuf) -> Vec<u8> {
             cfg.stop_vblanks = frames;
             cfg.input = (400..frames).step_by(100).map(|v| format!("{}:START", v)).collect::<Vec<_>>().join(",");
             nds::boot(cfg).expect("boot");
+            let mut renderer = first;
+            nds::set_renderer(renderer);
+            #[cfg(feature = "gpu")]
+            nds::debug_fail_gpu_frames(fail);
+            let _ = fail;
             loop {
+                if switches.contains(&nds::vblanks()) {
+                    renderer = if renderer == nds::Renderer::Gpu { nds::Renderer::Software } else { nds::Renderer::Gpu };
+                    nds::set_renderer(renderer);
+                }
                 nds::set_draw(nds::vblanks() + 1 == frames);
                 if !nds::run_frame() {
                     break;
@@ -118,4 +137,47 @@ fn a_pack_made_of_the_dump_changes_nothing() {
     cfg.texture_pack = Some(dump);
     let packed = picture_at(cfg, 2400, tmp.join("b.png"));
     assert!(plain == packed, "a pack of the dump must draw the same picture");
+}
+
+/// The GPU's frame is read after the emulation has run on (этап 9.2.3-9.2.4): the picture at VBlank 2400
+/// is the software engine's, drawn by the GPU throughout, and with the renderer switched back and forth
+/// before it (a frame in flight never leaks into the next renderer's).
+#[cfg(feature = "gpu")]
+#[test]
+fn the_gpu_frame_in_flight_is_read_before_anything_else() {
+    let Some(rom) = std::env::var_os("SUNPETAL_ROM").map(PathBuf::from) else {
+        eprintln!("skipped: SUNPETAL_ROM is not set");
+        return;
+    };
+    let tmp = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("async3d");
+    let mk = |name: &str| {
+        let mut cfg = Config::new(&rom);
+        cfg.out = tmp.join(name);
+        cfg
+    };
+    let soft = picture_with(mk("soft"), 2400, tmp.join("soft.png"), nds::Renderer::Software, &[]);
+    let gpu = picture_with(mk("gpu"), 2400, tmp.join("gpu.png"), nds::Renderer::Gpu, &[]);
+    assert!(soft == gpu, "the GPU picture at VBlank 2400 differs from the software one");
+    let mixed = picture_with(mk("mixed"), 2400, tmp.join("mixed.png"), nds::Renderer::Gpu, &[2000, 2200, 2300, 2399]);
+    assert!(soft == mixed, "switching the renderer left a stale frame");
+}
+
+/// A GPU that fails when its frame is read (этап 9.2.5): the software engine draws the frame again from the
+/// job it kept, so the picture is the software one's.
+#[cfg(feature = "gpu")]
+#[test]
+fn a_gpu_frame_that_fails_in_flight_is_drawn_by_the_software_engine() {
+    let Some(rom) = std::env::var_os("SUNPETAL_ROM").map(PathBuf::from) else {
+        eprintln!("skipped: SUNPETAL_ROM is not set");
+        return;
+    };
+    let tmp = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("async3d_fail");
+    let mk = |name: &str| {
+        let mut cfg = Config::new(&rom);
+        cfg.out = tmp.join(name);
+        cfg
+    };
+    let soft = picture_at(mk("soft"), 2400, tmp.join("soft.png"));
+    let failing = picture_failing(mk("fail"), 2400, tmp.join("fail.png"), nds::Renderer::Gpu, &[], true);
+    assert!(soft == failing, "a failed GPU frame was not redrawn by the software engine");
 }

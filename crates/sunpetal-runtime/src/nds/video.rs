@@ -269,6 +269,7 @@ impl Nds {
         self.gpu = super::gpu2d::Gpu2d::new();
         self.gx = super::gx::Gx::new();
         self.gx.set_wide(self.wide);
+        self.pending3d = None;
         self.frame3d = vec![0; 256 * 192];
         self.frame3d_wide = 0;
         self.frame3d_scale = 1;

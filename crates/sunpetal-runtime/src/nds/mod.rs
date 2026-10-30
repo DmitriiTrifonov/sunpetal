@@ -177,6 +177,8 @@ pub struct Nds {
     texpack: texpack::TexPack,
     /// The 3D picture the rendering engine drew last, 256x192 (`render3d`).
     frame3d: Vec<u32>,
+    /// The 3D frame started and not yet finished (`settle_3d`).
+    pending3d: Option<gx::Pending3d>,
     /// Pixels the 3D picture has on each side beyond the 256 (a widened view, `set_wide`).
     frame3d_wide: usize,
     /// The widening asked for, in DS pixels each side.
@@ -261,6 +263,7 @@ impl Nds {
             snd: sound::Sound::new(),
             texpack: texpack::TexPack::new(),
             frame3d: vec![0; 256 * 192],
+            pending3d: None,
             frame3d_wide: 0,
             wide: 0,
             frame3d_scale: 1,
@@ -1079,6 +1082,12 @@ pub fn set_extras(e: Extras) {
 }
 
 /// Chooses the engine that draws the 3D. Takes effect with the next frame drawn.
+/// For the tests: the GPU's frames fail when they are read, as a lost device would make them.
+#[cfg(feature = "gpu")]
+pub fn debug_fail_gpu_frames(on: bool) {
+    render3d_gpu::set_fail_end(on);
+}
+
 pub fn set_renderer(r: Renderer) {
     nds(|d| d.renderer = r);
 }
@@ -1208,7 +1217,10 @@ pub fn run_frame() -> bool {
             }
         });
     }
-    nds(|n| n.vblanks != vbl)
+    nds(|n| {
+        n.settle_3d(); // the GPU's frame, started in the course of this one, is read now
+        n.vblanks != vbl
+    })
 }
 
 /// Why the run stopped, if it has.
