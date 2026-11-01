@@ -8,6 +8,7 @@ pub mod fontgen;
 pub mod lz10;
 pub mod nftr;
 pub mod nitrofs;
+pub mod pack2d;
 pub mod report;
 pub mod script;
 pub mod tools;

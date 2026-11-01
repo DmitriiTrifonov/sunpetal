@@ -987,8 +987,8 @@ pub fn run(o: Options, el: EventLoop<()>) {
     cfg.out = o.out.unwrap_or_else(|| beside.and_then(|p| p.parent()).map(|p| p.to_path_buf()).unwrap_or_default());
     cfg.save = o.save;
     cfg.dump_textures = o.dump;
-    // a folder of 2D pictures (8е.3); a part of `sunpetal.data` comes with 8е.5
-    cfg.pack_2d = std::env::var_os("SUNPETAL_PACK_2D").map(PathBuf::from).filter(|p| p.is_dir());
+    // 2D pictures (8е.3): a folder or a data file by the variable, else the 2D part of the data file in use (below)
+    cfg.pack_2d = std::env::var_os("SUNPETAL_PACK_2D").map(PathBuf::from).filter(|p| p.exists());
     cfg.texture_pack = o.pack.or_else(|| {
         let p = PathBuf::from(&settings.video.texture_pack);
         if settings.video.texture_pack.is_empty() {
@@ -1015,6 +1015,9 @@ pub fn run(o: Options, el: EventLoop<()>) {
             eprintln!("the game starts from the ROM without it");
             cfg.texture_pack = None;
         }
+    }
+    if cfg.pack_2d.is_none() {
+        cfg.pack_2d = cfg.texture_pack.clone().filter(|p| p.is_file() && sunpetal_data::container::Container::tags(p).is_ok_and(|t| t.contains(sunpetal_data::pack2d::TAG)));
     }
     // the pack in use is the texture setting (the menu's list of sets starts from its folder)
     if let Some(p) = cfg.texture_pack.as_ref().filter(|p| p.is_file()) {

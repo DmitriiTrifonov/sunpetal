@@ -263,6 +263,14 @@ fn a_2d_pack_replaces_the_sprites_it_names_and_nothing_else() {
     let bad = plain.chunks_exact(4).zip(same.chunks_exact(4)).filter(|(a, b)| a != b).count();
     assert!(placed > 0);
     assert_eq!(bad, 0, "a pack of the dump changes {} pixels", bad);
+    // the same pictures as a part of a data file draw the same picture
+    let mut c = sunpetal_data::container::Container::new();
+    c.add(sunpetal_data::pack2d::TAG, sunpetal_data::pack2d::pack_dir(&dump).expect("pack the folder"));
+    let file = tmp.join("pictures.data");
+    c.write(&file).expect("write the data file");
+    let (_, _, from_file, placed_file) = run_2d(&rom, frames, Some(file), None, tmp.join("file.png"));
+    assert_eq!(placed_file, placed, "the data file's part holds the folder's pictures");
+    assert!(from_file == same, "pictures from a data file draw the same as from the folder");
     // one-colour pictures of the first sprite's size: only its pixels change
     let mut rects = Vec::new();
     for c in &objs {

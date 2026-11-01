@@ -17,8 +17,25 @@ pub(super) struct Img {
 }
 
 struct Entry {
-    path: PathBuf,
+    source: Source,
     image: OnceLock<Option<Arc<Img>>>,
+}
+
+enum Source {
+    Path(PathBuf),
+    Bytes(Vec<u8>),
+}
+
+impl Entry {
+    fn picture(&self) -> Option<Arc<Img>> {
+        self.image
+            .get_or_init(|| match &self.source {
+                Source::Path(p) => std::fs::read(p).ok().and_then(|b| decode(&b)),
+                Source::Bytes(b) => decode(b),
+            }
+            .map(Arc::new))
+            .clone()
+    }
 }
 
 #[derive(Default)]
@@ -52,16 +69,30 @@ pub(super) fn parse_name(name: &str) -> Option<Key> {
 }
 
 impl Pack2d {
+    /// A folder of PNGs, or a data file with a 2D part (`sunpetal-pack-2d`).
     pub fn load(dir: &Path) -> Result<Pack2d, String> {
         let mut entries = HashMap::new();
         let mut layers = HashMap::new();
+        if dir.is_file() {
+            let c = sunpetal_data::container::Container::read_only(dir, |t| t == sunpetal_data::pack2d::TAG)?;
+            for s in c.all(sunpetal_data::pack2d::TAG) {
+                for (name, png) in sunpetal_data::pack2d::unpack(&s.data)? {
+                    if let Some(k) = parse_name(&name) {
+                        entries.insert(k, Entry { source: Source::Bytes(png), image: OnceLock::new() });
+                    } else if let Some(h) = parse_layer_name(&name) {
+                        layers.insert(h, Entry { source: Source::Bytes(png), image: OnceLock::new() });
+                    }
+                }
+            }
+            return Ok(Pack2d { entries, layers });
+        }
         let rd = std::fs::read_dir(dir).map_err(|e| format!("2D pack {}: {}", dir.display(), e))?;
         for f in rd.flatten() {
             let name = f.file_name().to_string_lossy().into_owned();
             if let Some(k) = parse_name(&name) {
-                entries.insert(k, Entry { path: f.path(), image: OnceLock::new() });
+                entries.insert(k, Entry { source: Source::Path(f.path()), image: OnceLock::new() });
             } else if let Some(h) = parse_layer_name(&name) {
-                layers.insert(h, Entry { path: f.path(), image: OnceLock::new() });
+                layers.insert(h, Entry { source: Source::Path(f.path()), image: OnceLock::new() });
             }
         }
         Ok(Pack2d { entries, layers })
@@ -81,19 +112,17 @@ impl Pack2d {
 
     /// The picture of a background layer whose pixels hash to `h`.
     pub fn get_layer(&self, h: u64) -> Option<Arc<Img>> {
-        let e = self.layers.get(&h)?;
-        e.image.get_or_init(|| read_png(&e.path).map(Arc::new)).clone()
+        self.layers.get(&h)?.picture()
     }
 
     /// The picture of `key`, decoded the first time it is asked for; `None` if there is none or it does not read.
     pub fn get(&self, key: &Key) -> Option<Arc<Img>> {
-        let e = self.entries.get(key)?;
-        e.image.get_or_init(|| read_png(&e.path).map(Arc::new)).clone()
+        self.entries.get(key)?.picture()
     }
 }
 
-fn read_png(path: &Path) -> Option<Img> {
-    let mut dec = png::Decoder::new(std::fs::File::open(path).ok()?);
+fn decode(bytes: &[u8]) -> Option<Img> {
+    let mut dec = png::Decoder::new(std::io::Cursor::new(bytes));
     dec.set_transformations(png::Transformations::EXPAND);
     let mut r = dec.read_info().ok()?;
     let mut buf = vec![0u8; r.output_buffer_size()];

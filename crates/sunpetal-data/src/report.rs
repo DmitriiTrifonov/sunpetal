@@ -27,6 +27,7 @@ pub fn report(path: &Path) -> Result<String, String> {
                     b"NDS " => "the DS ROM",
                     b"TEXS" => "PS2 textures",
                     b"TRAN" => "a translation",
+                    b"2DPK" => "2D pictures",
                     _ => "(a part this program does not know)",
                 };
                 o += &format!("  {}  {:>9}  CRC-32 {:08X}  {}\n", String::from_utf8_lossy(&p.tag), size(p.len), p.crc, what);
