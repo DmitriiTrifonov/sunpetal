@@ -190,6 +190,14 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     unsafe {
         libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_USER_INTERACTIVE, 0);
     }
+    // and no App Nap while the window is behind another (the terminal with the chat, say): the game's frames are timed work
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_foundation::{NSActivityOptions, NSProcessInfo, NSString};
+        let opts = NSActivityOptions::UserInitiated | NSActivityOptions::LatencyCritical;
+        let token = NSProcessInfo::processInfo().beginActivityWithOptions_reason(opts, &NSString::from_str("Sunpetal runs the game's frames"));
+        std::mem::forget(token);
+    }
     *shared.status.lock().unwrap() = "booting".into();
     if let Err(e) = nds::boot(cfg) {
         *shared.stopped.lock().unwrap() = Some(e);

@@ -2835,6 +2835,7 @@ dependencies = [
  "gilrs",
  "libc",
  "naga",
+ "objc2-foundation 0.3.2",
  "png 0.17.16",
  "pollster 1.0.1",
  "rfd",

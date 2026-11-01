@@ -325,8 +325,13 @@ impl Gfx {
             format,
             width: size.width.max(1),
             height: size.height.max(1),
-            present_mode: wgpu::PresentMode::AutoVsync,
-            desired_maximum_frame_latency: 2,
+            // SUNPETAL_PRESENT=immediate|fifo and SUNPETAL_LATENCY=1..3: a way to test the windowed fps (B-11)
+            present_mode: match std::env::var("SUNPETAL_PRESENT").as_deref() {
+                Ok("immediate") => wgpu::PresentMode::AutoNoVsync,
+                Ok("fifo") => wgpu::PresentMode::Fifo,
+                _ => wgpu::PresentMode::AutoVsync,
+            },
+            desired_maximum_frame_latency: std::env::var("SUNPETAL_LATENCY").ok().and_then(|v| v.parse().ok()).filter(|n| (1..=3).contains(n)).unwrap_or(2),
             alpha_mode: caps.alpha_modes[0],
             color_space: wgpu::SurfaceColorSpace::Auto,
             view_formats: vec![],
