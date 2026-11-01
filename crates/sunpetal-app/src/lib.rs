@@ -1266,6 +1266,10 @@ fn save_command(export: Option<&std::path::Path>, import: Option<&std::path::Pat
         }
     }
     if let Some(from) = import {
+        if let Some(pid) = sunpetal_runtime::savefile::running(&path) {
+            eprintln!("a game (process {}) is running on {}: close it first, or it writes its own memory over the import (a lock left by a crash: delete {})", pid, path.display(), sunpetal_runtime::savefile::lock_path(&path).display());
+            return 1;
+        }
         match sunpetal_runtime::savefile::import(from, &path) {
             Ok(s) => println!("{}", s),
             Err(e) => {

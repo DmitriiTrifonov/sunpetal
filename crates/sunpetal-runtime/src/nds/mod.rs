@@ -1560,7 +1560,10 @@ pub fn report() {
 
 /// Writes the backup memory if it changed (the file is written whole, then moved into place).
 pub fn finish() {
-    nds(|n| n.cart_save());
+    nds(|n| {
+        n.cart_save();
+        n.cart_release();
+    });
 }
 
 /// The same, for now and then while the game runs: a game that is closed or killed keeps what it

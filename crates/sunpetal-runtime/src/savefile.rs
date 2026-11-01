@@ -121,6 +121,69 @@ pub fn import(src: &Path, dest: &Path) -> Result<String, String> {
     Ok(o)
 }
 
+/// The file that says a game is running on a save: `NAME.sav.lock` holds the process number.
+pub fn lock_path(save: &Path) -> PathBuf {
+    let mut n = save.as_os_str().to_os_string();
+    n.push(".lock");
+    PathBuf::from(n)
+}
+
+/// Whether a process with this number is alive (`kill -0`; where that is missing, it is taken to be).
+fn alive(pid: u32) -> bool {
+    if pid == std::process::id() {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        return std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(true);
+    }
+    #[allow(unreachable_code)]
+    true
+}
+
+/// The process that has a game running on `save`, if the lock file names a live one (a lock left by
+/// a process that is gone does not count).
+pub fn running(save: &Path) -> Option<u32> {
+    let pid: u32 = fs::read_to_string(lock_path(save)).ok()?.trim().parse().ok()?;
+    alive(pid).then_some(pid)
+}
+
+/// A game's claim on a save: the lock file exists while this value does (and is removed with it).
+#[derive(Debug)]
+pub struct Lock {
+    path: PathBuf,
+}
+
+impl Drop for Lock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+/// Takes the lock on `save` for this process. Another live process holding it is an error (two games on
+/// one save write over each other); a lock left by a dead one is taken over.
+pub fn lock(save: &Path) -> Result<Lock, String> {
+    use std::io::Write;
+    let path = lock_path(save);
+    if let Some(pid) = running(save) {
+        if pid != std::process::id() {
+            return Err(format!("a game (process {}) is already running on {}", pid, save.display()));
+        }
+    }
+    if let Some(d) = path.parent() {
+        let _ = fs::create_dir_all(d);
+    }
+    let mut f = fs::File::create(&path).map_err(|e| format!("cannot write {}: {}", path.display(), e))?;
+    let _ = write!(f, "{}", std::process::id());
+    Ok(Lock { path })
+}
+
 /// Writes a copy of the save to `to` (the raw bytes, as other emulators read them).
 pub fn export(bytes: &[u8], to: &Path) -> Result<String, String> {
     check(bytes).map_err(|e| format!("nothing to export: {}", e))?;
@@ -231,5 +294,34 @@ mod tests {
     fn the_default_path_is_the_named_one_or_beside_the_run() {
         assert_eq!(default_path(Some(Path::new("a/b.sav")), Path::new("out"), Path::new("x.nds")), PathBuf::from("a/b.sav"));
         assert_eq!(default_path(None, Path::new("out"), Path::new("dir/game.nds")), PathBuf::from("out/game.sav"));
+    }
+    #[test]
+    fn a_running_game_holds_the_lock_and_a_dead_ones_lock_is_taken_over() {
+        let d = dir("lock");
+        let save = d.join("g.sav");
+        assert_eq!(running(&save), None);
+        {
+            let _l = lock(&save).unwrap();
+            assert!(lock_path(&save).exists());
+            assert_eq!(running(&save), Some(std::process::id()));
+        }
+        assert!(!lock_path(&save).exists(), "the lock goes with the value");
+        // a lock of a process that is gone (the number of a finished child)
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let dead = child.id();
+        child.wait().unwrap();
+        fs::write(lock_path(&save), dead.to_string()).unwrap();
+        assert_eq!(running(&save), None, "a dead process does not hold it");
+        let l = lock(&save).unwrap();
+        assert_eq!(running(&save), Some(std::process::id()));
+        drop(l);
+        // a live other process refuses
+        let mut sleeper = std::process::Command::new("sleep").arg("5").spawn().unwrap();
+        fs::write(lock_path(&save), sleeper.id().to_string()).unwrap();
+        let e = lock(&save).unwrap_err();
+        assert!(e.contains("already running"), "{}", e);
+        sleeper.kill().unwrap();
+        sleeper.wait().unwrap();
+        fs::remove_dir_all(&d).unwrap();
     }
 }

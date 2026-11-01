@@ -30,6 +30,8 @@ pub(super) struct Cart {
     dirty: bool,
     /// An imported save is on the disk: what the machine holds is old, and none of it is written again.
     frozen: bool,
+    /// This game's claim on the save file (a second program must not import over it).
+    lock: Option<crate::savefile::Lock>,
     bk_cmd: u8,
     bk_status: u8,
     bk_out: u8,
@@ -55,6 +57,7 @@ impl Cart {
             save_path: PathBuf::new(),
             dirty: false,
             frozen: false,
+            lock: None,
             bk_cmd: 0,
             bk_status: 0,
             bk_out: 0,
@@ -115,6 +118,13 @@ impl Nds {
         c.rom = rom;
         c.chip_id = chip_id;
         c.save = save;
+        c.lock = match crate::savefile::lock(&save_path) {
+            Ok(l) => Some(l),
+            Err(e) => {
+                note(&format!("warning: {}; both would write the same save", e));
+                None
+            }
+        };
         c.save_path = save_path;
         Ok(())
     }
@@ -154,6 +164,11 @@ impl Nds {
         self.cart.frozen = true;
         self.cart.dirty = false;
         Ok(said)
+    }
+
+    /// The game is done with the save file: the lock goes, so the next program may take it.
+    pub(super) fn cart_release(&mut self) {
+        self.cart.lock = None;
     }
 
     pub(super) fn cart_save(&mut self) {
