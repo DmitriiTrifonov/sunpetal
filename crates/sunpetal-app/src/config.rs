@@ -112,6 +112,10 @@ pub struct Input {
     pub dial_swipe: bool,
     /// Turn of the dial, in radians, for a swipe of one dial radius; negative turns the other way.
     pub dial_gain: f32,
+    /// The pad's virtual stylus (the right stick): the screen's widths per second at full tilt.
+    pub stylus_speed: f32,
+    /// How far the right stick must go before the stylus moves (0-0.9).
+    pub stylus_dead: f32,
 }
 
 impl Default for Input {
@@ -136,6 +140,8 @@ impl Default for Input {
             touch_controls: "auto".into(),
             dial_swipe: false,
             dial_gain: 1.5,
+            stylus_speed: 0.9,
+            stylus_dead: 0.2,
         }
     }
 }
@@ -218,10 +224,26 @@ impl Lang {
     }
 }
 
+/// Which menu START (and F1, Esc, the menu button) opens.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[serde(default)]
+pub struct Ui {
+    /// The full settings menu instead of the short one (sound, screen, picture, saves). On by default
+    /// where there are no buttons to reach the game's own menu (a phone).
+    pub full_menu: bool,
+}
+
+impl Default for Ui {
+    fn default() -> Ui {
+        Ui { full_menu: cfg!(any(target_os = "android", target_os = "ios")) }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, PartialEq, Default, Debug)]
 #[serde(default)]
 pub struct Settings {
     pub interface: Interface,
+    pub ui: Ui,
     pub game: Game,
     pub video: Video,
     pub audio: Audio,
@@ -259,8 +281,16 @@ impl Settings {
         }
     }
 
+    /// Fixes the pad's stylus numbers a hand-edited file may have got wrong.
+    pub fn sanitize_pad(&mut self) {
+        let i = &mut self.input;
+        i.stylus_speed = if i.stylus_speed.is_finite() { i.stylus_speed.clamp(0.1, 4.0) } else { 0.9 };
+        i.stylus_dead = if i.stylus_dead.is_finite() { i.stylus_dead.clamp(0.0, 0.9) } else { 0.2 };
+    }
+
     /// Fixes what a hand-edited file may have got wrong.
     pub fn sanitize(&mut self) {
+        self.sanitize_pad();
         self.video.pixel_aspect = if self.video.pixel_aspect.is_finite() { self.video.pixel_aspect.clamp(0.5, 2.0) } else { 1.0 };
         if !matches!(self.video.fit.as_str(), "fit" | "integer" | "fill" | "stretch") {
             self.video.fit = "fit".into();
@@ -529,5 +559,43 @@ mod tests {
     #[test]
     fn profile_names_are_made_safe() {
         assert_eq!(clean_name("  ../x/y "), "___x_y");
+    }
+}
+
+#[cfg(test)]
+mod ui_flag_tests {
+    use super::*;
+
+    #[test]
+    fn the_full_menu_is_on_where_there_are_no_buttons() {
+        let phone = cfg!(any(target_os = "android", target_os = "ios"));
+        assert_eq!(Settings::default().ui.full_menu, phone);
+    }
+
+    #[test]
+    fn the_flag_is_read_from_ui_and_written_back() {
+        let s: Settings = toml::from_str("[ui]\nfull_menu = true\n").unwrap();
+        assert!(s.ui.full_menu);
+        let s: Settings = toml::from_str("[ui]\nfull_menu = false\n").unwrap();
+        assert!(!s.ui.full_menu);
+        let mut s = Settings::default();
+        s.ui.full_menu = !s.ui.full_menu;
+        let text = toml::to_string_pretty(&s).unwrap();
+        assert!(text.contains("[ui]") && text.contains("full_menu"));
+        let back: Settings = toml::from_str(&text).unwrap();
+        assert_eq!(back.ui, s.ui);
+        // an old file with no [ui] gets the platform's default
+        let old: Settings = toml::from_str("[audio]\nvolume = 0.5\n").unwrap();
+        assert_eq!(old.ui, Ui::default());
+    }
+
+    #[test]
+    fn the_stylus_numbers_of_a_hand_edited_file_are_held() {
+        let mut s: Settings = toml::from_str("[input]\nstylus_speed = 99.0\nstylus_dead = -3.0\n").unwrap();
+        s.sanitize();
+        assert_eq!(s.input.stylus_speed, 4.0);
+        assert_eq!(s.input.stylus_dead, 0.0);
+        let d = Input::default();
+        assert!(d.stylus_speed > 0.0 && d.stylus_dead < 0.9);
     }
 }
