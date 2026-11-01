@@ -75,6 +75,9 @@ struct Args {
     /// extension (the upper screen alone, 256 + 2N wide).
     #[arg(long, value_name = "PIXELS")]
     wide: Option<usize>,
+    /// A 2D pack (a folder of pictures or a data file with a 2D part) that replaces sprites and background layers.
+    #[arg(long, value_name = "DIR|FILE")]
+    pack_2d: Option<PathBuf>,
     /// The 3D's internal resolution (1-8 times the DS's) for `--shot`.
     #[arg(long, value_name = "N")]
     scale: Option<usize>,
@@ -311,6 +314,9 @@ fn run(a: Args) -> Result<(), String> {
     sunpetal_runtime::nds::set_wide(a.wide.unwrap_or(0));
     if let Some(n) = a.scale {
         sunpetal_runtime::nds::set_scale(n);
+    }
+    if let Some(p) = &a.pack_2d {
+        sunpetal_runtime::nds::set_pack_2d(Some(p))?;
     }
     let mut extras = sunpetal_runtime::nds::Extras::default();
     if let Some(v) = a.outline { extras.outline = v; }

@@ -828,8 +828,15 @@ impl Nds {
         // a blend or a fade over a layer would be lost under a picture laid over it: the engine draws those as they are
         let plain = |s: &Self, e: usize| {
             let io = if e == 1 { 0x0400_1000 } else { 0x0400_0000 };
-            let (bldcnt, bright) = (s.g16(io + 0x50), s.g16(io + 0x6C));
-            !((bldcnt >> 6 & 3 != 0 && (bldcnt & 0x3F != 0 || bldcnt >> 6 & 3 == 1)) || (bright >> 14 & 3 != 0 && bright & 31 != 0))
+            let (bldcnt, alpha, bldy, bright) = (s.g16(io + 0x50), s.g16(io + 0x52), s.g16(io + 0x54), s.g16(io + 0x6C));
+            // a blend that changes nothing does not count: no first target, a brightness change of 0, or an alpha of 16:0
+            // (the game sets that up on both screens of the device and the case menu)
+            let blends = match bldcnt >> 6 & 3 {
+                0 => false,
+                1 => bldcnt & 0x3F != 0 && !(alpha & 31 >= 16 && alpha >> 8 & 31 == 0),
+                _ => bldcnt & 0x3F != 0 && bldy & 31 != 0,
+            };
+            !(blends || (bright >> 14 & 3 != 0 && bright & 31 != 0))
         };
         if pack.has_layers() {
             for (e, bg, _, h) in self.bg_layers() {

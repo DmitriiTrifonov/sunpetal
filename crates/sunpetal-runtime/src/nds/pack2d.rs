@@ -123,7 +123,7 @@ impl Pack2d {
 
 fn decode(bytes: &[u8]) -> Option<Img> {
     let mut dec = png::Decoder::new(std::io::Cursor::new(bytes));
-    dec.set_transformations(png::Transformations::EXPAND);
+    dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut r = dec.read_info().ok()?;
     let mut buf = vec![0u8; r.output_buffer_size()];
     let info = r.next_frame(&mut buf).ok()?;
