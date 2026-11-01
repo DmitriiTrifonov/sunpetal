@@ -325,6 +325,16 @@ impl Menu {
                     ui.selectable_value(&mut s.video.background, "black".to_string(), tx("black", "чёрная"));
                 });
                 ui.checkbox(&mut s.video.wide, tx("Widen the 3D view to the window (one screen)", "Расширять 3D под окно (один экран)"));
+                if s.video.wide {
+                    // how wide the 3D may get: the window's shape, or at most one of the common ones (bars take the rest)
+                    const LIMITS: [(f32, &str, &str); 4] = [(0.0, "as the window", "по окну"), (16.0 / 10.0, "16:10", "16:10"), (16.0 / 9.0, "16:9", "16:9"), (21.0 / 9.0, "21:9", "21:9")];
+                    let now = LIMITS.iter().find(|l| (l.0 - s.video.wide_limit).abs() < 0.01).map_or_else(|| format!("{:.2}", s.video.wide_limit), |l| tx(l.1, l.2).to_string());
+                    egui::ComboBox::from_label(tx("Widest 3D view", "Макс. ширина 3D")).selected_text(now).show_ui(ui, |ui| {
+                        for l in LIMITS {
+                            ui.selectable_value(&mut s.video.wide_limit, l.0, tx(l.1, l.2));
+                        }
+                    });
+                }
                 ui.checkbox(&mut s.video.bars_match, tx("Bars take the picture's edge colour (logos)", "Полосы цвета края картинки (логотипы)"));
                 // window sizes (logical pixels); the window is also free to drag, and the menu then shows "own"
                 const SIZES: [[u32; 2]; 8] = [[512, 384], [768, 576], [1024, 768], [1280, 720], [1600, 900], [1920, 1080], [2560, 1440], [512, 768]];

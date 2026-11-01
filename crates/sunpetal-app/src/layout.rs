@@ -367,6 +367,15 @@ pub fn wide_each_side(win: (f32, f32), par: f32, max: usize) -> usize {
     if e.is_finite() && e >= 2.0 { (e as usize).min(max) } else { 0 }
 }
 
+/// The most DS pixels each side the 3D view may be widened by when its shape is limited to `limit` (width over
+/// height; 0 or less: no limit but `max`).
+pub fn wide_cap(limit: f32, max: usize) -> usize {
+    if !limit.is_finite() || limit <= 0.0 {
+        return max;
+    }
+    (((limit * 192.0 - 256.0) / 2.0).ceil().max(0.0) as usize).min(max)
+}
+
 /// The title's "Press START" box on the lower screen (a blue box with a white rim on black, the
 /// words in the language of the game): where it is, in the lower screen's pixels, with its rim. The
 /// upper screen has the film at that time; the box is put over it where it is.
@@ -985,6 +994,12 @@ mod tests {
         assert!(wide_each_side((1280.0, 720.0), 1.33, 170) < 5);
         // very wide: held at the most
         assert_eq!(wide_each_side((4000.0, 500.0), 1.0, 170), 170);
+        // the shape of the 3D limited: 16:9 widens by 43 at most, 21:9 by 96, none by 170; 4:3 not at all
+        assert_eq!(wide_cap(16.0 / 9.0, 170), 43);
+        assert_eq!(wide_cap(21.0 / 9.0, 170), 96);
+        assert_eq!(wide_cap(0.0, 170), 170);
+        assert_eq!(wide_cap(4.0 / 3.0, 170), 0);
+        assert_eq!(wide_each_side((3440.0, 1440.0), 1.0, wide_cap(16.0 / 9.0, 170)), 43);
     }
 
     #[test]

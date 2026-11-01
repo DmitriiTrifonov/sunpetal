@@ -1013,7 +1013,7 @@ impl ApplicationHandler for App {
                         }
                         let upper_alone = base.screens[0].is_some() && (base.screens[1].is_none() || base.name == "overlay");
                         let want = if settings.video.wide && upper_alone {
-                            layout::wide_each_side(g.size(), settings.video.pixel_aspect, sunpetal_runtime::nds::WIDE_MAX)
+                            layout::wide_each_side(g.size(), settings.video.pixel_aspect, layout::wide_cap(settings.video.wide_limit, sunpetal_runtime::nds::WIDE_MAX))
                         } else {
                             0
                         };
