@@ -714,8 +714,7 @@ impl ApplicationHandler for App {
                     self.dial_scene = dial::recognise(*scale, rgba);
                     // the dial's answer plays out on the upper screen a while after the dial is gone
                     let was = self.puzzle_hold;
-                    let device = layout::device_in(*scale, rgba);
-                    self.puzzle_hold = if self.dial_scene || device {
+                    self.puzzle_hold = if self.dial_scene {
                         PUZZLE_FRAMES
                     } else if layout::counter_in(*scale, rgba) {
                         0 // the map is back: the walk goes on
@@ -729,7 +728,7 @@ impl ApplicationHandler for App {
                         self.want = (false, AUTO_FRAMES);
                     }
                     // the digits' place is known once they are there; the layout then stays till the puzzle is done
-                    self.puzzle_side = self.puzzle_hold > 0 && (self.puzzle_side || device || layout::led_under_panel(*scale, rgba));
+                    self.puzzle_side = self.puzzle_hold > 0 && (self.puzzle_side || layout::led_under_panel(*scale, rgba));
                     self.counter_seen = layout::counter_in(*scale, rgba);
                     self.hint_seen = layout::hint_in(*scale, rgba);
                     let coll = layout::collection_in(*scale, rgba);

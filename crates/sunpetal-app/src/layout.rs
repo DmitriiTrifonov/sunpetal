@@ -466,29 +466,6 @@ pub fn scrolled(scroll: f32) -> Layout {
     Layout { name: "single", size: (256.0, 192.0), screens: [None, None], patches, fit: Fit::default() }
 }
 
-/// Whether the frame is Catherine's device: the upper screen is its green panel (the dial, the
-/// buttons) and the lower one carries its green strip (the readings, the case menu). The dial is on the
-/// upper screen, so both screens are needed (`Live::both`).
-pub fn device_in(scale: usize, rgba: &[u8]) -> bool {
-    let (w, top) = (256 * scale, 192 * scale);
-    if rgba.len() < w * top * 2 * 4 {
-        return false;
-    }
-    let green = |base: usize| {
-        let (mut n, mut g) = (0usize, 0usize);
-        for y in (0..192).step_by(4) {
-            for x in (0..256).step_by(4) {
-                let o = (((base + y * scale) * w) + x * scale) * 4;
-                let (r, gr, b) = (rgba[o] as i32, rgba[o + 1] as i32, rgba[o + 2] as i32);
-                n += 1;
-                g += (gr > r + 25 && gr > b + 40 && gr > 110) as usize;
-            }
-        }
-        g * 100 / n
-    };
-    green(0) >= 15 && green(top) >= 8
-}
-
 /// Which screen the game wants the player at, from the lower screen's picture: the lower, when it
 /// has something on it that is not the map (a menu, a list, the case, a puzzle: the lower screen
 /// is the touch screen); the upper, when it shows the map with the counter (a scene, a walk, a
@@ -706,15 +683,6 @@ mod tests {
             ("t1.png", true, "the title's menu"),
             ("rq_a.png", true, "the request buttons"),
         ];
-        // the device: its frames, and none of the others (the title, a book, a walk, the logos)
-        let device = ["c0.png", "c1.png", "case_guide.png", "memo_back.png"];
-        let others = ["badge2.png", "c2.png", "goods.png", "memo.png", "t1.png", "rq_a.png", "save.png", "vid1.png", "vid2.png", "vid4.png"];
-        for (list, want) in [(&device[..], true), (&others[..], false)] {
-            for file in list {
-                let Some(rgba) = load_rgba(&dir.join(file)) else { continue };
-                assert_eq!(device_in(1, &rgba), want, "{}", file);
-            }
-        }
         let mut wrong = Vec::new();
         for (file, want, what) in cases {
             let Some(rgba) = load_rgba(&dir.join(file)) else { continue };
