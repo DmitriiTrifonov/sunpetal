@@ -410,7 +410,7 @@ impl Menu {
                 };
                 if ui.button(label).clicked() {
                     if ask {
-                        if let Some(from) = rfd::FileDialog::new().set_title("Sunpetal").add_filter("save", &["sav", "dsv"]).pick_file() {
+                        if let Some(from) = rfd::FileDialog::new().set_title("Sunpetal").pick_file() {
                             action = Some(Action::ImportSave(from));
                         }
                     }
