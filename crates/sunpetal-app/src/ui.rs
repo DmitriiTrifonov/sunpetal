@@ -74,16 +74,16 @@ impl Menu {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     fn save_row(&mut self, ui: &mut egui::Ui, tx: &dyn Fn(&'static str, &'static str) -> String, action: &mut Option<Action>) {
         ui.horizontal(|ui| {
-            if ui.button(tx("Export the save…", "Сохранить копию сохранения…")).clicked() {
+            if ui.button(tx("Export the save…", "Экспорт сохранения…")).clicked() {
                 if let Some(to) = rfd::FileDialog::new().set_title("Sunpetal").set_file_name("sunpetal.sav").add_filter("save", &["sav"]).save_file() {
                     *action = Some(Action::ExportSave(to));
                 }
             }
             let ask = self.import_ask;
             let label = if ask {
-                tx("The save is replaced (the old one is kept) and the game restarts. Press again to choose the file", "Сохранение заменится (старое останется копией), игра перезапустится. Нажмите ещё раз и выберите файл")
+                tx("The save is replaced (the old one is kept) and the game restarts. Press again to choose the file", "Импорт заменит сохранение (старое останется копией), игра перезапустится. Нажмите ещё раз и выберите файл")
             } else {
-                tx("Import a save…", "Загрузить сохранение из файла…")
+                tx("Import a save…", "Импорт сохранения…")
             };
             if ui.button(label).clicked() {
                 if ask {
