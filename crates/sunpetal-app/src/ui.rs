@@ -31,11 +31,29 @@ pub struct Menu {
     import_ask: bool,
     /// What egui has now (None: the bundled font only), to reload only when it changes.
     font_set: Option<String>,
+    /// The short menu (sound, screen, picture, saves) instead of the full one; set by the window from `[ui] full_menu`.
+    pub short: bool,
+    /// The "main menu" button was pressed once: the next press does it.
+    main_ask: bool,
+    /// The focus ring (for the pad and the keyboard) was put into egui's style.
+    focus_style: bool,
 }
+
+/// What the short menu holds, in order; everything else (effects, keys, profiles, debug...) is the full menu's.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Block {
+    Sound,
+    Screen,
+    Graphics,
+    Saves,
+    Leave,
+}
+
+pub const SHORT: [Block; 5] = [Block::Sound, Block::Screen, Block::Graphics, Block::Saves, Block::Leave];
 
 impl Menu {
     pub fn new() -> Menu {
-        Menu { open: false, rebinding: None, profile_name: String::new(), profiles: config::profiles(), message: String::new(), restart_ask: false, import_ask: false, font_set: None }
+        Menu { open: false, rebinding: None, profile_name: String::new(), profiles: config::profiles(), message: String::new(), restart_ask: false, import_ask: false, font_set: None, short: false, main_ask: false, focus_style: false }
     }
 
     /// A line under the settings (what a save export or import did).
@@ -46,8 +64,120 @@ impl Menu {
     pub fn toggle(&mut self) {
         self.open = !self.open;
         self.rebinding = None;
+        (self.restart_ask, self.import_ask, self.main_ask) = (false, false, false);
         if self.open {
             self.profiles = config::profiles();
+        }
+    }
+
+    /// The game's save as a file other emulators read (a desktop's file dialog).
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    fn save_row(&mut self, ui: &mut egui::Ui, tx: &dyn Fn(&'static str, &'static str) -> String, action: &mut Option<Action>) {
+        ui.horizontal(|ui| {
+            if ui.button(tx("Export the save…", "Сохранить копию сохранения…")).clicked() {
+                if let Some(to) = rfd::FileDialog::new().set_title("Sunpetal").set_file_name("sunpetal.sav").add_filter("save", &["sav"]).save_file() {
+                    *action = Some(Action::ExportSave(to));
+                }
+            }
+            let ask = self.import_ask;
+            let label = if ask {
+                tx("The save is replaced (the old one is kept) and the game restarts. Press again to choose the file", "Сохранение заменится (старое останется копией), игра перезапустится. Нажмите ещё раз и выберите файл")
+            } else {
+                tx("Import a save…", "Загрузить сохранение из файла…")
+            };
+            if ui.button(label).clicked() {
+                if ask {
+                    if let Some(from) = rfd::FileDialog::new().set_title("Sunpetal").add_filter("save", &["sav", "dsv"]).pick_file() {
+                        *action = Some(Action::ImportSave(from));
+                    }
+                }
+                self.import_ask = !ask;
+            }
+        });
+    }
+
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    fn save_row(&mut self, _: &mut egui::Ui, _: &dyn Fn(&'static str, &'static str) -> String, _: &mut Option<Action>) {}
+
+    /// The short menu: sound, screen and window, picture, saves and restart, leaving.
+    fn short_body(&mut self, ui: &mut egui::Ui, s: &mut Settings, layouts: &[&str], internal: (u32, u32), tx: &dyn Fn(&'static str, &'static str) -> String, action: &mut Option<Action>) {
+        let lang = Lang::resolve(&s.interface.language);
+        for block in SHORT {
+            match block {
+                Block::Sound => {
+                    ui.heading(tx("Sound", "Звук"));
+                    ui.add(egui::Slider::new(&mut s.audio.volume, 0.0..=1.0).text(tx("Volume", "Громкость")));
+                    ui.checkbox(&mut s.audio.mute, tx("Mute", "Без звука"));
+                }
+                Block::Screen => {
+                    ui.heading(tx("Screen and window", "Экран и окно"));
+                    egui::ComboBox::from_label(tx("Screen layout", "Раскладка экранов")).selected_text(layout_label(&s.video.layout, lang).to_string()).show_ui(ui, |ui| {
+                        for l in layouts {
+                            ui.selectable_value(&mut s.video.layout, l.to_string(), layout_label(l, lang));
+                        }
+                    });
+                    const SIZES: [[u32; 2]; 8] = [[512, 384], [768, 576], [1024, 768], [1280, 720], [1600, 900], [1920, 1080], [2560, 1440], [512, 768]];
+                    let own = tx("own (dragged)", "своё (по перетаскиванию)");
+                    let now = SIZES.iter().find(|z| **z == s.video.window).map_or(own, |z| format!("{} × {}", z[0], z[1]));
+                    egui::ComboBox::from_label(tx("Window size", "Размер окна")).selected_text(now).show_ui(ui, |ui| {
+                        for z in SIZES {
+                            ui.selectable_value(&mut s.video.window, z, format!("{} × {}", z[0], z[1]));
+                        }
+                    });
+                    ui.checkbox(&mut s.video.fullscreen, tx("Full screen (F11)", "Полный экран (F11)"));
+                }
+                Block::Graphics => {
+                    ui.heading(tx("Picture", "Картинка"));
+                    ui.horizontal(|ui| {
+                        ui.label(tx("3D resolution:", "Разрешение 3D:"));
+                        ui.add(egui::Slider::new(&mut s.video.res, 1..=8).suffix("x"));
+                    });
+                    ui.label(format!("{} {}x{}", tx("each screen, pixels:", "каждый экран, точек:"), internal.0, internal.1));
+                    egui::ComboBox::from_label(tx("Dialogue font", "Шрифт реплик")).selected_text(match s.video.dialogue_font.as_str() {
+                        "rubik" => "Rubik",
+                        "ubuntu" => "Ubuntu",
+                        _ => "Noto Sans",
+                    }).show_ui(ui, |ui| {
+                        ui.selectable_value(&mut s.video.dialogue_font, "noto".to_string(), "Noto Sans");
+                        ui.selectable_value(&mut s.video.dialogue_font, "rubik".to_string(), "Rubik");
+                        ui.selectable_value(&mut s.video.dialogue_font, "ubuntu".to_string(), "Ubuntu");
+                    });
+                    ui.checkbox(&mut s.video.linear, tx("Smooth when stretched (linear filter)", "Сглаживание при растяжении (линейный фильтр)"));
+                }
+                Block::Saves => {
+                    ui.heading(tx("Saves", "Сохранения"));
+                    self.save_row(ui, tx, action);
+                    let ask = self.restart_ask;
+                    let label = if ask { tx("Progress not saved in the game is lost. Press again to restart", "Несохранённый прогресс пропадёт. Нажмите ещё раз для перезапуска") } else { tx("Restart the game", "Перезапустить игру") };
+                    if ui.button(label).clicked() {
+                        if ask {
+                            *action = Some(Action::Restart);
+                        }
+                        self.restart_ask = !ask;
+                    }
+                }
+                Block::Leave => {
+                    ui.separator();
+                    // The machine is the recompiled program with its own threads: leaving to the title is the program started anew.
+                    let ask = self.main_ask;
+                    let label = if ask { tx("Progress not saved in the game is lost. Press again to go to the main menu", "Несохранённый прогресс пропадёт. Нажмите ещё раз, чтобы выйти в главное меню") } else { tx("Exit to the main menu", "Выйти в главное меню") };
+                    if ui.button(label).clicked() {
+                        if ask {
+                            *action = Some(Action::Restart);
+                        }
+                        self.main_ask = !ask;
+                    }
+                    ui.horizontal(|ui| {
+                        if ui.button(tx("Close", "Закрыть")).clicked() {
+                            self.open = false;
+                        }
+                        if ui.button(tx("Quit", "Выйти из игры")).clicked() {
+                            *action = Some(Action::Quit);
+                        }
+                    });
+                    ui.label(tx("All the settings: full_menu = true under [ui] in the settings file, or --full-menu.", "Все настройки: full_menu = true в разделе [ui] файла настроек или --full-menu."));
+                }
+            }
         }
     }
 
@@ -60,6 +190,15 @@ impl Menu {
             let bytes = want.as_ref().and_then(|f| crate::fonts::pick(f)).map(|(_, b)| b);
             ctx.set_fonts(crate::fonts::definitions(bytes));
             self.font_set = want;
+        }
+        if !self.focus_style {
+            // the widget the pad or the keys are on: a thick yellow ring
+            ctx.all_styles_mut(|st| {
+                let ring = egui::Stroke::new(2.5, egui::Color32::from_rgb(255, 214, 64));
+                st.visuals.widgets.active.bg_stroke = ring;
+                st.visuals.widgets.active.fg_stroke = egui::Stroke::new(2.0, egui::Color32::WHITE);
+            });
+            self.focus_style = true;
         }
         let lang = Lang::resolve(&s.interface.language);
         // a table in `ui/<code>.toml` (uitext.rs) translates text by text over the built-in two
@@ -79,6 +218,10 @@ impl Menu {
         let video_res = s.video.res as u32;
         let mut open = self.open;
         egui::Window::new(tx("Sunpetal: settings", "Sunpetal: настройки")).open(&mut open).resizable(false).collapsible(false).vscroll(true).max_height((ctx.content_rect().height() - 48.0).max(120.0)).show(ctx, |ui| {
+            if self.short {
+                self.short_body(ui, s, layouts, internal, &tx, &mut action);
+                return;
+            }
             egui::ComboBox::from_label("Language / Язык")
                 .selected_text(match s.interface.language.as_str() {
                     "en" => "English".to_string(),
@@ -394,29 +537,7 @@ impl Menu {
                 }
             });
             ui.separator();
-            // the game's save as a file other emulators read (a desktop's file dialog)
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
-            ui.horizontal(|ui| {
-                if ui.button(tx("Export the save…", "Сохранить копию сохранения…")).clicked() {
-                    if let Some(to) = rfd::FileDialog::new().set_title("Sunpetal").set_file_name("sunpetal.sav").add_filter("save", &["sav"]).save_file() {
-                        action = Some(Action::ExportSave(to));
-                    }
-                }
-                let ask = self.import_ask;
-                let label = if ask {
-                    tx("The save is replaced (the old one is kept) and the game restarts. Press again to choose the file", "Сохранение заменится (старое останется копией), игра перезапустится. Нажмите ещё раз и выберите файл")
-                } else {
-                    tx("Import a save…", "Загрузить сохранение из файла…")
-                };
-                if ui.button(label).clicked() {
-                    if ask {
-                        if let Some(from) = rfd::FileDialog::new().set_title("Sunpetal").add_filter("save", &["sav", "dsv"]).pick_file() {
-                            action = Some(Action::ImportSave(from));
-                        }
-                    }
-                    self.import_ask = !ask;
-                }
-            });
+            self.save_row(ui, &tx, &mut action);
             ui.horizontal(|ui| {
                 if ui.button(tx("Reset all", "Сбросить всё")).clicked() {
                     *s = Settings::default();
@@ -543,5 +664,38 @@ mod pack_tests {
         assert!(!has_textures(&without));
         assert!(!has_textures(std::path::Path::new("/no/such/file.data")));
         let _ = (std::fs::remove_file(with), std::fs::remove_file(without));
+    }
+}
+
+#[cfg(test)]
+mod short_tests {
+    use super::*;
+
+    #[test]
+    fn the_short_menu_holds_the_five_blocks_the_author_chose() {
+        assert_eq!(SHORT, [Block::Sound, Block::Screen, Block::Graphics, Block::Saves, Block::Leave]);
+    }
+
+    #[test]
+    fn the_short_body_has_none_of_the_full_menus_other_blocks() {
+        let src = include_str!("ui.rs");
+        let a = src.find("fn short_body").unwrap();
+        let b = src.find("/// Draws the menu; changes go straight").unwrap();
+        let body = &src[a..b];
+        for gone in ["Effects", "Debug", "Profiles", "Controls", "Emulation", "Reset all", "texture_pack"] {
+            assert!(!body.contains(gone), "{} is for the full menu", gone);
+        }
+        for kept in ["Volume", "Window size", "Screen layout", "3D resolution", "Dialogue font", "self.save_row", "Exit to the main menu"] {
+            assert!(body.contains(kept), "{}", kept);
+        }
+    }
+
+    #[test]
+    fn toggling_forgets_a_half_done_confirmation() {
+        let mut m = Menu::new();
+        m.main_ask = true;
+        m.restart_ask = true;
+        m.toggle();
+        assert!(!m.main_ask && !m.restart_ask);
     }
 }

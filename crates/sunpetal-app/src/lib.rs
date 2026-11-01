@@ -9,7 +9,9 @@
 //! (held) runs without waiting for the clock. The keys of the DS's buttons are set in the menu
 //! (default: arrows = D-pad, Z = A, X = B, S = X, A = Y, Q = L, W = R, Enter = START, Backspace =
 //! SELECT). A pad: the D-pad or left stick, the face buttons as the DS's (east A, south B, north
-//! X, west Y), shoulders L and R, Start, Select. The mouse on the lower screen is the stylus. The
+//! X, west Y), shoulders L and R, Start (our menu, except where the game waits for it), Select (the
+//! game's menu, as F8); the right stick is the stylus (its click touches); `SUNPETAL_PAD_LOG=1`
+//! prints the pad's events. The menu is the short one unless `[ui] full_menu` or `--full-menu`. The mouse on the lower screen is the stylus. The
 //! settings are kept in the configuration folder (`config::dir`) and saved when the menu closes
 //! and at exit.
 mod audio;
@@ -23,6 +25,7 @@ mod layout;
 mod layout_file;
 pub mod screen_report;
 mod locate;
+mod pad;
 mod post;
 mod touchpad;
 mod ui;
@@ -135,6 +138,8 @@ struct App {
     /// What was last put into effect (the menu compares).
     applied: Settings,
     menu: ui::Menu,
+    /// `--full-menu`: the full settings menu for this run, whatever the setting says.
+    force_full: bool,
     /// Key code to button bit, from the settings.
     keymap: HashMap<KeyCode, u32>,
     mouse: (f32, f32),
@@ -157,6 +162,18 @@ struct App {
     kb: u32,
     pad: u32,
     pads: Option<gilrs::Gilrs>,
+    /// `SUNPETAL_PAD_LOG=1`: every pad event is printed with what it was taken for.
+    pad_log: bool,
+    /// The right stick (x, y; up is positive), the virtual stylus it moves, and whether the stick's click holds it down.
+    rstick: (f32, f32),
+    stylus: pad::Stylus,
+    pad_pen: bool,
+    /// The left stick (both axes) and the D-pad's buttons as a menu direction; the one held repeats in the menu.
+    stick_axes: [f32; 2],
+    stick_dir: Option<pad::Dir>,
+    dpad_dir: Option<pad::Dir>,
+    nav: pad::Repeat,
+    last_poll: std::time::Instant,
     win_size: (u32, u32),
     /// The picture's shape (width over height) the window was last given (`video.follow_shape`); 0: none yet.
     shape_last: f32,
@@ -381,6 +398,7 @@ impl App {
     }
 
     fn toggle_menu(&mut self) {
+        self.menu.short = !(self.settings.ui.full_menu || self.force_full);
         self.menu.toggle();
         self.pen_down = false;
         self.shared.input.lock().unwrap().pen = None;
@@ -389,42 +407,177 @@ impl App {
         }
     }
 
-    /// The pad's events since the last frame: its buttons held, the left stick as the D-pad.
+    /// The pad's events since the last frame: the buttons (the game's, or the menus'), the sticks.
     fn poll_pads(&mut self) {
-        let threshold = self.settings.input.stick_threshold;
         let Some(g) = &mut self.pads else { return };
-        let mut changed = false;
+        let mut events = Vec::new();
         while let Some(ev) = g.next_event() {
+            if self.pad_log {
+                let name = g.connected_gamepad(ev.id).map(|p| p.name().to_string()).unwrap_or_default();
+                eprintln!("pad {} [{}]: {:?}", usize::from(ev.id), name, ev.event);
+            }
+            events.push(ev.event);
+        }
+        for ev in events {
             use gilrs::EventType::*;
-            match ev.event {
-                ButtonPressed(b, _) => {
-                    self.pad |= pad_button(b);
-                    changed = true;
-                }
-                ButtonReleased(b, _) => {
-                    self.pad &= !pad_button(b);
-                    changed = true;
-                }
-                AxisChanged(a, v, _) => {
-                    let (neg, pos) = match a {
-                        gilrs::Axis::LeftStickX => (bit("LEFT"), bit("RIGHT")),
-                        gilrs::Axis::LeftStickY => (bit("DOWN"), bit("UP")),
-                        _ => continue,
-                    };
-                    self.pad &= !(neg | pos);
-                    if v < -threshold {
-                        self.pad |= neg;
-                    } else if v > threshold {
-                        self.pad |= pos;
-                    }
-                    changed = true;
-                }
+            match ev {
+                ButtonPressed(b, _) => self.pad_press(b),
+                ButtonReleased(b, _) => self.pad_release(b),
+                AxisChanged(a, v, _) => self.pad_axis(a, v),
+                Disconnected => self.pad_lost(),
                 _ => {}
             }
         }
-        if changed {
-            self.send_keys();
+        // time passes: a held direction repeats in the menu, the stylus follows the stick
+        let dt = self.last_poll.elapsed().as_secs_f32().min(0.1);
+        self.last_poll = std::time::Instant::now();
+        if self.menu.open {
+            if let Some(d) = self.nav.tick() {
+                self.menu_key(pad::Act::Nav(d));
+            }
+        } else if self.rstick != (0.0, 0.0) {
+            let (speed, dead) = (self.settings.input.stylus_speed, self.settings.input.stylus_dead);
+            if let Some(g) = &self.gfx {
+                let size = (g.size().0 as f32, g.size().1 as f32);
+                if self.stylus.pos.is_none() {
+                    self.stylus.pos = Some(self.stylus_home());
+                }
+                if self.stylus.step(self.rstick, dt, speed, dead, size, (size.0 / 2.0, size.1 / 2.0)) {
+                    self.mouse = self.stylus.pos.unwrap_or(self.mouse);
+                    self.update_pen();
+                }
+            }
         }
+    }
+
+    /// Where the stylus starts: the middle of the lower screen (or of the window).
+    fn stylus_home(&self) -> (f32, f32) {
+        let Some(g) = &self.gfx else { return (0.0, 0.0) };
+        let size = (g.size().0 as f32, g.size().1 as f32);
+        self.layout().fit(g.size())[1].map_or((size.0 / 2.0, size.1 / 2.0), |r| (r.x + r.w / 2.0, r.y + r.h / 2.0))
+    }
+
+    /// A key for the menu, from a pad button (`Back` closes a drop-down list first, then the menu).
+    fn menu_key(&mut self, a: pad::Act) {
+        if a == pad::Act::Back && !self.gfx.as_ref().is_some_and(|g| g.popup_open()) {
+            self.toggle_menu();
+            return;
+        }
+        if let (Some(k), Some(g)) = (pad::key_of(a), &mut self.gfx) {
+            g.pad_key(k);
+        }
+    }
+
+    fn pad_press(&mut self, b: gilrs::Button) {
+        let act = pad::press(b, pad::Ctx { menu_open: self.menu.open, start_to_game: self.prompt.is_some() });
+        if self.pad_log {
+            eprintln!("    {:?} -> {:?}", b, act);
+        }
+        match act {
+            pad::Act::Game(bits) => {
+                self.pad |= bits;
+                self.send_keys();
+            }
+            pad::Act::GameMenu => self.swap_screen(),
+            pad::Act::OpenMenu | pad::Act::CloseMenu => {
+                // what was held goes up: the menu is not the game's
+                self.pad = 0;
+                self.pad_pen = false;
+                self.send_keys();
+                self.toggle_menu();
+            }
+            pad::Act::Nav(d) => {
+                self.dpad_dir = Some(d);
+                self.nav.hold(Some(d));
+                self.menu_key(act);
+            }
+            pad::Act::Confirm | pad::Act::Back => self.menu_key(act),
+            pad::Act::Pen => {
+                self.pad_pen = true;
+                // the click holds the point where the stick left it (or the middle of the lower screen)
+                if self.stylus.pos.is_none() {
+                    self.stylus.pos = Some(self.stylus_home());
+                }
+                self.mouse = self.stylus.pos.unwrap_or(self.mouse);
+                self.pen_down = true;
+                if let Some(g) = &self.gfx {
+                    if self.layout().touch(g.size(), self.mouse, false).is_none() {
+                        self.pen_down = false;
+                    }
+                }
+                self.update_pen();
+            }
+            pad::Act::None => {}
+        }
+    }
+
+    fn pad_release(&mut self, b: gilrs::Button) {
+        if self.pad_log {
+            eprintln!("    {:?} released", b);
+        }
+        if pad::is_pen_button(b) {
+            self.pad_pen = false;
+            self.pen_down = false;
+            self.update_pen();
+            return;
+        }
+        self.pad &= !pad_button(b);
+        self.send_keys();
+        if matches!(b, gilrs::Button::DPadUp | gilrs::Button::DPadDown | gilrs::Button::DPadLeft | gilrs::Button::DPadRight) {
+            self.dpad_dir = None;
+            self.nav.hold(self.stick_dir);
+        }
+    }
+
+    fn pad_axis(&mut self, a: gilrs::Axis, v: f32) {
+        use gilrs::Axis::*;
+        let threshold = self.settings.input.stick_threshold;
+        if self.pad_log {
+            eprintln!("    {:?} {:.2}: {}", a, v, pad::axis_use(a));
+        }
+        match a {
+            RightStickX => self.rstick.0 = v,
+            RightStickY => self.rstick.1 = v,
+            LeftStickX | LeftStickY => {
+                self.stick_axes[(a == LeftStickY) as usize] = v;
+                // the menu takes the stick as moves; the game as the D-pad
+                if self.menu.open {
+                    let d = pad::stick_dir(self.stick_axes[0], self.stick_axes[1], threshold);
+                    if d != self.stick_dir {
+                        self.stick_dir = d;
+                        if let Some(d) = d {
+                            self.menu_key(pad::Act::Nav(d));
+                        }
+                    }
+                    self.nav.hold(self.dpad_dir.or(self.stick_dir));
+                    return;
+                }
+                self.stick_dir = None;
+                let (neg, pos) = if a == LeftStickX { (bit("LEFT"), bit("RIGHT")) } else { (bit("DOWN"), bit("UP")) };
+                self.pad &= !(neg | pos);
+                if v < -threshold {
+                    self.pad |= neg;
+                } else if v > threshold {
+                    self.pad |= pos;
+                }
+                self.send_keys();
+            }
+            _ => {}
+        }
+    }
+
+    /// The pad went away: nothing stays pressed.
+    fn pad_lost(&mut self) {
+        self.pad = 0;
+        self.rstick = (0.0, 0.0);
+        self.stick_axes = [0.0; 2];
+        self.pad_pen = false;
+        self.pen_down = false;
+        self.stick_dir = None;
+        self.dpad_dir = None;
+        self.nav.hold(None);
+        self.send_keys();
+        self.update_pen();
     }
 
     fn update_pen(&mut self) {
@@ -588,6 +741,8 @@ impl ApplicationHandler for App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.mouse = (position.x as f32, position.y as f32);
+                // the mouse is in charge again: the pad's stylus point goes
+                self.stylus.pos = None;
                 self.update_pen();
             }
             WindowEvent::MouseInput { state, button: MouseButton::Left, .. } if !consumed => {
@@ -801,7 +956,8 @@ impl ApplicationHandler for App {
                 let mut action = None;
                 let mut want_shape: Option<f32> = None;
                 {
-                    let App { gfx, menu, settings, layouts, touch_held, stopped_msg, shared, counter_seen, hint_seen, puzzle_hold, puzzle_side, coll_seen, coll_card, pending_capture, edo_seen, prompt, bar_color, auto_lower, hold, wide_now, paper, scroll, portrait_left, .. } = self;
+                    let (cursor, pen_now) = (self.stylus.pos.filter(|_| !self.menu.open), self.pen_down);
+                    let App { gfx, menu, force_full, settings, layouts, touch_held, stopped_msg, shared, counter_seen, hint_seen, puzzle_hold, puzzle_side, coll_seen, coll_card, pending_capture, edo_seen, prompt, bar_color, auto_lower, hold, wide_now, paper, scroll, portrait_left, .. } = self;
                     let live = layout::Live { vblank: shared.vblank.load(Ordering::Relaxed), counter_seen: *counter_seen, hint_seen: *hint_seen, both: *puzzle_hold > 0, both_side: *puzzle_side, collection: coll_seen.then(|| coll_card.get()), lower: *auto_lower || hold.is_some(), edo: *edo_seen, prompt: *prompt, wide: *wide_now as f32, scroll: (*paper && *auto_lower).then_some(*scroll) };
                     if let Some(g) = gfx {
                         let layout = layout::find(layouts, &settings.video, &live);
@@ -844,7 +1000,8 @@ impl ApplicationHandler for App {
                         // the line goes with the picture it was made for (empty when that picture has the game's own letters)
                         let vline = shared.dialogue_text.lock().unwrap().clone();
                         let vwide = *wide_now as f32;
-                        if menu.open || pad_on || corner_on || stats_on || fade > 0.0 || vline.is_some() {
+                        menu.short = !(settings.ui.full_menu || *force_full);
+                        if menu.open || pad_on || corner_on || stats_on || fade > 0.0 || vline.is_some() || cursor.is_some() {
                             let held = touch_held.clone();
                             let mut f = |ctx: &egui::Context| {
                                 if fade > 0.0 {
@@ -884,6 +1041,17 @@ impl ApplicationHandler for App {
                                         None => String::new(),
                                     };
                                     touchpad::paint(ctx, band, &held, &info);
+                                }
+                                if let Some((x, y)) = cursor {
+                                    // the pad's stylus: a ring, filled while it touches
+                                    let ppp = ctx.pixels_per_point();
+                                    let c = egui::pos2(x / ppp, y / ppp);
+                                    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("stylus")));
+                                    if pen_now {
+                                        p.circle_filled(c, 7.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 170));
+                                    }
+                                    p.circle_stroke(c, 8.0, egui::Stroke::new(3.0, egui::Color32::BLACK));
+                                    p.circle_stroke(c, 8.0, egui::Stroke::new(1.5, egui::Color32::WHITE));
                                 }
                                 if menu.open {
                                     action = menu.show(ctx, settings, &names, internal);
@@ -972,6 +1140,8 @@ pub struct Options {
     pub mute: bool,
     pub res: Option<usize>,
     pub menu: bool,
+    /// The full settings menu for this run (`--full-menu`), over the setting `[ui] full_menu`.
+    pub full_menu: bool,
     pub dump: Option<PathBuf>,
     pub pack: Option<PathBuf>,
     /// The game language for this run (`--lang ru`; `--lang none`: the ROM's own text), over the setting.
@@ -1093,6 +1263,7 @@ pub fn run(o: Options, el: EventLoop<()>) {
         },
         applied: settings.clone(),
         settings,
+        force_full: o.full_menu,
         menu: {
             let mut m = ui::Menu::new();
             m.open = o.menu;
@@ -1111,6 +1282,15 @@ pub fn run(o: Options, el: EventLoop<()>) {
         kb: 0,
         pad: 0,
         pads: gilrs::Gilrs::new().map_err(|e| eprintln!("no pads: {}", e)).ok(),
+        pad_log: std::env::var_os("SUNPETAL_PAD_LOG").is_some_and(|v| v != "0"),
+        rstick: (0.0, 0.0),
+        stylus: pad::Stylus::default(),
+        pad_pen: false,
+        stick_axes: [0.0; 2],
+        stick_dir: None,
+        dpad_dir: None,
+        nav: pad::Repeat::default(),
+        last_poll: std::time::Instant::now(),
         win_size: (512, 768),
         shape_last: 0.0,
         counter_seen: false,
@@ -1180,7 +1360,7 @@ mod save_command_tests {
     use std::path::PathBuf;
 
     fn options() -> Options {
-        Options { rom: PathBuf::new(), out: None, save: None, mute: false, res: None, menu: false, dump: None, pack: None, lang: None, wide: None, renderer: None }
+        Options { rom: PathBuf::new(), out: None, save: None, mute: false, res: None, menu: false, full_menu: false, dump: None, pack: None, lang: None, wide: None, renderer: None }
     }
 
     #[test]
@@ -1285,7 +1465,7 @@ fn save_command(export: Option<&std::path::Path>, import: Option<&std::path::Pat
 pub fn desktop_main() {
     let mut args = std::env::args().skip(1);
     let mut rom: Option<PathBuf> = None;
-    let mut o = Options { rom: PathBuf::new(), out: None, save: None, mute: false, res: None, menu: false, dump: None, pack: None, lang: None, wide: None, renderer: None };
+    let mut o = Options { rom: PathBuf::new(), out: None, save: None, mute: false, res: None, menu: false, full_menu: false, dump: None, pack: None, lang: None, wide: None, renderer: None };
     // the save file out to a copy, or a copy in (`--export-save FILE`, `--import-save FILE`): done with no window
     let (mut export_save, mut import_save): (Option<PathBuf>, Option<PathBuf>) = (None, None);
     while let Some(a) = args.next() {
@@ -1299,6 +1479,7 @@ pub fn desktop_main() {
             // the speed figures and the skip's marks on the terminal each two seconds (as SUNPETAL_STATS=1)
             "--stats" => std::env::set_var("SUNPETAL_STATS", "1"),
             "--menu" => o.menu = true,
+            "--full-menu" => o.full_menu = true,
             "--dump-ui-strings" => {
                 print!("{}", uitext::dump());
                 std::process::exit(0);

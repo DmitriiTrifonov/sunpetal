@@ -201,6 +201,8 @@ pub struct Gfx {
     window: Arc<Window>,
     egui_ctx: egui::Context,
     egui_state: egui_winit::State,
+    /// Keys the pad presses for the menu (its arrows, Enter, Escape), given to egui with the next frame's input.
+    pad_keys: Vec<egui::Key>,
     egui_renderer: egui_wgpu::Renderer,
     bgl: wgpu::BindGroupLayout,
     nearest: wgpu::Sampler,
@@ -413,7 +415,7 @@ impl Gfx {
         );
         let egui_renderer = egui_wgpu::Renderer::new(&device, format, egui_wgpu::RendererOptions::default());
         let post_kit = post::Kit::new(&device, format);
-        Ok(Gfx { window: w, egui_ctx, egui_state, egui_renderer, bgl, nearest, linear_sampler: linear, scale: 1, surface, device, queue, config, pipeline, post_kit, post: None, screens, glow, glow_grid: vec![0.0; GLOW_W * GLOW_H * 3], background: true, edge_bars: false, capture: None, bar_color: None, wide_screen: None, wide_e: 0, linear: true, reserve: 0.0 })
+        Ok(Gfx { window: w, egui_ctx, egui_state, pad_keys: Vec::new(), egui_renderer, bgl, nearest, linear_sampler: linear, scale: 1, surface, device, queue, config, pipeline, post_kit, post: None, screens, glow, glow_grid: vec![0.0; GLOW_W * GLOW_H * 3], background: true, edge_bars: false, capture: None, bar_color: None, wide_screen: None, wide_e: 0, linear: true, reserve: 0.0 })
     }
 
     pub fn resize(&mut self, w: u32, h: u32) {
@@ -528,6 +530,18 @@ impl Gfx {
     /// A window event for the menu. True if the menu used it (the game should not).
     pub fn ui_event(&mut self, ev: &winit::event::WindowEvent) -> bool {
         self.egui_state.on_window_event(&self.window, ev).consumed
+    }
+
+    /// A key for the menu, from the pad. An arrow with nothing focused yet is a Tab: it focuses the first widget.
+    pub fn pad_key(&mut self, key: egui::Key) {
+        let arrow = matches!(key, egui::Key::ArrowUp | egui::Key::ArrowDown | egui::Key::ArrowLeft | egui::Key::ArrowRight);
+        let nothing = self.egui_ctx.memory(|m| m.focused().is_none());
+        self.pad_keys.push(if arrow && nothing { egui::Key::Tab } else { key });
+    }
+
+    /// A popup (a drop-down list) is open in the menu: the pad's B closes it before the menu.
+    pub fn popup_open(&self) -> bool {
+        self.egui_ctx.any_popup_open()
     }
 
     /// Draws the screens, then, with `menu`, the menu over them.
@@ -666,7 +680,12 @@ impl Gfx {
         let mut buffers = Vec::new();
         let mut freed = Vec::new();
         if let Some(menu) = menu {
-            let raw = self.egui_state.take_egui_input(&self.window);
+            let mut raw = self.egui_state.take_egui_input(&self.window);
+            for key in self.pad_keys.drain(..) {
+                for pressed in [true, false] {
+                    raw.events.push(egui::Event::Key { key, physical_key: Some(key), pressed, repeat: false, modifiers: egui::Modifiers::NONE });
+                }
+            }
             let out = self.egui_ctx.run_pass(raw, |ctx| menu(ctx));
             self.egui_state.handle_platform_output(&self.window, out.platform_output);
             let jobs = self.egui_ctx.tessellate(out.shapes, out.pixels_per_point);
