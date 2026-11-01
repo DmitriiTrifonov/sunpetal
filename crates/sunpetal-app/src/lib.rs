@@ -912,6 +912,23 @@ impl ApplicationHandler for App {
                     el.exit();
                     return;
                 }
+                // a save to export or import: the emulation does it (paused or not); what it did comes back below
+                match &action {
+                    Some(ui::Action::ExportSave(to)) => *self.shared.save_job.lock().unwrap() = Some(emu::SaveJob::Export(to.clone())),
+                    Some(ui::Action::ImportSave(from)) => *self.shared.save_job.lock().unwrap() = Some(emu::SaveJob::Import(from.clone())),
+                    _ => {}
+                }
+                let done = self.shared.save_done.lock().unwrap().take();
+                match done {
+                    Some((false, said)) => self.menu.say(said.unwrap_or_else(|e| e)),
+                    // the file is in place: the game starts anew and reads it (the machine writes nothing more)
+                    Some((true, Ok(said))) => {
+                        eprintln!("{}", said);
+                        action = Some(ui::Action::Restart);
+                    }
+                    Some((true, Err(e))) => self.menu.say(e),
+                    None => {}
+                }
                 if action == Some(ui::Action::Restart) {
                     self.save();
                     self.restart = true;
@@ -1148,6 +1165,53 @@ fn restart_args(mut args: Vec<std::ffi::OsString>, pack: &str) -> Vec<std::ffi::
 }
 
 #[cfg(test)]
+mod save_command_tests {
+    use super::{save_command, Options};
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn options() -> Options {
+        Options { rom: PathBuf::new(), out: None, save: None, mute: false, res: None, menu: false, dump: None, pack: None, lang: None, wide: None, renderer: None }
+    }
+
+    #[test]
+    fn the_save_goes_out_and_comes_back_with_no_window() {
+        let dir = std::env::temp_dir().join(format!("sunpetal-savecmd-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        // the save beside the ROM, named by it
+        let rom = dir.join("game.nds");
+        let mut bytes = vec![0xFF; 65536];
+        bytes[..5].copy_from_slice(&[9, 8, 7, 6, 5]);
+        fs::write(dir.join("game.sav"), &bytes).unwrap();
+        let o = options();
+        let copy = dir.join("copy.sav");
+        assert_eq!(save_command(Some(&copy), None, &o, Some(&rom)), 0);
+        assert_eq!(fs::read(&copy).unwrap(), bytes);
+        // another save comes in, the first is kept
+        let mut other = bytes.clone();
+        other[0] = 1;
+        fs::write(dir.join("other.sav"), &other).unwrap();
+        assert_eq!(save_command(None, Some(&dir.join("other.sav")), &o, Some(&rom)), 0);
+        assert_eq!(fs::read(dir.join("game.sav")).unwrap(), other);
+        let kept: Vec<_> = fs::read_dir(&dir).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with("game.sav.bak-")).collect();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(fs::read(kept[0].path()).unwrap(), bytes);
+        // a wrong file, a missing save and a missing game are refused (the save stays)
+        fs::write(dir.join("bad.sav"), [1u8; 100]).unwrap();
+        assert_eq!(save_command(None, Some(&dir.join("bad.sav")), &o, Some(&rom)), 1);
+        assert_eq!(fs::read(dir.join("game.sav")).unwrap(), other);
+        assert_eq!(save_command(Some(&copy), None, &o, Some(&dir.join("none.nds"))), 1);
+        assert_eq!(save_command(Some(&copy), None, &o, None), 2);
+        // --save names the file and --out the folder
+        let o = Options { save: Some(dir.join("named.sav")), ..options() };
+        assert_eq!(save_command(None, Some(&copy), &o, Some(&rom)), 0);
+        assert_eq!(fs::read(dir.join("named.sav")).unwrap(), bytes);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
+#[cfg(test)]
 mod restart_tests {
     use super::restart_args;
     use std::ffi::OsString;
@@ -1164,13 +1228,57 @@ mod restart_tests {
     }
 }
 
+/// The save file of a run, as the machine names it: `--save`, else `<out>/<name of the ROM or data file>.sav`
+/// (the folder `--out`, else the one beside the ROM, or beside the data file when there is no ROM).
+fn save_file_of(o: &Options, source: &std::path::Path) -> PathBuf {
+    let out = o.out.clone().or_else(|| source.parent().map(|p| p.to_path_buf())).unwrap_or_default();
+    sunpetal_runtime::savefile::default_path(o.save.as_deref(), &out, source)
+}
+
+/// `--export-save` / `--import-save`: the save file copied out, or a copy put in (the old one kept beside it
+/// as `.bak-STAMP`). With no window and no machine: the game must not be running, which would write its own
+/// memory over an import. The exit code of the program.
+fn save_command(export: Option<&std::path::Path>, import: Option<&std::path::Path>, o: &Options, source: Option<&std::path::Path>) -> i32 {
+    let Some(source) = source else {
+        eprintln!("no game to name the save by: give the ROM (sunpetal-app ROM.nds --export-save FILE) or --save FILE");
+        return 2;
+    };
+    let path = save_file_of(o, source);
+    if let Some(to) = export {
+        let said = std::fs::read(&path)
+            .map_err(|e| format!("no save to export at {}: {}", path.display(), e))
+            .and_then(|bytes| sunpetal_runtime::savefile::export(&bytes, to));
+        match said {
+            Ok(s) => println!("{}", s),
+            Err(e) => {
+                eprintln!("{}", e);
+                return 1;
+            }
+        }
+    }
+    if let Some(from) = import {
+        match sunpetal_runtime::savefile::import(from, &path) {
+            Ok(s) => println!("{}", s),
+            Err(e) => {
+                eprintln!("{}", e);
+                return 1;
+            }
+        }
+    }
+    0
+}
+
 /// The command-line program.
 pub fn desktop_main() {
     let mut args = std::env::args().skip(1);
     let mut rom: Option<PathBuf> = None;
     let mut o = Options { rom: PathBuf::new(), out: None, save: None, mute: false, res: None, menu: false, dump: None, pack: None, lang: None, wide: None, renderer: None };
+    // the save file out to a copy, or a copy in (`--export-save FILE`, `--import-save FILE`): done with no window
+    let (mut export_save, mut import_save): (Option<PathBuf>, Option<PathBuf>) = (None, None);
     while let Some(a) = args.next() {
         match a.as_str() {
+            "--export-save" => export_save = args.next().map(PathBuf::from),
+            "--import-save" => import_save = args.next().map(PathBuf::from),
             "--out" => o.out = args.next().map(PathBuf::from),
             "--save" => o.save = args.next().map(PathBuf::from),
             "--res" => o.res = args.next().and_then(|v| v.parse().ok()),
@@ -1205,6 +1313,11 @@ pub fn desktop_main() {
     let rom = rom
         .or_else(|| Some(PathBuf::from(config::load().game.rom)).filter(|p| !p.as_os_str().is_empty()))
         .or_else(|| locate::find_rom(&dirs));
+    if export_save.is_some() || import_save.is_some() {
+        let named_data = o.pack.clone().or_else(|| Some(PathBuf::from(config::load().video.texture_pack)).filter(|p| !p.as_os_str().is_empty()));
+        let data = named_data.or_else(|| locate::find_data(&dirs)).filter(|p| sunpetal_data::dsrom::has_rom(p));
+        std::process::exit(save_command(export_save.as_deref(), import_save.as_deref(), &o, rom.as_deref().or(data.as_deref())));
+    }
     let rom = match rom {
         Some(rom) => {
             if !rom.is_file() {
@@ -1256,7 +1369,7 @@ pub fn desktop_main() {
                         }
                         return;
                     }
-                    eprintln!("usage: sunpetal-app [ROM.nds] [--out DIR] [--save FILE] [--mute] [--res N] [--menu] [--texture-pack FILE] [--lang ru|none] [--renderer software|gpu]");
+                    eprintln!("usage: sunpetal-app [ROM.nds] [--out DIR] [--save FILE] [--export-save FILE] [--import-save FILE] [--mute] [--res N] [--menu] [--texture-pack FILE] [--lang ru|none] [--renderer software|gpu]");
                     eprintln!("{}", locate::no_game(&dirs));
                     std::process::exit(2);
                 }

@@ -1539,6 +1539,22 @@ pub fn flush_save() {
     nds(|n| n.cart_save_quiet());
 }
 
+/// The save file's path (where the backup memory is written).
+pub fn save_path() -> PathBuf {
+    nds(|n| n.cart_save_path())
+}
+
+/// Writes the backup memory as it is now to `to`, as a raw `.sav` file other emulators read.
+pub fn export_save(to: &std::path::Path) -> Result<String, String> {
+    nds(|n| n.cart_export_save(to))
+}
+
+/// Puts the save in `src` in place of the save file (checked, the old one kept as a backup). After it the
+/// machine writes no more: the game must be started anew to read the file.
+pub fn import_save(src: &std::path::Path) -> Result<String, String> {
+    nds(|n| n.cart_import_save(src))
+}
+
 pub(crate) fn fatal(msg: String) -> ! {
     fatal_msg(&msg)
 }

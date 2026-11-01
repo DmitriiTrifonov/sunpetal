@@ -12,6 +12,10 @@ pub enum Action {
     Quit,
     /// Start the program anew (the settings saved, the game's backup memory written first).
     Restart,
+    /// A copy of the game's save to this file.
+    ExportSave(std::path::PathBuf),
+    /// This file replaces the game's save, and the game starts anew.
+    ImportSave(std::path::PathBuf),
 }
 
 pub struct Menu {
@@ -23,13 +27,20 @@ pub struct Menu {
     message: String,
     /// The restart button was pressed once: the next press does it.
     restart_ask: bool,
+    /// The import button was pressed once: the next press asks for the file.
+    import_ask: bool,
     /// What egui has now (None: the bundled font only), to reload only when it changes.
     font_set: Option<String>,
 }
 
 impl Menu {
     pub fn new() -> Menu {
-        Menu { open: false, rebinding: None, profile_name: String::new(), profiles: config::profiles(), message: String::new(), restart_ask: false, font_set: None }
+        Menu { open: false, rebinding: None, profile_name: String::new(), profiles: config::profiles(), message: String::new(), restart_ask: false, import_ask: false, font_set: None }
+    }
+
+    /// A line under the settings (what a save export or import did).
+    pub fn say(&mut self, text: String) {
+        self.message = text;
     }
 
     pub fn toggle(&mut self) {
@@ -374,6 +385,29 @@ impl Menu {
                 }
             });
             ui.separator();
+            // the game's save as a file other emulators read (a desktop's file dialog)
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            ui.horizontal(|ui| {
+                if ui.button(tx("Export the save…", "Сохранить копию сохранения…")).clicked() {
+                    if let Some(to) = rfd::FileDialog::new().set_title("Sunpetal").set_file_name("sunpetal.sav").add_filter("save", &["sav"]).save_file() {
+                        action = Some(Action::ExportSave(to));
+                    }
+                }
+                let ask = self.import_ask;
+                let label = if ask {
+                    tx("The save is replaced (the old one is kept) and the game restarts. Press again to choose the file", "Сохранение заменится (старое останется копией), игра перезапустится. Нажмите ещё раз и выберите файл")
+                } else {
+                    tx("Import a save…", "Загрузить сохранение из файла…")
+                };
+                if ui.button(label).clicked() {
+                    if ask {
+                        if let Some(from) = rfd::FileDialog::new().set_title("Sunpetal").add_filter("save", &["sav", "dsv"]).pick_file() {
+                            action = Some(Action::ImportSave(from));
+                        }
+                    }
+                    self.import_ask = !ask;
+                }
+            });
             ui.horizontal(|ui| {
                 if ui.button(tx("Reset all", "Сбросить всё")).clicked() {
                     *s = Settings::default();
