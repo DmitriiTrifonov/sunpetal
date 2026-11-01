@@ -6,6 +6,7 @@ pub mod interp;
 pub mod machine;
 pub mod nds;
 pub mod sched;
+pub mod savefile;
 pub mod selftest;
 pub mod services;
 #[cfg(feature = "debug-tools")]

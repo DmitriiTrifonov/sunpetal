@@ -28,6 +28,8 @@ pub(super) struct Cart {
     save: Vec<u8>,
     save_path: PathBuf,
     dirty: bool,
+    /// An imported save is on the disk: what the machine holds is old, and none of it is written again.
+    frozen: bool,
     bk_cmd: u8,
     bk_status: u8,
     bk_out: u8,
@@ -52,6 +54,7 @@ impl Cart {
             save: Vec::new(),
             save_path: PathBuf::new(),
             dirty: false,
+            frozen: false,
             bk_cmd: 0,
             bk_status: 0,
             bk_out: 0,
@@ -100,13 +103,7 @@ impl Nds {
             let n = crate::nitrofs::apply_overlay(&mut rom, &files)?;
             note(&format!("overlay: {} files replace the ROM's", n));
         }
-        let save_path = match &self.cfg.save {
-            Some(p) => p.clone(),
-            None => {
-                let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-                self.cfg.out.join(format!("{}.sav", stem))
-            }
-        };
+        let save_path = crate::savefile::default_path(self.cfg.save.as_deref(), &self.cfg.out, &path);
         let mut save = vec![0xFF; self.cfg.save_size];
         if let Ok(s) = fs::read(&save_path) {
             if !s.is_empty() {
@@ -131,19 +128,32 @@ impl Nds {
     }
 
     fn write_save(&mut self) -> Result<(), String> {
-        if !self.cart.dirty {
+        if !self.cart.dirty || self.cart.frozen {
             return Ok(());
         }
-        let path = self.cart.save_path.clone();
-        if let Some(d) = path.parent() {
-            let _ = fs::create_dir_all(d);
-        }
         // whole, then moved into place: a kill in the middle leaves the old file
-        let tmp = path.with_extension("sav.tmp");
-        fs::write(&tmp, &self.cart.save).map_err(|e| format!("cannot write {}: {}", tmp.display(), e))?;
-        fs::rename(&tmp, &path).map_err(|e| format!("cannot move {} into place: {}", tmp.display(), e))?;
+        crate::savefile::write_atomic(&self.cart.save_path, &self.cart.save)?;
         self.cart.dirty = false;
         Ok(())
+    }
+
+    /// The file the backup memory is written to.
+    pub(super) fn cart_save_path(&self) -> PathBuf {
+        self.cart.save_path.clone()
+    }
+
+    /// A copy of the backup memory as the machine holds it now, to `to` (the raw `.sav`).
+    pub(super) fn cart_export_save(&mut self, to: &std::path::Path) -> Result<String, String> {
+        crate::savefile::export(&self.cart.save, to)
+    }
+
+    /// The save in `src` replaces the save file (the old one kept as a backup). The machine's own copy is
+    /// old from now on and is not written again: the caller starts the game anew to read the new file.
+    pub(super) fn cart_import_save(&mut self, src: &std::path::Path) -> Result<String, String> {
+        let said = crate::savefile::import(src, &self.cart.save_path)?;
+        self.cart.frozen = true;
+        self.cart.dirty = false;
+        Ok(said)
     }
 
     pub(super) fn cart_save(&mut self) {
@@ -379,6 +389,7 @@ impl Nds {
 mod tests {
     use super::{chip_mask, Nds};
     use crate::nds::Config;
+    use std::fs;
 
     /// One chip-select: the bytes go out, the last replies come back.
     fn xfer(n: &mut Nds, bytes: &[u8]) -> Vec<u8> {
@@ -409,6 +420,41 @@ mod tests {
         assert_eq!(n.cart.save[0x10], 0xFF);
         let r = xfer(&mut n, &[0x03, 0xAB, 0xC0, 0, 0, 0]);
         assert_eq!(&r[3..], &[0x5A, 0x5B, 0x58]);
+    }
+
+    #[test]
+    fn an_imported_save_is_not_written_over_by_the_machines_old_one() {
+        let dir = std::env::temp_dir().join(format!("sunpetal-cart-import-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let mut n = Nds::new(Config::new("none"));
+        n.cart.save = vec![0xFF; 65536];
+        n.cart.save_path = dir.join("game.sav");
+        xfer(&mut n, &[0x06]);
+        xfer(&mut n, &[0x02, 0x00, 0x10, 0x11, 0x22]);
+        n.cart_save_quiet();
+        let old = fs::read(dir.join("game.sav")).unwrap();
+        assert_eq!(&old[0x10..0x12], &[0x11, 0x22]);
+        // a save made elsewhere
+        let mut other = vec![0xFF; 65536];
+        other[0..4].copy_from_slice(&[1, 2, 3, 4]);
+        fs::write(dir.join("other.sav"), &other).unwrap();
+        let said = n.cart_import_save(&dir.join("other.sav")).unwrap();
+        assert!(said.contains("kept as"), "{}", said);
+        // the game goes on a moment and writes: the file keeps the import
+        xfer(&mut n, &[0x06]);
+        xfer(&mut n, &[0x02, 0x00, 0x20, 0x99]);
+        assert!(n.cart.dirty);
+        n.cart_save_quiet();
+        n.cart_save();
+        assert_eq!(fs::read(dir.join("game.sav")).unwrap(), other);
+        // and the old save is beside it
+        let kept = fs::read_dir(&dir).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().contains(".bak-")).count();
+        assert_eq!(kept, 1);
+        // an export is the machine's bytes as they are
+        n.cart_export_save(&dir.join("copy.sav")).unwrap();
+        assert_eq!(fs::read(dir.join("copy.sav")).unwrap().len(), 65536);
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

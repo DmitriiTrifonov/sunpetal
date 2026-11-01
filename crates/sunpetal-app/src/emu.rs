@@ -116,6 +116,20 @@ pub struct Shared {
     pub stopped: Mutex<Option<String>>,
     /// A line about how it runs (DS frame, speed), for the screen.
     pub status: Mutex<String>,
+    /// A save to export or import: the window asks, the emulation does it (the machine's memory is its own) at
+    /// once, paused or not.
+    pub save_job: Mutex<Option<SaveJob>>,
+    /// What the emulation did with the job: whether it was an import, and the words for the player or the error.
+    pub save_done: Mutex<Option<(bool, Result<String, String>)>>,
+}
+
+/// The menu's request for the game's save file.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SaveJob {
+    /// A copy of the save, as the machine has it now, to this file.
+    Export(PathBuf),
+    /// This file replaces the save (the old one kept as a backup); the game starts anew to read it.
+    Import(PathBuf),
 }
 
 impl Shared {
@@ -155,6 +169,8 @@ impl Shared {
             paused: AtomicBool::new(false),
             stopped: Mutex::new(None),
             status: Mutex::new(String::from("starting")),
+            save_job: Mutex::new(None),
+            save_done: Mutex::new(None),
         })
     }
 }
@@ -198,6 +214,17 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     // frames of real wide picture in a row before (a short one, as the logos' few, is no scene to keep)
     let mut wide_streak = 0u32;
     while !shared.quit.load(Ordering::Relaxed) {
+        let job = shared.save_job.lock().unwrap().take();
+        if let Some(job) = job {
+            let (import, said) = match &job {
+                SaveJob::Export(to) => (false, nds::export_save(to)),
+                SaveJob::Import(from) => (true, nds::import_save(from)),
+            };
+            if let Err(e) = &said {
+                eprintln!("save: {}", e);
+            }
+            *shared.save_done.lock().unwrap() = Some((import, said));
+        }
         if shared.paused.load(Ordering::Relaxed) {
             std::thread::sleep(Duration::from_millis(10));
             next = Instant::now();
