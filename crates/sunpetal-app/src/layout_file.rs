@@ -117,6 +117,24 @@ mod tests {
         }
     }
 
+    /// The panels the game state brings up are geometry too: their files read to the code's
+    /// rectangles (the state decides which one shows, in `layout::pick`).
+    #[test]
+    fn the_panel_files_are_the_codes_geometry() {
+        for (text, code) in [
+            (include_str!("../layouts/overlay-open.toml"), layout::overlay(true)),
+            (include_str!("../layouts/puzzle-panel.toml"), layout::puzzle_panel()),
+        ] {
+            let file = parse(text).unwrap();
+            assert_eq!(file.name, code.name);
+            assert_eq!(file.screens[0], code.screens[0]);
+            let (a, b) = (file.screens[1].unwrap(), code.screens[1].unwrap());
+            for (x, y) in [(a.x, b.x), (a.y, b.y), (a.w, b.w), (a.h, b.h)] {
+                assert!((x - y).abs() < 0.01, "{:?} {:?}", a, b);
+            }
+        }
+    }
+
     #[test]
     fn a_patch_and_a_pinned_flag_read() {
         let l = parse(

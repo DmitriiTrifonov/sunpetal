@@ -1,0 +1,5 @@
+# Geometry of the lower screen's panel over the upper one; which one is shown is the game state's choice (layout.rs).
+name = "overlay"
+size = [256.0, 192.0]
+upper = { x = 0.0, y = 0.0, w = 256.0, h = 192.0 }
+lower = { x = 96.4, y = 70.8, w = 153.6, h = 115.2 }
