@@ -1008,12 +1008,15 @@ pub fn run(o: Options, el: EventLoop<()>) {
     // a data file is checked whole before the game starts from it: a damaged one is no game, and
     // beside a ROM it is only left out
     if let Some(p) = cfg.texture_pack.clone().filter(|p| p.is_file()) {
-        if let Err(e) = locate::check_data(&p) {
-            eprintln!("{}", e);
+        // damaged, or made from another ROM than the one beside it (a ROM kept inside the file is
+        // checked against its `META` when the game boots, and the window says so)
+        let checked = locate::check_data(&p).and_then(|_| if rom.as_os_str().is_empty() { Ok(()) } else { locate::check_pair(&p, &rom) });
+        if let Err(e) = checked {
             if rom.as_os_str().is_empty() {
+                locate::tell(&e);
                 std::process::exit(2);
             }
-            eprintln!("the game starts from the ROM without it");
+            locate::tell(&format!("{}\n\nThe game starts from the ROM without the data file.", e));
             cfg.texture_pack = None;
         }
     }

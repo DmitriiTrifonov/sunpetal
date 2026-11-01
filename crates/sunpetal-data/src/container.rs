@@ -267,6 +267,16 @@ impl Meta {
             Err(format!("the data file is built from another ROM (CRC-32 {:08X}; this one is {:08X})", self.rom_crc, rom_crc))
         }
     }
+
+    /// Whether `rom` (a whole DS image) is the game the file was built for: the game code in its
+    /// header, then its CRC-32, against `META`; the message for the player if not.
+    pub fn check_image(&self, rom: &[u8]) -> Result<(), String> {
+        let code = rom.get(0xC..0x10).ok_or("the ROM is too short to be a DS image")?;
+        if code != self.game {
+            return Err(format!("the data file is for the game {}, this ROM is {}", String::from_utf8_lossy(&self.game), String::from_utf8_lossy(code)));
+        }
+        self.check_rom(crate::delta::crc32(rom))
+    }
 }
 
 fn name(tag: &[u8; 4]) -> String {
@@ -348,6 +358,25 @@ fn rebase_textures(data: &[u8], by: i64) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A ROM image is the file's game when the game code and the CRC-32 both match `META`;
+    /// another game code and another image are each told apart, in the player's words.
+    #[test]
+    fn a_rom_image_is_checked_against_meta_by_game_code_and_crc() {
+        let mut rom = vec![0u8; 0x400];
+        rom[0xC..0x10].copy_from_slice(b"YHNP");
+        let meta = Meta { game: *b"YHNP", rom_crc: crate::delta::crc32(&rom), builder: String::new(), parts: Vec::new() };
+        assert!(meta.check_image(&rom).is_ok());
+        let mut other = rom.clone();
+        other[0x100] = 1;
+        let e = meta.check_image(&other).unwrap_err();
+        assert!(e.contains("another ROM"), "{}", e);
+        let mut jp = rom.clone();
+        jp[0xC..0x10].copy_from_slice(b"YHNJ");
+        let e = meta.check_image(&jp).unwrap_err();
+        assert!(e.contains("YHNP") && e.contains("YHNJ"), "{}", e);
+        assert!(meta.check_image(&rom[..8]).unwrap_err().contains("too short"));
+    }
 
     #[test]
     fn it_writes_and_reads_sections_and_moves_the_texture_offsets() {
