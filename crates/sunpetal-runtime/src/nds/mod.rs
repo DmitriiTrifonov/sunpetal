@@ -194,6 +194,8 @@ pub struct Nds {
     scale: usize,
     extras: Extras,
     renderer: Renderer,
+    /// Stage 8ж.5: `run_frame` does not wait for the GPU's 3D frame; it is read at the next frame's start.
+    pipeline: bool,
     script: Vec<input::Press>,
     cart: cart::Cart,
     spi: spi::Spi,
@@ -274,6 +276,7 @@ impl Nds {
             scale: 1,
             extras: Extras::default(),
             renderer: Renderer::Software,
+            pipeline: false,
             script: Vec::new(),
             cart: cart::Cart::new(),
             spi: spi::Spi::new(),
@@ -1122,6 +1125,22 @@ pub fn set_renderer(r: Renderer) {
     nds(|d| d.renderer = r);
 }
 
+/// Pipelining of the GPU's 3D frame (stage 8ж.5): off by default; the picture then reaches the screens one
+/// frame later. Turning it off reads the frame in flight.
+pub fn set_pipeline(on: bool) {
+    nds(|d| {
+        d.pipeline = on;
+        if !on {
+            d.settle_3d();
+        }
+    });
+}
+
+/// Reads the 3D frame in flight, if any (for what must see the picture of this very frame).
+pub fn settle() {
+    nds(|d| d.settle_3d());
+}
+
 /// Both screens as RGBA at the current scale, the upper first: 2 x (256 x n) x (192 x n) x 4 bytes.
 /// Returns the scale too.
 pub fn screens_rgba() -> (usize, Vec<u8>) {
@@ -1151,6 +1170,7 @@ pub fn take_samples() -> Vec<i16> {
 
 /// Both screens as a PNG, 256x384 times the scale, the upper first.
 pub fn screenshot(path: &std::path::Path) -> Result<(), String> {
+    settle();
     let (scale, rgb) = nds(|n| (n.scale, n.screens_rgb(n.scale)));
     if let Some(d) = path.parent() {
         let _ = std::fs::create_dir_all(d);
@@ -1166,6 +1186,7 @@ pub fn screenshot(path: &std::path::Path) -> Result<(), String> {
 /// The widened upper screen as PNGs of its parts: `<stem>_wide.png` (all), `<stem>_2d.png` and `<stem>_3d.png`;
 /// false if there is no widened picture.
 pub fn screenshot_wide_layers(stem: &std::path::Path) -> Result<bool, String> {
+    settle();
     for (suffix, layers) in [("wide", 3u8), ("2d", 1), ("3d", 2)] {
         let Some((scale, e, rgb)) = nds(|n| n.upper_wide_rgb_layers(n.scale, layers).map(|(e, rgb)| (n.scale, e, rgb))) else { return Ok(false) };
         let path = std::path::PathBuf::from(format!("{}_{}.png", stem.display(), suffix));
@@ -1184,6 +1205,7 @@ pub fn screenshot_wide_layers(stem: &std::path::Path) -> Result<bool, String> {
 
 /// The widened upper screen (`upper_wide_rgba`) as a PNG; false if there is none to write.
 pub fn screenshot_wide(path: &std::path::Path) -> Result<bool, String> {
+    settle();
     let Some((scale, e, rgb)) = nds(|n| n.upper_wide_rgb(n.scale).map(|(e, rgb)| (n.scale, e, rgb))) else { return Ok(false) };
     let f = std::fs::File::create(path).map_err(|e| format!("{}: {}", path.display(), e))?;
     let mut enc = png::Encoder::new(std::io::BufWriter::new(f), (256 + 2 * e as u32) * scale as u32, 192 * scale as u32);
@@ -1249,7 +1271,9 @@ pub fn run_frame() -> bool {
         });
     }
     nds(|n| {
-        n.settle_3d(); // the GPU's frame, started in the course of this one, is read now
+        if !(n.pipeline && n.pending_in_flight()) {
+            n.settle_3d(); // the GPU's frame, started in the course of this one, is read now
+        }
         n.vblanks != vbl
     })
 }

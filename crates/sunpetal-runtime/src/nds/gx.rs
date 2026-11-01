@@ -1252,6 +1252,11 @@ impl Nds {
     /// Finishes the frame the rendering engine started (`gx_render_start`): the GPU's picture is waited
     /// for and read, a failed one is drawn again by the software engine. `run_frame` calls it before it
     /// returns, so outside the emulation `frame3d` is always the last frame's (этап 9.2).
+    /// A GPU drawing is in flight (not yet read).
+    pub(super) fn pending_in_flight(&self) -> bool {
+        self.pending3d.as_ref().is_some_and(|p| p.drawing.is_some())
+    }
+
     pub(super) fn settle_3d(&mut self) {
         let Some(p) = self.pending3d.take() else { return };
         let Pending3d { job, scale, vblank, drawing, early } = p;
