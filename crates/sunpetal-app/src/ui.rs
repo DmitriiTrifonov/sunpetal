@@ -355,6 +355,13 @@ impl Menu {
                 if !s.video.texture_pack.is_empty() && !std::path::Path::new(&s.video.texture_pack).exists() {
                     ui.colored_label(egui::Color32::LIGHT_RED, tx("not found", "не найдено"));
                 }
+                ui.horizontal(|ui| {
+                    ui.label(tx("2D pictures (folder or data file, empty: from the data file):", "2D-картинки (папка или файл, пусто: из файла данных):"));
+                    ui.text_edit_singleline(&mut s.video.pack_2d);
+                });
+                if !s.video.pack_2d.is_empty() && !std::path::Path::new(&s.video.pack_2d).exists() {
+                    ui.colored_label(egui::Color32::LIGHT_RED, tx("not found", "не найдено"));
+                }
                 egui::ComboBox::from_label(tx("Game language (needs the data file)", "Язык игры (нужен файл данных)")).selected_text(match s.game.language.as_str() {
                     "ru" => "Русский".to_string(),
                     _ => tx("the ROM's own", "как в ROM"),

@@ -56,6 +56,9 @@ pub struct Video {
     pub show_stats: bool,
     /// A data file (`.spdata`) or a folder of replacement textures (empty: none); read when the game starts.
     pub texture_pack: String,
+    /// A folder or a data file of 2D pictures (the case's icons and backgrounds, stage 8е); empty: the 2D part of the
+    /// data file in use. The variable `SUNPETAL_PACK_2D` wins over it. Read when the game starts.
+    pub pack_2d: String,
     /// The engine that draws the 3D: `software` (the reference) or `gpu` (the device; the software
     /// one takes over, with a note, if it cannot be made).
     pub renderer: String,
@@ -81,7 +84,7 @@ pub fn parse_renderer(name: &str) -> Option<nds::Renderer> {
 
 impl Default for Video {
     fn default() -> Video {
-        Video { res: 2, linear: true, layout: "stacked".into(), lower: false, panel: false, counter: true, auto: true, wide: true, bars_match: true, fit: "fit".into(), pixel_aspect: 1.0, logos_in_turn: true, puzzle: "side".into(), dialogue_text: "auto".into(), dialogue_font: "noto".into(), follow_shape: false, fullscreen: false, background: "edge".into(), show_stats: false, texture_pack: String::new(), renderer: default_renderer().into(), window: [512, 768] }
+        Video { res: 2, linear: true, layout: "stacked".into(), lower: false, panel: false, counter: true, auto: true, wide: true, bars_match: true, fit: "fit".into(), pixel_aspect: 1.0, logos_in_turn: true, puzzle: "side".into(), dialogue_text: "auto".into(), dialogue_font: "noto".into(), follow_shape: false, fullscreen: false, background: "edge".into(), show_stats: false, texture_pack: String::new(), pack_2d: String::new(), renderer: default_renderer().into(), window: [512, 768] }
     }
 }
 
