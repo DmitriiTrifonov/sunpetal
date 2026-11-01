@@ -107,6 +107,15 @@ impl Menu {
                         ui.selectable_value(&mut s.video.fit, m.to_string(), tl(fit_label(m, lang)));
                     }
                 });
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(tx("Window shape:", "Форма окна:"));
+                    let now = config::shape_name(s.video.window);
+                    for (name, r) in config::SHAPES {
+                        if ui.selectable_label(now == Some(name), name).clicked() {
+                            s.video.window = config::window_of_shape(s.video.window, r);
+                        }
+                    }
+                });
                 ui.horizontal(|ui| {
                     ui.label(tx("Pixel width:", "Ширина пикселя:"));
                     ui.add(egui::Slider::new(&mut s.video.pixel_aspect, 0.5..=2.0));

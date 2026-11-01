@@ -391,9 +391,43 @@ pub fn delete_profile(name: &str) {
     let _ = fs::remove_file(profile_file(&clean_name(name)));
 }
 
+/// Ready window shapes (stage 8в): name and width over height. The window is any shape the user
+/// drags it to; these set it to a common one in one click.
+pub const SHAPES: [(&str, f32); 6] = [("4:3", 4.0 / 3.0), ("16:10", 16.0 / 10.0), ("16:9", 16.0 / 9.0), ("21:9", 21.0 / 9.0), ("3:4", 3.0 / 4.0), ("9:16", 9.0 / 16.0)];
+
+/// The window (logical size) of the shape `ratio` that keeps the area of `cur`, in whole pixels,
+/// neither side under 240 nor over 8192.
+pub fn window_of_shape(cur: [u32; 2], ratio: f32) -> [u32; 2] {
+    let area = (cur[0].max(1) as f32) * (cur[1].max(1) as f32);
+    let ratio = ratio.clamp(0.25, 4.0);
+    let w = (area * ratio).sqrt();
+    let h = w / ratio;
+    [(w.round() as u32).clamp(240, 8192), (h.round() as u32).clamp(240, 8192)]
+}
+
+/// The shape (name) closest to a window of `size`, when within 2 % of it.
+pub fn shape_name(size: [u32; 2]) -> Option<&'static str> {
+    let r = size[0] as f32 / size[1].max(1) as f32;
+    SHAPES.iter().find(|(_, q)| (r / q - 1.0).abs() < 0.02).map(|(n, _)| *n)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shapes_keep_the_area_and_are_found_again() {
+        for (name, r) in SHAPES {
+            let w = window_of_shape([512, 768], r);
+            let got = w[0] as f32 / w[1] as f32;
+            assert!((got / r - 1.0).abs() < 0.01, "{}: {:?}", name, w);
+            let area = (w[0] * w[1]) as f32 / (512.0 * 768.0);
+            assert!((area - 1.0).abs() < 0.02, "{}: area {}", name, area);
+            assert_eq!(shape_name(w), Some(name));
+        }
+        assert_eq!(shape_name([1000, 1000]), None);
+        assert_eq!(window_of_shape([10, 10], 4.0), [240, 240]);
+    }
 
     #[test]
     fn defaults_round_trip_through_toml() {
