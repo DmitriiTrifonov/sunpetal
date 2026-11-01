@@ -618,6 +618,9 @@ impl ApplicationHandler for App {
                     Started if !self.menu.open && !consumed && corner.map_or(false, |(w, h)| touchpad::on_menu_button(w, h, p)) => {
                         self.toggle_menu();
                     }
+                    Started if !self.menu.open && !consumed && corner.map_or(false, |(w, h)| touchpad::on_swap_button(w, h, p)) => {
+                        self.swap_screen();
+                    }
                     Started if !self.menu.open && !consumed && self.settings.emulation.skip_button && corner.map_or(false, |(w, h)| touchpad::on_skip_button(w, h, p)) => {
                         // a tap starts a skip, another cancels it
                         self.shared.toggle_skip();

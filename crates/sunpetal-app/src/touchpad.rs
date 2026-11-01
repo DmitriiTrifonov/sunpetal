@@ -174,6 +174,16 @@ pub fn on_skip_button(w: f32, h: f32, p: (f32, f32)) -> bool {
     skip_button(w, h).contains(p)
 }
 
+/// The screen-swap button, left of the skip button (the lower or the upper screen of the single layout).
+pub fn swap_button(w: f32, h: f32) -> Shape {
+    let Shape::Circle { x, y, r } = skip_button(w, h) else { unreachable!() };
+    Shape::Circle { x: x - 2.4 * r, y, r }
+}
+
+pub fn on_swap_button(w: f32, h: f32, p: (f32, f32)) -> bool {
+    swap_button(w, h).contains(p)
+}
+
 /// Whether a finger landing at `p` is on that button.
 pub fn on_menu_button(w: f32, h: f32, p: (f32, f32)) -> bool {
     menu_button(w, h).contains(p)
@@ -192,6 +202,16 @@ pub fn paint_menu_button(ctx: &egui::Context, w: f32, h: f32, info: &str, fast: 
         let (hw, gap) = (r / k * 0.5, r / k * 0.32);
         for dy in [-gap, 0.0, gap] {
             painter.line_segment([Pos2::new(c.x - hw, c.y + dy), Pos2::new(c.x + hw, c.y + dy)], Stroke::new(r / k * 0.14, Color32::from_white_alpha(190)));
+        }
+    }
+    // swap: two screens, one above the other
+    if let Shape::Circle { x, y, r } = swap_button(w, h) {
+        let c = Pos2::new(x / k, y / k);
+        painter.circle(c, r / k, Color32::from_black_alpha(90), Stroke::new(1.5, Color32::from_white_alpha(110)));
+        let (hw, hh) = (r / k * 0.42, r / k * 0.26);
+        let ink = Stroke::new(r / k * 0.12, Color32::from_white_alpha(190));
+        for dy in [-hh * 1.25, hh * 1.25] {
+            painter.rect_stroke(egui::Rect::from_center_size(Pos2::new(c.x, c.y + dy), egui::vec2(hw * 2.0, hh * 2.0)), 1.0, ink, egui::StrokeKind::Middle);
         }
     }
     // skip: a triangle and a bar, lit while a skip is running
@@ -308,6 +328,9 @@ mod tests {
         let (m, f, s) = (c(menu_button(w, h)), c(fast_button(w, h)), c(skip_button(w, h)));
         assert!(m.0 - f.0 > 2.0 * m.2 && f.0 - s.0 > 2.0 * f.2, "the buttons must not touch");
         assert!(s.0 - s.2 > 0.0, "all on the screen");
+        let sw = c(swap_button(w, h));
+        assert!(s.0 - sw.0 > 2.0 * s.2 && sw.0 - sw.2 > 0.0, "the swap button is apart and on the screen");
+        assert!(on_swap_button(w, h, (sw.0, sw.1)) && !on_swap_button(w, h, (s.0, s.1)) && !on_skip_button(w, h, (sw.0, sw.1)));
         assert!(on_skip_button(w, h, (s.0, s.1)));
         assert!(!on_skip_button(w, h, (f.0, f.1)) && !on_fast_button(w, h, (s.0, s.1)) && !on_menu_button(w, h, (s.0, s.1)));
     }
