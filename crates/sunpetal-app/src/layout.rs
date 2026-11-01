@@ -624,6 +624,44 @@ impl Layout {
 
 #[cfg(test)]
 mod tests {
+
+    /// The screens recorded for 8b (`artifacts/screens`, not in git): which screen the rule picks on
+    /// each. Skipped when the folder is not there; `SUNPETAL_SCREENS` names another.
+    #[test]
+    fn the_rule_picks_the_screen_on_the_recorded_screens() {
+        let dir = std::env::var("SUNPETAL_SCREENS").unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../../artifacts/screens").into());
+        let dir = std::path::Path::new(&dir);
+        if !dir.is_dir() {
+            eprintln!("skipped: no {}", dir.display());
+            return;
+        }
+        // (file, the lower screen wanted, what it is)
+        let cases = [
+            ("badge2.png", false, "the map with the step counter (a walk)"),
+            ("case.png", true, "Catherine's device: the dial above, the readings below"),
+            ("c1.png", true, "the case menu"),
+            ("c2.png", true, "the guide book"),
+            ("memo.png", true, "the memo"),
+            ("goods.png", true, "the list of profiles"),
+            ("t1.png", true, "the title's menu"),
+            ("rq_a.png", true, "the request buttons"),
+        ];
+        let mut wrong = Vec::new();
+        for (file, want, what) in cases {
+            let Ok(f) = std::fs::File::open(dir.join(file)) else { continue };
+            let mut r = png::Decoder::new(std::io::BufReader::new(f)).read_info().unwrap();
+            let mut buf = vec![0; r.output_buffer_size()];
+            let info = r.next_frame(&mut buf).unwrap();
+            let ch = info.color_type.samples();
+            let rgba: Vec<u8> = buf[..info.buffer_size()].chunks(ch).flat_map(|p| [p[0], p[1], p[2], 255]).collect();
+            let got = lower_wanted(1, &rgba);
+            eprintln!("{:10} {:?} want {} ({})", file, got, want, what);
+            if got != Some(want) {
+                wrong.push(format!("{} ({}): got {:?}, want {}", file, what, got, want));
+            }
+        }
+        assert!(wrong.is_empty(), "{:#?}", wrong);
+    }
     #[test]
     fn the_wipe_is_a_red_band_not_the_panels_red_lines() {
         let paint = |from: usize, to: usize| {
