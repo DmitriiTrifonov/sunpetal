@@ -1015,6 +1015,9 @@ mod tests {
         let mut v = video("single", false, false, true);
         v.auto = true;
         let mut lv = live(0, false);
+        // by default (B-14) a puzzle with both screens is side by side; the panel is a choice
+        assert_eq!(crate::config::Video::default().puzzle, "side");
+        v.puzzle = "inset".into();
         assert_eq!(find(&all, &v, &lv).name, "single");
         lv.both = true;
         assert_eq!(find(&all, &v, &lv).name, "overlay");

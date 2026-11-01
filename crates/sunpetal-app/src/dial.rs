@@ -39,6 +39,23 @@ const SIGNATURE: [((u32, u32), Class); 12] = [
     ((60, 168), Class::Metal),
 ];
 
+/// The same puzzle drawn over by the 2D pack (stage 8е.7е: the silver case, the green plate; its band at the top is
+/// black, the corners are not the game's): the pack's colours at points that the dial's art has in common.
+const SIGNATURE_REDRAWN: [((u32, u32), Class); 12] = [
+    ((153, 95), Class::Dark),
+    ((60, 12), Class::Dark),
+    ((125, 15), Class::Dark),
+    ((15, 100), Class::Green),
+    ((15, 150), Class::Green),
+    ((20, 40), Class::Green),
+    ((240, 100), Class::Green),
+    ((240, 150), Class::Green),
+    ((153, 45), Class::Metal),
+    ((153, 145), Class::Metal),
+    ((100, 95), Class::Metal),
+    ((190, 120), Class::Metal),
+];
+
 fn is(c: Class, (r, g, b): (i32, i32, i32)) -> bool {
     match c {
         Class::Dark => r < 40 && g < 40 && b < 40,
@@ -56,15 +73,18 @@ pub fn recognise(scale: usize, rgba: &[u8]) -> bool {
     if rgba.len() < 2 * lower {
         return false;
     }
-    let hits = SIGNATURE
-        .iter()
-        .filter(|((x, y), class)| {
-            let (px, py) = (*x as usize * scale + scale / 2, *y as usize * scale + scale / 2);
-            let o = lower + (py * w + px) * 4;
-            is(*class, (rgba[o] as i32, rgba[o + 1] as i32, rgba[o + 2] as i32))
-        })
-        .count();
-    hits >= SIGNATURE.len() - 1
+    let matches = |sig: &[((u32, u32), Class)]| {
+        let hits = sig
+            .iter()
+            .filter(|((x, y), class)| {
+                let (px, py) = (*x as usize * scale + scale / 2, *y as usize * scale + scale / 2);
+                let o = lower + (py * w + px) * 4;
+                is(*class, (rgba[o] as i32, rgba[o + 1] as i32, rgba[o + 2] as i32))
+            })
+            .count();
+        hits >= sig.len() - 1
+    };
+    matches(&SIGNATURE) || matches(&SIGNATURE_REDRAWN)
 }
 
 /// A dial being turned by a finger.
@@ -101,9 +121,13 @@ mod tests {
 
     /// A lower screen painted with the colours the signature expects.
     fn frame(scale: usize, tint: impl Fn(Class) -> (u8, u8, u8)) -> Vec<u8> {
+        frame_of(scale, &SIGNATURE, tint)
+    }
+
+    fn frame_of(scale: usize, sig: &[((u32, u32), Class)], tint: impl Fn(Class) -> (u8, u8, u8)) -> Vec<u8> {
         let (w, h) = (256 * scale, 192 * scale);
         let mut v = vec![0u8; 2 * w * h * 4];
-        for ((x, y), c) in SIGNATURE {
+        for &((x, y), c) in sig {
             let (r, g, b) = tint(c);
             let (px, py) = (x as usize * scale + scale / 2, y as usize * scale + scale / 2);
             let o = w * h * 4 + (py * w + px) * 4;
@@ -128,6 +152,13 @@ mod tests {
         }
         // a screen effect that darkens and shifts the colours a little
         assert!(recognise(2, &frame(2, |c| { let (r, g, b) = colours(c); (r.saturating_sub(4), g.saturating_sub(4), b) })));
+    }
+
+    #[test]
+    fn the_puzzle_drawn_over_by_the_pack_is_recognised_too() {
+        for scale in [1, 2, 4] {
+            assert!(recognise(scale, &frame_of(scale, &SIGNATURE_REDRAWN, colours)));
+        }
     }
 
     #[test]

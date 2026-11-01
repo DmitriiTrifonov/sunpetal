@@ -81,7 +81,7 @@ pub fn parse_renderer(name: &str) -> Option<nds::Renderer> {
 
 impl Default for Video {
     fn default() -> Video {
-        Video { res: 2, linear: true, layout: "stacked".into(), lower: false, panel: false, counter: true, auto: true, wide: true, bars_match: true, fit: "fit".into(), pixel_aspect: 1.0, logos_in_turn: true, puzzle: "inset".into(), dialogue_text: "auto".into(), dialogue_font: "noto".into(), follow_shape: false, fullscreen: false, background: "edge".into(), show_stats: false, texture_pack: String::new(), renderer: default_renderer().into(), window: [512, 768] }
+        Video { res: 2, linear: true, layout: "stacked".into(), lower: false, panel: false, counter: true, auto: true, wide: true, bars_match: true, fit: "fit".into(), pixel_aspect: 1.0, logos_in_turn: true, puzzle: "side".into(), dialogue_text: "auto".into(), dialogue_font: "noto".into(), follow_shape: false, fullscreen: false, background: "edge".into(), show_stats: false, texture_pack: String::new(), renderer: default_renderer().into(), window: [512, 768] }
     }
 }
 
