@@ -1,0 +1,5 @@
+# The DS as it is: the upper screen over the lower.
+name = "stacked"
+size = [256.0, 384.0]
+upper = { x = 0.0, y = 0.0, w = 256.0, h = 192.0 }
+lower = { x = 0.0, y = 192.0, w = 256.0, h = 192.0 }

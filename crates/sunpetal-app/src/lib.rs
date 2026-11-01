@@ -20,6 +20,7 @@ mod emu;
 mod fonts;
 mod gfx;
 mod layout;
+mod layout_file;
 mod locate;
 mod post;
 mod touchpad;
@@ -1051,7 +1052,20 @@ pub fn run(o: Options, el: EventLoop<()>) {
         ring,
         window: None,
         gfx: None,
-        layouts: layout::all(),
+        layouts: {
+            // the player's layout files go after the built-in ones; a broken file is named and left out
+            let mut all = layout::all();
+            let (mine, bad) = layout_file::load_dir(&config::dir().join("layouts"));
+            for b in bad {
+                eprintln!("layout file: {}", b);
+            }
+            for l in mine {
+                if !all.iter().any(|a| a.name == l.name) {
+                    all.push(l);
+                }
+            }
+            all
+        },
         applied: settings.clone(),
         settings,
         menu: {

@@ -10,7 +10,7 @@ pub struct Rect {
     pub h: f32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Layout {
     pub name: &'static str,
     /// The size of the layout's own space.
