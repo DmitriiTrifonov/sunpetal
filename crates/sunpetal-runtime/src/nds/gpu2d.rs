@@ -514,6 +514,11 @@ impl Nds {
     /// 192, transparent where empty), to `dir/bg{engine}{layer}_{hash}.png`. A debugging and
     /// picture-pack aid: the hash is of the pixels.
     pub(super) fn dump_backgrounds(&mut self, dir: &std::path::Path) -> usize {
+        self.dump_backgrounds_rows(dir, &mut Vec::new())
+    }
+
+    /// `dump_backgrounds`, plus an `index.csv` row (`bg,engine,layer,0,0,256,192,key,file`) for each picture.
+    fn dump_backgrounds_rows(&mut self, dir: &std::path::Path, rows: &mut Vec<String>) -> usize {
         let mut n = 0;
         for e in 0..2 {
             let l = self.new_line(e);
@@ -570,7 +575,8 @@ impl Nds {
                     h = (h ^ *b as u64).wrapping_mul(0x100_0000_01b3);
                 }
                 let _ = std::fs::create_dir_all(dir);
-                let path = dir.join(format!("bg{}{}_{:016x}.png", e, bg, h));
+                let name = format!("bg{}{}_{:016x}.png", e, bg, h);
+                let path = dir.join(&name);
                 if let Ok(f) = std::fs::File::create(path) {
                     let mut enc = png::Encoder::new(std::io::BufWriter::new(f), 256, 192);
                     enc.set_color(png::ColorType::Rgba);
@@ -578,11 +584,164 @@ impl Nds {
                     if let Ok(mut w) = enc.write_header() {
                         let _ = w.write_image_data(&rgba);
                         n += 1;
+                        rows.push(format!("bg,{},{},0,0,256,192,{:016x},{}", e, bg, h, name));
                     }
                 }
             }
             self.gpu.refs = saved;
         }
+        n
+    }
+
+
+    /// Every picture the 2D engines show, for a 2D pack (`docs/2D-UPSCALE.md`, 8е.2): the background
+    /// layers as `bg{e}{layer}_{hash}.png` and each visible sprite as it lies in the object memory
+    /// (no flip, no rotation) as `obj{e}_{w}x{h}_{data}_{pal}.png`, the key being the hashes of the
+    /// sprite's tile data and of the palette it reads. `index.csv` (kind, engine, layer or OAM entry,
+    /// x, y, w, h, key, file) is merged with what an earlier call wrote, sorted, so the same scenes
+    /// give the same files. Returns the pictures written.
+    pub(super) fn dump_2d(&mut self, dir: &std::path::Path) -> usize {
+        let mut rows = Vec::new();
+        let mut n = self.dump_backgrounds_rows(dir, &mut rows);
+        let on9 = |s: &Self, e: usize| s.io_reg16(9, 0x0400_0304) & if e == 1 { 0x200 } else { 0x2 } != 0;
+        const KW: [[i32; 4]; 3] = [[8, 16, 32, 64], [16, 32, 32, 64], [8, 8, 16, 32]];
+        const KH: [[i32; 4]; 3] = [[8, 16, 32, 64], [8, 8, 16, 32], [16, 32, 32, 64]];
+        for e in 0..2usize {
+            let l = self.new_line(e);
+            let d = l.dispcnt;
+            if !on9(self, e) || d & 0x80 != 0 || d & 0x1000 == 0 || (d >> 16) & if e == 1 { 1 } else { 3 } != 1 {
+                continue;
+            }
+            let ext = d & 0x8000_0000 != 0;
+            for i in 0..128usize {
+                let a0 = self.oam16(e, i * 8) as u32;
+                let a1 = self.oam16(e, i * 8 + 2) as u32;
+                let a2 = self.oam16(e, i * 8 + 4) as u32;
+                let affine = a0 & 0x100 != 0;
+                if (!affine && a0 & 0x200 != 0) || (a0 | a1 | a2) == 0 {
+                    continue;
+                }
+                let (shape, sz) = ((a0 >> 14) as usize, (a1 >> 14) as usize);
+                if shape == 3 {
+                    continue;
+                }
+                let (w, h) = (KW[shape][sz], KH[shape][sz]);
+                let (mut x0, y0) = ((a1 & 0x1FF) as i32, (a0 & 0xFF) as i32);
+                if x0 >= 256 {
+                    x0 -= 512;
+                }
+                if x0 + w <= 0 || x0 >= 256 || (y0 + h <= 256 && y0 >= 192) {
+                    continue;
+                }
+                let bitmap = (a0 >> 10) & 3 == 3;
+                let c256 = a0 & 0x2000 != 0;
+                let tile = a2 & 0x3FF;
+                let mut rgba = vec![0u8; (w * h * 4) as usize];
+                let (mut hd, mut hp) = (0xcbf2_9ce4_8422_2325u64, 0xcbf2_9ce4_8422_2325u64);
+                let eat = |hh: &mut u64, v: u32| {
+                    for b in v.to_le_bytes() {
+                        *hh = (*hh ^ b as u64).wrapping_mul(0x100_0000_01b3);
+                    }
+                };
+                let mut used = [false; 256];
+                for ty in 0..h as u32 {
+                    for tx in 0..w as u32 {
+                        let (wu, o) = (w as u32, ((ty * w as u32 + tx) * 4) as usize);
+                        let c;
+                        if bitmap {
+                            let addr = if d & 0x40 != 0 {
+                                tile * (128u32 << ((d >> 22) & 1)) + (ty * wu + tx) * 2
+                            } else {
+                                let mask: u32 = if d & 0x20 != 0 { 0x1F } else { 0x0F };
+                                (tile & mask) * 0x10 + (tile & !mask) * 0x80 + ty * if d & 0x20 != 0 { 512 } else { 256 } + tx * 2
+                            };
+                            let v = self.vram_r16(l.aobj, addr);
+                            eat(&mut hd, v as u32);
+                            if v & 0x8000 == 0 {
+                                continue;
+                            }
+                            c = v;
+                        } else {
+                            let tbytes = if c256 { 64 } else { 32 };
+                            let addr = if d & 0x10 != 0 {
+                                tile * (32u32 << ((d >> 20) & 3)) + ((ty >> 3) * (wu >> 3) + (tx >> 3)) * tbytes
+                            } else {
+                                tile * 32 + (ty >> 3) * 1024 + (tx >> 3) * tbytes
+                            };
+                            let idx = if c256 {
+                                self.vram_r8(l.aobj, addr + (ty & 7) * 8 + (tx & 7)) as u32
+                            } else {
+                                let b = self.vram_r8(l.aobj, addr + (ty & 7) * 4 + (tx & 7) / 2);
+                                (if tx & 1 != 0 { b >> 4 } else { b & 15 }) as u32
+                            };
+                            eat(&mut hd, idx);
+                            if idx == 0 {
+                                continue;
+                            }
+                            c = if c256 {
+                                used[idx as usize] = true;
+                                if ext {
+                                    self.vram_r16(l.aobjext, (a2 >> 12) * 512 + idx * 2)
+                                } else {
+                                    self.pal16(e, 0x100 + idx)
+                                }
+                            } else {
+                                used[idx as usize] = true;
+                                self.pal16(e, 0x100 + (a2 >> 12) * 16 + idx)
+                            };
+                        }
+                        let c = c666(c);
+                        let ch = |sh: u32| {
+                            let v = (c >> sh & 63) as u8;
+                            v << 2 | v >> 4
+                        };
+                        rgba[o..o + 4].copy_from_slice(&[ch(0), ch(6), ch(12), 255]);
+                    }
+                }
+                // the palette hash covers the colours the sprite uses, in index order
+                for (k, u) in used.iter().enumerate() {
+                    if *u {
+                        let c = if c256 {
+                            if ext { self.vram_r16(l.aobjext, (a2 >> 12) * 512 + k as u32 * 2) } else { self.pal16(e, 0x100 + k as u32) }
+                        } else {
+                            self.pal16(e, 0x100 + (a2 >> 12) * 16 + k as u32)
+                        };
+                        eat(&mut hp, k as u32);
+                        eat(&mut hp, c as u32);
+                    }
+                }
+                if rgba.chunks_exact(4).all(|p| p[3] == 0) {
+                    continue;
+                }
+                let name = format!("obj{}_{}x{}_{:016x}_{:016x}.png", e, w, h, hd, hp);
+                let _ = std::fs::create_dir_all(dir);
+                let path = dir.join(&name);
+                if !path.exists() {
+                    if let Ok(f) = std::fs::File::create(&path) {
+                        let mut enc = png::Encoder::new(std::io::BufWriter::new(f), w as u32, h as u32);
+                        enc.set_color(png::ColorType::Rgba);
+                        enc.set_depth(png::BitDepth::Eight);
+                        if let Ok(mut wr) = enc.write_header() {
+                            let _ = wr.write_image_data(&rgba);
+                            n += 1;
+                        }
+                    }
+                }
+                rows.push(format!("obj,{},{},{},{},{},{},{:016x}_{:016x},{}", e, i, x0, y0, w, h, hd, hp, name));
+            }
+        }
+        // merge with the index an earlier call wrote
+        let idx = dir.join("index.csv");
+        let mut all: std::collections::BTreeSet<String> = std::fs::read_to_string(&idx)
+            .map(|t| t.lines().skip(1).map(str::to_owned).collect())
+            .unwrap_or_default();
+        all.extend(rows);
+        let mut text = String::from("kind,engine,layer_or_oam,x,y,w,h,key,file\n");
+        for r in &all {
+            text.push_str(r);
+            text.push('\n');
+        }
+        let _ = std::fs::write(idx, text);
         n
     }
 

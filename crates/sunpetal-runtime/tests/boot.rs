@@ -139,6 +139,48 @@ fn a_pack_made_of_the_dump_changes_nothing() {
     assert!(plain == packed, "a pack of the dump must draw the same picture");
 }
 
+/// The 2D dump (этап 8е.2): two runs of the same frames write the same pictures under the same names and the
+/// same `index.csv`; both screens give background layers, and the sprites carry their size in the name.
+#[test]
+fn the_2d_dump_is_the_same_on_every_run() {
+    let Some(rom) = std::env::var_os("SUNPETAL_ROM").map(PathBuf::from) else {
+        eprintln!("skipped: SUNPETAL_ROM is not set");
+        return;
+    };
+    let tmp = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("dump2d");
+    let _ = std::fs::remove_dir_all(&tmp);
+    let one = |name: &str| -> (Vec<String>, String) {
+        let dir = tmp.join(name);
+        let (cfg, d2) = (Config::new(&rom), dir.clone());
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(move || {
+                let mut cfg = cfg;
+                cfg.stop_vblanks = 1600;
+                cfg.input = (400..1600).step_by(100).map(|v| format!("{}:START", v)).collect::<Vec<_>>().join(",");
+                nds::boot(cfg).expect("boot");
+                while nds::run_frame() {
+                    if nds::vblanks() % 100 == 0 {
+                        nds::dump_2d(&d2);
+                    }
+                }
+            })
+            .unwrap()
+            .join()
+            .expect("the run");
+        let mut names: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        (names, std::fs::read_to_string(dir.join("index.csv")).expect("index.csv"))
+    };
+    let (a, ia) = one("a");
+    let (b, ib) = one("b");
+    assert!(a.len() > 3, "the menu shows 2D pictures ({:?})", a);
+    assert_eq!(a, b, "the same frames, the same files");
+    assert_eq!(ia, ib, "the same index");
+    assert!(ia.lines().skip(1).all(|l| l.split(',').count() == 9), "nine columns in every row");
+    assert!(a.iter().any(|n| n.starts_with("bg")), "background layers are dumped");
+}
+
 /// The GPU's frame is read after the emulation has run on (этап 9.2.3-9.2.4): the picture at VBlank 2400
 /// is the software engine's, drawn by the GPU throughout, and with the renderer switched back and forth
 /// before it (a frame in flight never leaks into the next renderer's).

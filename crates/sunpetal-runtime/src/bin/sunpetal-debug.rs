@@ -7,7 +7,7 @@
 //! (`{"ok":true,...}` or `{"error":"..."}`):
 //!
 //!     run N | press KEYS [FRAMES] | tap X Y [FRAMES] | shot FILE | shotwide FILE (with --wide)
-//!     log FILE|off | advance [FRAMES] | walk N [FRAMES] | shown | peek ADDR[:LEN] | find TEXT | findhex HEX | calls FRAMES FILE [KEYS] | callsarg FRAMES LO[-HI] [KEYS] | quit
+//!     dump2d DIR | log FILE|off | advance [FRAMES] | walk N [FRAMES] | shown | peek ADDR[:LEN] | find TEXT | findhex HEX | calls FRAMES FILE [KEYS] | callsarg FRAMES LO[-HI] [KEYS] | quit
 use std::io::BufRead;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -172,6 +172,10 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
         "shot" => {
             s.shot(std::path::Path::new(w.first().ok_or("shot FILE")?))?;
             done(json!({}))
+        }
+        "dump2d" => {
+            let n = sunpetal_runtime::nds::dump_2d(std::path::Path::new(w.first().ok_or("dump2d DIR")?));
+            done(json!({"new": n}))
         }
         "traceall" => {
             debug::trace_everything(true);

@@ -1176,6 +1176,12 @@ pub fn dump_backgrounds(dir: &std::path::Path) -> usize {
     nds(|n| n.dump_backgrounds(dir))
 }
 
+/// Writes every 2D picture on show (background layers, sprites) with an `index.csv` into `dir`
+/// (see `gpu2d::dump_2d`); returns how many pictures were new.
+pub fn dump_2d(dir: &std::path::Path) -> usize {
+    nds(|n| n.dump_2d(dir))
+}
+
 /// Runs to the next VBlank; false once stopped.
 /// How a frame's time goes (a diagnostic for the app's status line): scheduler quanta run, then
 /// nanoseconds in the guest CPUs, in the hardware (events: lines, timers, DMA), in the sound.
