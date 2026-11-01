@@ -13,6 +13,10 @@ doctest = false
 name = "sunpetal-app"
 path = "src/main.rs"
 
+[[bin]]
+name = "sunpetal-screen-report"
+path = "src/bin/sunpetal-screen-report.rs"
+
 [dependencies]
 bytemuck = { version = "1.25.2", features = ["derive"] }
 cpal = "0.18.2"

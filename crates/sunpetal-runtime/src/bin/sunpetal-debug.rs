@@ -65,6 +65,9 @@ struct Args {
     /// Autoplay: a picture of the dialogue window per line goes to DIR/<scene>_<ID>.png.
     #[arg(long, value_name = "DIR")]
     out: Option<PathBuf>,
+    /// Autoplay: both screens per line go to DIR/<scene>_<ID>.png (the input of `sunpetal-screen-report`).
+    #[arg(long, value_name = "DIR")]
+    screens_dir: Option<PathBuf>,
     /// Both screens as a PNG at the end.
     #[arg(long, value_name = "FILE")]
     shot: Option<PathBuf>,
@@ -357,7 +360,7 @@ fn run(a: Args) -> Result<(), String> {
     }
     let mut stop = None;
     if a.autoplay {
-        stop = Some(s.autoplay(&Autoplay { max_lines: a.max_lines, delay: a.frame_delay, out: a.out.clone() })?);
+        stop = Some(s.autoplay(&Autoplay { max_lines: a.max_lines, delay: a.frame_delay, out: a.out.clone(), screens: a.screens_dir.clone() })?);
     }
     if let Some(p) = &a.shot {
         s.shot(p)?;
@@ -421,7 +424,7 @@ fn batch(s: &mut Session, a: &Args, values: &[(i32, i32)], scenes: &[String]) ->
         let (status, stop, error) = match started {
             Err(e) => (if e.contains("no event starts it") { "no_event" } else { "not_started" }, None, Some(e)),
             Ok(()) if a.autoplay => {
-                let stop = s.autoplay(&Autoplay { max_lines: a.max_lines, delay: a.frame_delay, out: a.out.clone() })?;
+                let stop = s.autoplay(&Autoplay { max_lines: a.max_lines, delay: a.frame_delay, out: a.out.clone(), screens: a.screens_dir.clone() })?;
                 (if stop == sunpetal_runtime::session::Stop::Stalled { "stalled" } else { "ok" }, Some(stop), None)
             }
             Ok(()) => ("ok", None, None),

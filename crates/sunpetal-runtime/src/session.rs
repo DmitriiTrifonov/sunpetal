@@ -302,6 +302,8 @@ pub struct Autoplay {
     pub delay: u64,
     /// Where the pictures of the dialogue window go, `<scene>_<ID>.png`.
     pub out: Option<PathBuf>,
+    /// Where the pictures of both screens go, `<scene>_<ID>.png` (for `sunpetal-screen-report`).
+    pub screens: Option<PathBuf>,
 }
 
 /// Why `autoplay` stopped.
@@ -430,6 +432,10 @@ impl Session {
             if let (Some(dir), Some(name), Some(id)) = (&o.out, &event.scene, &event.id) {
                 self.run(o.delay)?;
                 self.shot_dialogue(&dir.join(format!("{}_{}.png", name, id)))?;
+            }
+            if let (Some(dir), Some(name), Some(id)) = (&o.screens, &event.scene, &event.id) {
+                self.run(o.delay)?;
+                self.shot(&dir.join(format!("{}_{}.png", name, id)))?;
             }
         }
         Ok(Stop::MaxLines)
@@ -754,7 +760,7 @@ impl Session {
         }
         if !carry_on {
             self.quiet = self.quiet_opening;
-            let played = self.goto_request(chapter).and_then(|_| self.autoplay(&Autoplay { max_lines: 1000, delay: 0, out: None }));
+            let played = self.goto_request(chapter).and_then(|_| self.autoplay(&Autoplay { max_lines: 1000, delay: 0, out: None, screens: None }));
             self.quiet = false;
             // the opening plays by A; the first stall is the first free walk
             let stop = played?;

@@ -21,6 +21,7 @@ mod fonts;
 mod gfx;
 mod layout;
 mod layout_file;
+pub mod screen_report;
 mod locate;
 mod post;
 mod touchpad;
