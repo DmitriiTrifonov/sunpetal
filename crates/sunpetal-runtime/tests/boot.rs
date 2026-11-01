@@ -299,6 +299,57 @@ fn a_2d_pack_replaces_the_sprites_it_names_and_nothing_else() {
     assert!(changed > 0);
 }
 
+/// The 2D pack for background layers (этап 8е.3): a pack of the dump draws the frame as it was, and one-colour
+/// pictures of the layers paint pixels of that colour and change nothing else.
+#[test]
+fn a_2d_pack_replaces_background_layers() {
+    let Some(rom) = std::env::var_os("SUNPETAL_ROM").map(PathBuf::from) else {
+        eprintln!("skipped: SUNPETAL_ROM is not set");
+        return;
+    };
+    let tmp = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("pack2d_bg");
+    let _ = std::fs::remove_dir_all(&tmp);
+    let (dump, checker) = (tmp.join("dump"), tmp.join("checker"));
+    std::fs::create_dir_all(&checker).unwrap();
+    let mut found = None;
+    for frames in [1200u64, 1600, 2000, 2400, 3000, 3600, 4800] {
+        let _ = std::fs::remove_dir_all(&dump);
+        let (_, _, plain, _) = run_2d(&rom, frames, None, Some(dump.clone()), tmp.join("plain.png"));
+        let layers: Vec<String> = std::fs::read_dir(&dump).map(|d| d.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.starts_with("bg")).collect()).unwrap_or_default();
+        if layers.is_empty() {
+            continue;
+        }
+        // only the layers in the pack: the sprites' pictures taken out
+        let only = tmp.join("only_bg");
+        let _ = std::fs::remove_dir_all(&only);
+        std::fs::create_dir_all(&only).unwrap();
+        for n in &layers {
+            std::fs::copy(dump.join(n), only.join(n)).unwrap();
+        }
+        let (_, _, same, placed) = run_2d(&rom, frames, Some(only), None, tmp.join("same.png"));
+        if placed > 0 {
+            found = Some((frames, plain, same, layers));
+            break;
+        }
+    }
+    let (frames, plain, same, layers) = found.expect("some frame shows a layer the pack can replace");
+    let bad = plain.chunks_exact(4).zip(same.chunks_exact(4)).filter(|(a, b)| a != b).count();
+    assert_eq!(bad, 0, "a pack of the layers of frame {} changes {} pixels", frames, bad);
+    for n in &layers {
+        let px: Vec<u8> = (0..256 * 192).flat_map(|_| [255u8, 0, 255, 255]).collect();
+        let f = std::fs::File::create(checker.join(n)).unwrap();
+        let mut enc = png::Encoder::new(std::io::BufWriter::new(f), 256, 192);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.write_header().unwrap().write_image_data(&px).unwrap();
+    }
+    let (_, _, painted, placed) = run_2d(&rom, frames, Some(checker), None, tmp.join("checker.png"));
+    assert!(placed > 0 && plain != painted, "the one-colour layers change the picture");
+    for (i, (a, b)) in plain.chunks_exact(4).zip(painted.chunks_exact(4)).enumerate() {
+        assert!(a == b || b[..3] == [255, 0, 255], "pixel {} changed to something else than the pack's colour", i);
+    }
+}
+
 /// The GPU's frame is read after the emulation has run on (этап 9.2.3-9.2.4): the picture at VBlank 2400
 /// is the software engine's, drawn by the GPU throughout, and with the renderer switched back and forth
 /// before it (a frame in flight never leaks into the next renderer's).

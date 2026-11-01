@@ -24,6 +24,18 @@ struct Entry {
 #[derive(Default)]
 pub(super) struct Pack2d {
     entries: HashMap<Key, Entry>,
+    /// Background layers, by the hash of their pixels.
+    layers: HashMap<u64, Entry>,
+}
+
+/// `bg01_{16 hex}.png` -> the hash of the layer's pixels.
+pub(super) fn parse_layer_name(name: &str) -> Option<u64> {
+    let stem = name.strip_suffix(".png")?.strip_prefix("bg")?;
+    let (el, h) = stem.split_once('_')?;
+    if el.len() != 2 || !el.bytes().all(|b| b.is_ascii_digit()) || h.len() != 16 {
+        return None;
+    }
+    u64::from_str_radix(h, 16).ok()
 }
 
 /// `obj0_32x16_{16 hex}_{16 hex}.png` -> its key.
@@ -42,22 +54,35 @@ pub(super) fn parse_name(name: &str) -> Option<Key> {
 impl Pack2d {
     pub fn load(dir: &Path) -> Result<Pack2d, String> {
         let mut entries = HashMap::new();
+        let mut layers = HashMap::new();
         let rd = std::fs::read_dir(dir).map_err(|e| format!("2D pack {}: {}", dir.display(), e))?;
         for f in rd.flatten() {
             let name = f.file_name().to_string_lossy().into_owned();
             if let Some(k) = parse_name(&name) {
                 entries.insert(k, Entry { path: f.path(), image: OnceLock::new() });
+            } else if let Some(h) = parse_layer_name(&name) {
+                layers.insert(h, Entry { path: f.path(), image: OnceLock::new() });
             }
         }
-        Ok(Pack2d { entries })
+        Ok(Pack2d { entries, layers })
     }
 
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.entries.is_empty() && self.layers.is_empty()
     }
 
     pub fn len(&self) -> usize {
-        self.entries.len()
+        self.entries.len() + self.layers.len()
+    }
+
+    pub fn has_layers(&self) -> bool {
+        !self.layers.is_empty()
+    }
+
+    /// The picture of a background layer whose pixels hash to `h`.
+    pub fn get_layer(&self, h: u64) -> Option<Arc<Img>> {
+        let e = self.layers.get(&h)?;
+        e.image.get_or_init(|| read_png(&e.path).map(Arc::new)).clone()
     }
 
     /// The picture of `key`, decoded the first time it is asked for; `None` if there is none or it does not read.
@@ -119,6 +144,9 @@ mod tests {
         assert_eq!(parse_name("obj1_32x16_00000000000000ab_00000000000000cd.png"), Some((32, 16, 0xab, 0xcd)));
         assert_eq!(parse_name("obj0_8x32_ffffffffffffffff_0000000000000001.png"), Some((8, 32, u64::MAX, 1)));
         assert_eq!(parse_name("bg00_00000000000000ab.png"), None);
+        assert_eq!(parse_layer_name("bg13_00000000000000ab.png"), Some(0xab));
+        assert_eq!(parse_layer_name("bg1_00000000000000ab.png"), None);
+        assert_eq!(parse_layer_name("obj0_8x8_00000000000000ab.png"), None);
         assert_eq!(parse_name("obj0_32x16_ab_cd_ef.png"), None);
         assert_eq!(parse_name("obj0_32x16_ab_cd.jpg"), None);
     }

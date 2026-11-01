@@ -50,6 +50,10 @@ pub(super) struct Gpu2d {
     skip: [[bool; 128]; 2],
     /// This frame's replaced sprites.
     placed: Vec<Placed>,
+    /// [engine][y][x]: the layer on top of the pixel (0-3 BG, 4 OBJ, 5 backdrop) as the last line drawn left it.
+    top: Vec<u8>,
+    /// This frame's replaced background layers: engine, layer, picture.
+    layers_placed: Vec<(usize, usize, std::sync::Arc<super::pack2d::Img>)>,
 }
 
 /// A sprite of the pack laid over the screen.
@@ -91,11 +95,11 @@ impl Sprite {
 
 impl Gpu2d {
     pub(super) fn placed_count(&self) -> usize {
-        self.placed.len()
+        self.placed.len() + self.layers_placed.len()
     }
 
     pub(super) fn new() -> Gpu2d {
-        Gpu2d { px: vec![0; 2 * 192 * 256 * 2], refs: [[[0; 2]; 2]; 2], on: true, mosaic: vec![[0; 256]; 8], hide_dialogue: false, band: (0, 0), text_box: [None; 2], pack: None, skip: [[false; 128]; 2], placed: Vec::new() }
+        Gpu2d { px: vec![0; 2 * 192 * 256 * 2], refs: [[[0; 2]; 2]; 2], on: true, mosaic: vec![[0; 256]; 8], hide_dialogue: false, band: (0, 0), text_box: [None; 2], pack: None, skip: [[false; 128]; 2], placed: Vec::new(), top: vec![5; 2 * 192 * 256], layers_placed: Vec::new() }
     }
 
     fn at(e: usize, y: usize) -> usize {
@@ -573,6 +577,27 @@ impl Nds {
     /// `dump_backgrounds`, plus an `index.csv` row (`bg,engine,layer,0,0,256,192,key,file`) for each picture.
     fn dump_backgrounds_rows(&mut self, dir: &std::path::Path, rows: &mut Vec<String>) -> usize {
         let mut n = 0;
+        for (e, bg, rgba, h) in self.bg_layers() {
+            let name = format!("bg{}{}_{:016x}.png", e, bg, h);
+            let _ = std::fs::create_dir_all(dir);
+            if let Ok(f) = std::fs::File::create(dir.join(&name)) {
+                let mut enc = png::Encoder::new(std::io::BufWriter::new(f), 256, 192);
+                enc.set_color(png::ColorType::Rgba);
+                enc.set_depth(png::BitDepth::Eight);
+                if let Ok(mut w) = enc.write_header() {
+                    let _ = w.write_image_data(&rgba);
+                    n += 1;
+                    rows.push(format!("bg,{},{},0,0,256,192,{:016x},{}", e, bg, h, name));
+                }
+            }
+        }
+        n
+    }
+
+    /// Every background layer that shows, as it looks on its screen (scrolled, 256 x 192 RGBA, transparent where
+    /// empty): (engine, layer, pixels, hash of the pixels).
+    fn bg_layers(&mut self) -> Vec<(usize, usize, Vec<u8>, u64)> {
+        let mut out = Vec::new();
         for e in 0..2 {
             let l = self.new_line(e);
             let d = l.dispcnt;
@@ -627,26 +652,12 @@ impl Nds {
                 for b in &rgba {
                     h = (h ^ *b as u64).wrapping_mul(0x100_0000_01b3);
                 }
-                let _ = std::fs::create_dir_all(dir);
-                let name = format!("bg{}{}_{:016x}.png", e, bg, h);
-                let path = dir.join(&name);
-                if let Ok(f) = std::fs::File::create(path) {
-                    let mut enc = png::Encoder::new(std::io::BufWriter::new(f), 256, 192);
-                    enc.set_color(png::ColorType::Rgba);
-                    enc.set_depth(png::BitDepth::Eight);
-                    if let Ok(mut w) = enc.write_header() {
-                        let _ = w.write_image_data(&rgba);
-                        n += 1;
-                        rows.push(format!("bg,{},{},0,0,256,192,{:016x},{}", e, bg, h, name));
-                    }
-                }
+                out.push((e, bg, rgba, h));
             }
             self.gpu.refs = saved;
         }
-        n
+        out
     }
-
-
 
     /// The sprite of OAM entry `i` of the engine of `l` as it lies in the object memory (no flip, no
     /// rotation), with the key of its data; `None` for one that is off, out of the picture, empty
@@ -809,15 +820,30 @@ impl Nds {
     fn collect_replaced(&mut self) {
         self.gpu.skip = [[false; 128]; 2];
         self.gpu.placed.clear();
+        self.gpu.layers_placed.clear();
         let Some(pack) = self.gpu.pack.clone() else { return };
         if pack.is_empty() {
             return;
         }
+        // a blend or a fade over a layer would be lost under a picture laid over it: the engine draws those as they are
+        let plain = |s: &Self, e: usize| {
+            let io = if e == 1 { 0x0400_1000 } else { 0x0400_0000 };
+            let (bldcnt, bright) = (s.g16(io + 0x50), s.g16(io + 0x6C));
+            !((bldcnt >> 6 & 3 != 0 && (bldcnt & 0x3F != 0 || bldcnt >> 6 & 3 == 1)) || (bright >> 14 & 3 != 0 && bright & 31 != 0))
+        };
+        if pack.has_layers() {
+            for (e, bg, _, h) in self.bg_layers() {
+                if !plain(self, e) {
+                    continue;
+                }
+                if let Some(img) = pack.get_layer(h) {
+                    self.gpu.layers_placed.push((e, bg, img));
+                }
+            }
+        }
         for e in 0..2usize {
             let l = self.new_line(e);
-            // a blend or a fade over the sprites would be lost under a picture laid over them: the engine draws them as they are
-            let (bldcnt, bright) = (self.g16(l.io + 0x50), self.g16(l.io + 0x6C));
-            if (bldcnt >> 6 & 3 != 0 && (bldcnt & 0x10 != 0 || bldcnt >> 6 & 3 == 1)) || (bright >> 14 & 3 != 0 && bright & 31 != 0) {
+            if !plain(self, e) {
                 continue;
             }
             for i in 0..128usize {
@@ -835,6 +861,25 @@ impl Nds {
     /// Lays the pack's pictures over `rgb` (the two screens, `CH` bytes a pixel, `s` times the DS's size).
     fn overlay_pack(&self, rgb: &mut [u8], s: usize, ch: usize, a_top: bool) {
         let (w, h3) = (256 * s, 192 * s);
+        for (e, bg, img) in &self.gpu.layers_placed {
+            let top = if (*e == 0) == a_top { 0 } else { h3 };
+            for y in 0..h3 {
+                for x in 0..w {
+                    if self.gpu.top[(e * 192 + y / s) * 256 + x / s] != *bg as u8 {
+                        continue;
+                    }
+                    let c = img.sample((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h3 as f32);
+                    if c[3] == 0 {
+                        continue;
+                    }
+                    let o = ((top + y) * w + x) * ch;
+                    let a = c[3] as u32;
+                    for k in 0..3 {
+                        rgb[o + k] = ((c[k] as u32 * a + rgb[o + k] as u32 * (255 - a) + 127) / 255) as u8;
+                    }
+                }
+            }
+        }
         for p in &self.gpu.placed {
             let top = if (p.e == 0) == a_top { 0 } else { h3 };
             let (pw, ph) = ((p.w as usize) * s, (p.h as usize) * s);
@@ -1083,6 +1128,7 @@ impl Nds {
             }
             self.gpu.px[base + 2 * x] = w0;
             self.gpu.px[base + 2 * x + 1] = w1;
+            self.gpu.top[(e * 192 + y as usize) * 256 + x] = tl as u8;
         }
     }
 
