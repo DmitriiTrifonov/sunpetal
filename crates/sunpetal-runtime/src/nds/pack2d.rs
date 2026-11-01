@@ -14,6 +14,8 @@ pub(super) struct Img {
     pub w: usize,
     pub h: usize,
     pub rgba: Vec<u8>,
+    /// The picture sampled to one size (a whole layer at the window's scale), kept from frame to frame.
+    scaled: std::sync::Mutex<Option<(usize, usize, Arc<Vec<u8>>)>>,
 }
 
 struct Entry {
@@ -135,10 +137,30 @@ fn decode(bytes: &[u8]) -> Option<Img> {
         (png::ColorType::Grayscale, png::BitDepth::Eight) => buf[..w * h].iter().flat_map(|&g| [g, g, g, 255]).collect(),
         _ => return None,
     };
-    (w > 0 && h > 0).then_some(Img { w, h, rgba })
+    (w > 0 && h > 0).then_some(Img { w, h, rgba, scaled: Default::default() })
 }
 
 impl Img {
+    /// The picture stretched over `w` x `h` pixels, as `sample` gives it at each pixel's middle (RGBA bytes);
+    /// made once for a size, not on every frame.
+    pub fn scaled(&self, w: usize, h: usize) -> Arc<Vec<u8>> {
+        let mut c = self.scaled.lock().unwrap();
+        if let Some((cw, ch, v)) = &*c {
+            if (*cw, *ch) == (w, h) {
+                return v.clone();
+            }
+        }
+        let mut v = Vec::with_capacity(w * h * 4);
+        for y in 0..h {
+            for x in 0..w {
+                v.extend_from_slice(&self.sample((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32));
+            }
+        }
+        let v = Arc::new(v);
+        *c = Some((w, h, v.clone()));
+        v
+    }
+
     /// The picture at (`fx`, `fy`) in 0..1 across and down, bilinear, alpha premultiplied while it
     /// is mixed; (r, g, b, a) bytes.
     pub fn sample(&self, fx: f32, fy: f32) -> [u8; 4] {
@@ -182,7 +204,7 @@ mod tests {
 
     #[test]
     fn a_picture_samples_to_its_own_pixels_at_its_own_size() {
-        let img = Img { w: 2, h: 1, rgba: vec![255, 0, 0, 255, 0, 0, 255, 0] };
+        let img = Img { w: 2, h: 1, rgba: vec![255, 0, 0, 255, 0, 0, 255, 0], scaled: Default::default() };
         assert_eq!(img.sample(0.25, 0.5), [255, 0, 0, 255]);
         assert_eq!(img.sample(0.75, 0.5)[3], 0);
     }

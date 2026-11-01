@@ -184,6 +184,12 @@ pub fn spawn(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) -> std:
 }
 
 fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
+    // macOS throttles a thread of a window that was in the background (timers, low QoS) and may keep it slow after
+    // the return: the machine's thread asks for the interactive class for good
+    #[cfg(target_os = "macos")]
+    unsafe {
+        libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_USER_INTERACTIVE, 0);
+    }
     *shared.status.lock().unwrap() = "booting".into();
     if let Err(e) = nds::boot(cfg) {
         *shared.stopped.lock().unwrap() = Some(e);

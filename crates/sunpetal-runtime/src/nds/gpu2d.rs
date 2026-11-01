@@ -870,16 +870,22 @@ impl Nds {
         let (w, h3) = (256 * s, 192 * s);
         for (e, bg, img) in &self.gpu.layers_placed {
             let top = if (*e == 0) == a_top { 0 } else { h3 };
+            let pic = img.scaled(w, h3);
             for y in 0..h3 {
+                let mask = &self.gpu.top[(e * 192 + y / s) * 256..][..256];
                 for x in 0..w {
-                    if self.gpu.top[(e * 192 + y / s) * 256 + x / s] != *bg as u8 {
+                    if mask[x / s] != *bg as u8 {
                         continue;
                     }
-                    let c = img.sample((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h3 as f32);
+                    let c = &pic[(y * w + x) * 4..][..4];
                     if c[3] == 0 {
                         continue;
                     }
                     let o = ((top + y) * w + x) * ch;
+                    if c[3] == 255 {
+                        rgb[o..o + 3].copy_from_slice(&c[..3]);
+                        continue;
+                    }
                     let a = c[3] as u32;
                     for k in 0..3 {
                         rgb[o + k] = ((c[k] as u32 * a + rgb[o + k] as u32 * (255 - a) + 127) / 255) as u8;

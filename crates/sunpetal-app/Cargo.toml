@@ -38,6 +38,9 @@ winit = "0.30.13"
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 rfd = "0.17.2"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+
 [target.'cfg(target_os = "android")'.dependencies]
 winit = { version = "0.30.13", features = ["android-native-activity"] }
 libc = "0.2"

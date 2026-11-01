@@ -478,7 +478,7 @@ impl App {
                 self.pad |= bits;
                 self.send_keys();
             }
-            pad::Act::GameMenu => self.swap_screen(),
+            pad::Act::GameMenu => self.press("Y"),
             pad::Act::OpenMenu | pad::Act::CloseMenu => {
                 // what was held goes up: the menu is not the game's
                 self.pad = 0;
