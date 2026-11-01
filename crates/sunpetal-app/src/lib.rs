@@ -456,6 +456,8 @@ impl App {
                 self.scroll = (self.scroll + v * 160.0 * dt).clamp(0.0, 192.0);
             }
         }
+        // the ring goes out when the stick has been let alone for a while (the mouse does it at once)
+        self.stylus.rest(dt, self.pad_pen || self.pen_down, self.settings.input.stylus_hide);
         if !self.menu.open && self.rstick != (0.0, 0.0) {
             let (speed, dead) = (self.settings.input.stylus_speed, self.settings.input.stylus_dead);
             if let Some(g) = &self.gfx {
@@ -523,6 +525,7 @@ impl App {
                 if self.stylus.pos.is_none() {
                     self.stylus.pos = Some(self.stylus_home());
                 }
+                self.stylus.idle = 0.0;
                 self.mouse = self.stylus.pos.unwrap_or(self.mouse);
                 self.pen_down = true;
                 if let Some(g) = &self.gfx {

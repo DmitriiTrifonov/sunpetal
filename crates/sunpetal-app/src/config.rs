@@ -119,6 +119,8 @@ pub struct Input {
     pub stylus_speed: f32,
     /// How far the right stick must go before the stylus moves (0-0.9).
     pub stylus_dead: f32,
+    /// The stylus' ring goes out after this many seconds without the stick moving (0: stays).
+    pub stylus_hide: f32,
 }
 
 impl Default for Input {
@@ -145,6 +147,7 @@ impl Default for Input {
             dial_gain: 1.5,
             stylus_speed: 0.9,
             stylus_dead: 0.2,
+            stylus_hide: 3.0,
         }
     }
 }
@@ -291,6 +294,7 @@ impl Settings {
         let i = &mut self.input;
         i.stylus_speed = if i.stylus_speed.is_finite() { i.stylus_speed.clamp(0.1, 4.0) } else { 0.9 };
         i.stylus_dead = if i.stylus_dead.is_finite() { i.stylus_dead.clamp(0.0, 0.9) } else { 0.2 };
+        i.stylus_hide = if i.stylus_hide.is_finite() { i.stylus_hide.clamp(0.0, 60.0) } else { 3.0 };
     }
 
     /// Fixes what a hand-edited file may have got wrong.

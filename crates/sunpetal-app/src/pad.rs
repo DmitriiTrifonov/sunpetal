@@ -138,6 +138,8 @@ pub fn stick_speed(x: f32, y: f32, dead: f32) -> (f32, f32) {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Stylus {
     pub pos: Option<(f32, f32)>,
+    /// Seconds since the point last moved or was pressed.
+    pub idle: f32,
 }
 
 impl Stylus {
@@ -148,10 +150,27 @@ impl Stylus {
         if sx == 0.0 && sy == 0.0 {
             return false;
         }
+        self.idle = 0.0;
         let (px, py) = self.pos.unwrap_or(home);
         let d = speed * size.0 * dt;
         self.pos = Some(((px + sx * d).clamp(0.0, (size.0 - 1.0).max(0.0)), (py - sy * d).clamp(0.0, (size.1 - 1.0).max(0.0))));
         true
+    }
+
+    /// `dt` seconds pass. With the point at rest (not `held` by the click) for `hide` seconds it goes out
+    /// (`hide` 0: never); the stick moves it back. True if it went out now.
+    pub fn rest(&mut self, dt: f32, held: bool, hide: f32) -> bool {
+        if self.pos.is_none() || held || hide <= 0.0 {
+            self.idle = 0.0;
+            return false;
+        }
+        self.idle += dt;
+        if self.idle >= hide {
+            self.pos = None;
+            self.idle = 0.0;
+            return true;
+        }
+        false
     }
 }
 
@@ -170,6 +189,27 @@ mod tests {
     use super::*;
     use crate::bit;
     use gilrs::Button::*;
+
+    #[test]
+    fn the_stylus_goes_out_at_rest_and_comes_back_with_the_stick() {
+        let mut s = Stylus::default();
+        let size = (100.0, 100.0);
+        assert!(s.step((1.0, 0.0), 0.1, 0.9, 0.2, size, (50.0, 50.0)));
+        assert!(!s.rest(2.9, false, 3.0));
+        assert!(s.pos.is_some());
+        assert!(s.rest(0.2, false, 3.0));
+        assert!(s.pos.is_none());
+        assert!(s.step((1.0, 0.0), 0.1, 0.9, 0.2, size, (50.0, 50.0)));
+        assert!(s.pos.is_some());
+    }
+
+    #[test]
+    fn a_held_click_or_hide_zero_keeps_the_stylus() {
+        let mut s = Stylus { pos: Some((10.0, 10.0)), idle: 0.0 };
+        assert!(!s.rest(10.0, true, 3.0));
+        assert!(!s.rest(10.0, false, 0.0));
+        assert!(s.pos.is_some());
+    }
 
     const GAME: Ctx = Ctx { menu_open: false, start_to_game: false, game_menu_up: false };
     const MENU: Ctx = Ctx { menu_open: true, start_to_game: false, game_menu_up: false };
