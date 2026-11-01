@@ -159,13 +159,13 @@ pub struct Emulation {
     pub skip_button: bool,
     /// A click (a tap) while the logos at the start run races through them.
     pub click_skips_logos: bool,
-    /// Stage 8ж.5: the GPU's 3D frame is not waited for at the end of a frame (the picture is a frame late).
+    /// Stage 8ж.5: the GPU's 3D frame is not waited for at the end of a frame (the picture is a frame late). On by default since B-11.
     pub pipeline: bool,
 }
 
 impl Default for Emulation {
     fn default() -> Emulation {
-        Emulation { pause_in_menu: true, fast_key: true, fast_button: true, skip_button: true, click_skips_logos: true, pipeline: false }
+        Emulation { pause_in_menu: true, fast_key: true, fast_button: true, skip_button: true, click_skips_logos: true, pipeline: true }
     }
 }
 
