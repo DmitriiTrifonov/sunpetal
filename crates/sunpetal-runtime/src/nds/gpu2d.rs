@@ -50,13 +50,20 @@ pub(super) struct Gpu2d {
     skip: [[bool; 128]; 2],
     /// This frame's replaced sprites.
     placed: Vec<Placed>,
+    /// [engine][OAM entry]: the sprite last replaced there and for how many frames it has been kept after the pack lost it
+    /// (a pressed icon of the case has other tiles and colours for a few frames, B-16).
+    held: [Vec<Option<(Placed, u8)>>; 2],
     /// [engine][y][x]: the layer on top of the pixel (0-3 BG, 4 OBJ, 5 backdrop) as the last line drawn left it.
     top: Vec<u8>,
     /// This frame's replaced background layers: engine, layer, picture.
     layers_placed: Vec<(usize, usize, std::sync::Arc<super::pack2d::Img>)>,
 }
 
+/// Frames a replaced sprite keeps its picture after the pack has lost its key.
+const HOLD_FRAMES: u8 = 8;
+
 /// A sprite of the pack laid over the screen.
+#[derive(Clone)]
 struct Placed {
     e: usize,
     x: i32,
@@ -99,7 +106,7 @@ impl Gpu2d {
     }
 
     pub(super) fn new() -> Gpu2d {
-        Gpu2d { px: vec![0; 2 * 192 * 256 * 2], refs: [[[0; 2]; 2]; 2], on: true, mosaic: vec![[0; 256]; 8], hide_dialogue: false, band: (0, 0), text_box: [None; 2], pack: None, skip: [[false; 128]; 2], placed: Vec::new(), top: vec![5; 2 * 192 * 256], layers_placed: Vec::new() }
+        Gpu2d { px: vec![0; 2 * 192 * 256 * 2], refs: [[[0; 2]; 2]; 2], on: true, mosaic: vec![[0; 256]; 8], hide_dialogue: false, band: (0, 0), text_box: [None; 2], pack: None, skip: [[false; 128]; 2], placed: Vec::new(), held: [vec![None; 128], vec![None; 128]], top: vec![5; 2 * 192 * 256], layers_placed: Vec::new() }
     }
 
     fn at(e: usize, y: usize) -> usize {
@@ -836,8 +843,19 @@ impl Nds {
                 1 => bldcnt & 0x3F != 0 && !(alpha & 31 >= 16 && alpha >> 8 & 31 == 0),
                 _ => bldcnt & 0x3F != 0 && bldy & 31 != 0,
             };
-            !(blends || (bright >> 14 & 3 != 0 && bright & 31 != 0))
+            // the master brightness (a fade of the screen) does not count: `overlay_pack` fades the pictures the same way
+            let _ = bright;
+            !blends
         };
+        // SUNPETAL_PACK_LOG=1: which engines draw as they are (a fade or a blend), when that changes (B-16)
+        if std::env::var_os("SUNPETAL_PACK_LOG").is_some() {
+            static LAST: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let io = |e: usize| if e == 1 { 0x0400_1000 } else { 0x0400_0000 };
+            let now = (0..2usize).fold(0u32, |m, e| m | (!plain(self, e) as u32) << e);
+            if LAST.swap(now, std::sync::atomic::Ordering::Relaxed) != now {
+                eprintln!("pack2d: not plain A={} B={} (BLDCNT A {:04X} B {:04X}, BLDY A {} B {}, MASTER_BRIGHT A {:04X} B {:04X})", now & 1, now >> 1 & 1, self.g16(io(0) + 0x50), self.g16(io(1) + 0x50), self.g16(io(0) + 0x54), self.g16(io(1) + 0x54), self.g16(io(0) + 0x6C), self.g16(io(1) + 0x6C));
+            }
+        }
         if pack.has_layers() {
             for (e, bg, _, h) in self.bg_layers() {
                 if !plain(self, e) {
@@ -851,16 +869,33 @@ impl Nds {
         for e in 0..2usize {
             let l = self.new_line(e);
             if !plain(self, e) {
+                self.gpu.held[e].fill(None);
                 continue;
             }
             for i in 0..128usize {
-                let Some(sp) = self.sprite_bitmap(&l, i) else { continue };
+                let Some(sp) = self.sprite_bitmap(&l, i) else {
+                    self.gpu.held[e][i] = None;
+                    continue;
+                };
                 if sp.affine || sp.mode != 0 {
+                    self.gpu.held[e][i] = None;
                     continue;
                 }
-                let Some(img) = pack.get(&(sp.w, sp.h, sp.data, sp.pal)) else { continue };
+                let Some(img) = pack.get(&(sp.w, sp.h, sp.data, sp.pal)) else {
+                    // the same sprite in the same place and size, with other tiles: the picture it had stays a few frames
+                    if let Some((p, age)) = self.gpu.held[e][i].take() {
+                        if age < HOLD_FRAMES && (p.x, p.y, p.w, p.h) == (sp.x, sp.y, sp.w, sp.h) {
+                            self.gpu.skip[e][i] = true;
+                            self.gpu.placed.push(p.clone());
+                            self.gpu.held[e][i] = Some((p, age + 1));
+                        }
+                    }
+                    continue;
+                };
                 self.gpu.skip[e][i] = true;
-                self.gpu.placed.push(Placed { e, x: sp.x, y: sp.y, w: sp.w, h: sp.h, flip_h: sp.flip_h, flip_v: sp.flip_v, img });
+                let p = Placed { e, x: sp.x, y: sp.y, w: sp.w, h: sp.h, flip_h: sp.flip_h, flip_v: sp.flip_v, img };
+                self.gpu.held[e][i] = Some((p.clone(), 0));
+                self.gpu.placed.push(p);
             }
         }
     }
@@ -868,6 +903,23 @@ impl Nds {
     /// Lays the pack's pictures over `rgb` (the two screens, `CH` bytes a pixel, `s` times the DS's size).
     fn overlay_pack(&self, rgb: &mut [u8], s: usize, ch: usize, a_top: bool) {
         let (w, h3) = (256 * s, 192 * s);
+        // the master brightness of each engine: the pictures fade with the screen (B-16: the old art showed through a fade)
+        let fade = [0usize, 1].map(|e| {
+            let mb = self.g16(if e == 1 { 0x0400_106C } else { 0x0400_006C }) as u32;
+            ((mb >> 14) & 3, (mb & 0x1F).min(16))
+        });
+        let faded = |e: usize, c: &[u8]| -> [u32; 3] {
+            let (m, f) = fade[e];
+            let mut o = [c[0] as u32, c[1] as u32, c[2] as u32];
+            for v in o.iter_mut() {
+                *v = match m {
+                    1 => *v + ((255 - *v) * f >> 4),
+                    2 => *v - ((*v * f + 7) >> 4),
+                    _ => *v,
+                };
+            }
+            o
+        };
         for (e, bg, img) in &self.gpu.layers_placed {
             let top = if (*e == 0) == a_top { 0 } else { h3 };
             let pic = img.scaled(w, h3);
@@ -882,13 +934,16 @@ impl Nds {
                         continue;
                     }
                     let o = ((top + y) * w + x) * ch;
+                    let f = faded(*e, c);
                     if c[3] == 255 {
-                        rgb[o..o + 3].copy_from_slice(&c[..3]);
+                        for k in 0..3 {
+                            rgb[o + k] = f[k] as u8;
+                        }
                         continue;
                     }
                     let a = c[3] as u32;
                     for k in 0..3 {
-                        rgb[o + k] = ((c[k] as u32 * a + rgb[o + k] as u32 * (255 - a) + 127) / 255) as u8;
+                        rgb[o + k] = ((f[k] * a + rgb[o + k] as u32 * (255 - a) + 127) / 255) as u8;
                     }
                 }
             }
@@ -914,8 +969,9 @@ impl Nds {
                     }
                     let o = ((top + sy as usize) * w + sx as usize) * ch;
                     let a = c[3] as u32;
+                    let f = faded(p.e, &c);
                     for k in 0..3 {
-                        rgb[o + k] = ((c[k] as u32 * a + rgb[o + k] as u32 * (255 - a) + 127) / 255) as u8;
+                        rgb[o + k] = ((f[k] * a + rgb[o + k] as u32 * (255 - a) + 127) / 255) as u8;
                     }
                 }
             }

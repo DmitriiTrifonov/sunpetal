@@ -209,6 +209,10 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     let frame = Duration::from_secs_f64(1.0 / FRAME_RATE);
     let mut next = Instant::now();
     let stats = std::env::var_os("SUNPETAL_STATS").is_some();
+    // SUNPETAL_PACK_LOG=1: how many sprites and layers the 2D pack placed, each time it changes (a dip is a frame with the old art, B-16)
+    let pack_log = std::env::var_os("SUNPETAL_PACK_LOG").is_some();
+    let mut last_placed = usize::MAX;
+    let (mut dry, mut partial) = (0u32, 0u32);
     // the side of the dialogue portrait and the panel's middle, last seen (the window draws the text with them)
     let mut portrait_left = true;
     let mut middle: Option<f32> = None;
@@ -281,6 +285,34 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         let t0 = Instant::now();
         if !nds::run_frame() {
             break;
+        }
+        if pack_log {
+            let placed = nds::pack_2d_placed();
+            // B-16: a picture of the frames with nothing placed (5th, 20th, 35th) and of those with only a few (2nd), with the 2D dump
+            let (few, none) = ((3..10).contains(&placed), placed == 0);
+            dry = if none { dry + 1 } else { 0 };
+            partial = if few { partial + 1 } else { 0 };
+            let snap = |tag: &str, dump: bool| {
+                let stem = std::path::PathBuf::from(format!("artifacts/b16/{}_{}", tag, nds::vblanks()));
+                let _ = std::fs::create_dir_all("artifacts/b16");
+                let _ = nds::screenshot(&std::path::PathBuf::from(format!("{}.png", stem.display())));
+                let n = if dump { nds::dump_2d(&std::path::PathBuf::from(format!("{}_2d", stem.display()))) } else { 0 };
+                eprintln!("pack2d: picture {} ({} 2D images)", stem.display(), n);
+            };
+            // a drop of three or more at once from a full screen: the pressed icon of the case (B-16)
+            if last_placed != usize::MAX && last_placed >= 10 && placed + 3 <= last_placed && placed >= 10 {
+                snap("drop", true);
+            }
+            if matches!(dry, 5 | 35) || partial == 2 {
+                snap(if none { "none" } else { "few" }, false);
+            }
+            if dry == 20 || partial == 3 {
+                snap(if none { "none" } else { "few" }, true);
+            }
+            if placed != last_placed {
+                eprintln!("pack2d: vblank {} placed {} (was {})", nds::vblanks(), placed, last_placed as isize);
+                last_placed = placed;
+            }
         }
         if shared.dump.swap(false, Ordering::Relaxed) {
             let stem = std::path::PathBuf::from(format!("artifacts/shots/v{}", nds::vblanks()));
