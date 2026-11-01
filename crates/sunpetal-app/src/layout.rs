@@ -648,6 +648,34 @@ impl Layout {
 #[cfg(test)]
 mod tests {
 
+    /// Windows of every common shape: the picture fits inside, keeps its proportions, the bars are
+    /// symmetric, and a touch at a screen's centre lands at the DS screen's centre.
+    #[test]
+    fn every_window_shape_fits_the_layouts_with_symmetric_bars_and_a_reversible_touch() {
+        let wins = [(1920.0, 1080.0), (1920.0, 1200.0), (2560.0, 1080.0), (1080.0, 2400.0), (800.0, 800.0), (360.0, 800.0)];
+        for l in [single(false), single(true), stacked(), side_by_side(), top_only(), bottom_only()] {
+            for win in wins {
+                let rects = l.fit(win);
+                // the whole layout's box: the screens' union in the window
+                let all: Vec<Rect> = rects.iter().flatten().copied().collect();
+                let (x0, y0) = (all.iter().map(|r| r.x).fold(f32::MAX, f32::min), all.iter().map(|r| r.y).fold(f32::MAX, f32::min));
+                let (x1, y1) = (all.iter().map(|r| r.x + r.w).fold(f32::MIN, f32::max), all.iter().map(|r| r.y + r.h).fold(f32::MIN, f32::max));
+                let who = format!("{} in {:?}", l.name, win);
+                assert!(x0 >= -0.01 && y0 >= -0.01 && x1 <= win.0 + 0.01 && y1 <= win.1 + 0.01, "inside: {}", who);
+                assert!(((x0 + x1) / 2.0 - win.0 / 2.0).abs() < 0.01 && ((y0 + y1) / 2.0 - win.1 / 2.0).abs() < 0.01, "centred (symmetric bars): {}", who);
+                for r in &all {
+                    assert!((r.w / r.h - 256.0 / 192.0).abs() < 1e-3, "proportions: {}", who);
+                }
+                if let Some(lo) = rects[1] {
+                    let at = l.touch(win, (lo.x + lo.w / 2.0, lo.y + lo.h / 2.0), false).expect(&who);
+                    assert!((at.0 - 128).abs() <= 1 && (at.1 - 96).abs() <= 1, "touch: {} gave {:?}", who, at);
+                    // a point outside every screen is no touch
+                    assert!(l.touch(win, (lo.x - 1.0, lo.y + lo.h / 2.0), false).is_none() || lo.x >= 1.0, "{}", who);
+                }
+            }
+        }
+    }
+
     fn load_rgba(path: &std::path::Path) -> Option<Vec<u8>> {
         let f = std::fs::File::open(path).ok()?;
         let mut r = png::Decoder::new(std::io::BufReader::new(f)).read_info().unwrap();
