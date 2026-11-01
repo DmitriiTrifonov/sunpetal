@@ -405,6 +405,13 @@ pub fn window_of_shape(cur: [u32; 2], ratio: f32) -> [u32; 2] {
     [(w.round() as u32).clamp(240, 8192), (h.round() as u32).clamp(240, 8192)]
 }
 
+/// The size one screen is drawn at inside: the DS's 256 x 192 times `res` (1-8), whatever the
+/// window is. The window only scales it.
+pub fn internal_size(res: usize) -> (usize, usize) {
+    let k = res.clamp(1, 8);
+    (256 * k, 192 * k)
+}
+
 /// The shape (name) closest to a window of `size`, when within 2 % of it.
 pub fn shape_name(size: [u32; 2]) -> Option<&'static str> {
     let r = size[0] as f32 / size[1].max(1) as f32;
@@ -413,6 +420,31 @@ pub fn shape_name(size: [u32; 2]) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
+    /// The internal size follows `res` alone; the window scales it without bending a pixel (the
+    /// screen keeps 4:3 at every `res` and window), and `res` is held to 1-8.
+    #[test]
+    fn internal_size_is_the_res_alone_and_the_window_does_not_bend_the_pixel() {
+        use crate::layout::{single, Mode};
+        assert_eq!(internal_size(0), (256, 192));
+        assert_eq!(internal_size(3), (768, 576));
+        assert_eq!(internal_size(99), (2048, 1536));
+        let l = single(false);
+        for res in 1..=8 {
+            let (w, h) = internal_size(res);
+            for win in [(1920.0, 1080.0), (800.0, 800.0), (360.0, 800.0), (3840.0, 2160.0)] {
+                let r = l.fit(win)[0].unwrap();
+                assert!((r.w / r.h - 4.0 / 3.0).abs() < 1e-3, "{:?}", r);
+                // a pixel of the internal picture is square on the window
+                assert!(((r.w / w as f32) / (r.h / h as f32) - 1.0).abs() < 1e-3);
+            }
+        }
+        // integer mode: a whole number of the DS's pixels when there is room
+        let mut li = single(false);
+        li.fit.mode = Mode::Integer;
+        let r = li.fit((1920.0, 1080.0))[0].unwrap();
+        assert_eq!(r.h, 960.0); // 5 x 192
+    }
+
     use super::*;
 
     #[test]
