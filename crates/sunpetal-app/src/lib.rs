@@ -118,6 +118,9 @@ fn next_hold(hold: Option<Hold>, wants: bool, settled: bool) -> Option<Hold> {
 /// Frames Edo's screen may go unseen before its hint patch is dropped (B-05; about 0.5 s at 60 frames a second).
 const EDO_HOLD: u32 = 30;
 const TAP_FRAMES: u32 = 8;
+/// SELECT out of the game's menu: B presses at most (a page inside the case, the case), and frames between them.
+const LEAVE_PRESSES: u8 = 3;
+const LEAVE_GAP: u32 = 30;
 const HOLD_FRAMES: u32 = 1800;
 
 /// Frames both screens stay up after the dial puzzle was last seen.
@@ -214,6 +217,8 @@ struct App {
     /// The screen the picture wants (`layout::lower_wanted`) and for how many frames it has wanted it.
     want: (bool, u32),
     auto_lower: bool,
+    /// SELECT leaves the game's menu: B presses still to give, and frames to the next (a sub-page needs more than one).
+    leaving: (u8, u32),
     hold: Option<Hold>,
     /// A button the app presses (bit) and the frames it has left.
     tap: (u32, u32),
@@ -485,7 +490,7 @@ impl App {
     }
 
     fn pad_press(&mut self, b: gilrs::Button) {
-        let act = pad::press(b, pad::Ctx { menu_open: self.menu.open, start_to_game: self.prompt.is_some() });
+        let act = pad::press(b, pad::Ctx { menu_open: self.menu.open, start_to_game: self.prompt.is_some(), game_menu_up: self.auto_lower && self.puzzle_hold == 0 && !self.dial_scene });
         if self.pad_log {
             eprintln!("    {:?} -> {:?}", b, act);
         }
@@ -495,6 +500,10 @@ impl App {
                 self.send_keys();
             }
             pad::Act::GameMenu => self.press("Y"),
+            pad::Act::GameBack => {
+                self.press("B");
+                self.leaving = (LEAVE_PRESSES - 1, LEAVE_GAP);
+            }
             pad::Act::OpenMenu | pad::Act::CloseMenu => {
                 // what was held goes up: the menu is not the game's
                 self.pad = 0;
@@ -947,6 +956,17 @@ impl ApplicationHandler for App {
                     // a change of screen waits until the picture has held for a moment (a fade, a
                     // flash between scenes would flicker it)
                     if let Some(w) = layout::lower_wanted(*scale, rgba) {
+                        // leaving by SELECT: another B until the lower screen is the map again
+                        if self.leaving.0 > 0 {
+                            if !w {
+                                self.leaving = (0, 0);
+                            } else if self.leaving.1 == 0 {
+                                self.leaving = (self.leaving.0 - 1, LEAVE_GAP);
+                                self.press("B");
+                            } else {
+                                self.leaving.1 -= 1;
+                            }
+                        }
                         self.want = if w == self.want.0 { (w, self.want.1 + 1) } else { (w, 0) };
                         if self.want.1 >= AUTO_FRAMES {
                             self.auto_lower = w;
@@ -1346,6 +1366,7 @@ pub fn run(o: Options, el: EventLoop<()>) {
         bar_color: None,
         want: (false, 0),
         auto_lower: false,
+        leaving: (0, 0),
         hold: None,
         tap: (0, 0),
         restart: false,

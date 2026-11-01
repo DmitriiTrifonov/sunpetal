@@ -18,6 +18,8 @@ pub enum Act {
     Game(u32),
     /// SELECT: the game's own menu (the suitcase), as F8.
     GameMenu,
+    /// SELECT with the game's menu already up (the lower screen is a menu, the case, a list): back, as B.
+    GameBack,
     /// START: our menu.
     OpenMenu,
     /// START with our menu open: closes it.
@@ -39,6 +41,8 @@ pub struct Ctx {
     pub menu_open: bool,
     /// The game waits for START (the title's "Press START"): the button is the game's.
     pub start_to_game: bool,
+    /// The lower screen has the game's menu, the case or a list on it (not the map, not a puzzle): SELECT closes it.
+    pub game_menu_up: bool,
 }
 
 /// The pad button that is the stylus' touch.
@@ -63,6 +67,7 @@ pub fn press(b: gilrs::Button, c: Ctx) -> Act {
     }
     match b {
         Start if !c.start_to_game => Act::OpenMenu,
+        Select if c.game_menu_up => Act::GameBack,
         Select => Act::GameMenu,
         b if is_pen_button(b) => Act::Pen,
         b => match pad_button(b) {
@@ -166,9 +171,9 @@ mod tests {
     use crate::bit;
     use gilrs::Button::*;
 
-    const GAME: Ctx = Ctx { menu_open: false, start_to_game: false };
-    const MENU: Ctx = Ctx { menu_open: true, start_to_game: false };
-    const TITLE: Ctx = Ctx { menu_open: false, start_to_game: true };
+    const GAME: Ctx = Ctx { menu_open: false, start_to_game: false, game_menu_up: false };
+    const MENU: Ctx = Ctx { menu_open: true, start_to_game: false, game_menu_up: false };
+    const TITLE: Ctx = Ctx { menu_open: false, start_to_game: true, game_menu_up: false };
 
     #[test]
     fn the_faces_are_the_ds_buttons_and_select_is_not_the_games() {
@@ -190,6 +195,8 @@ mod tests {
         assert_eq!(press(Start, TITLE), Act::Game(bit("START")));
         // SELECT is the suitcase on the title too
         assert_eq!(press(Select, TITLE), Act::GameMenu);
+        // with the game's menu up, SELECT is the way back (B), not the suitcase again
+        assert_eq!(press(Select, Ctx { game_menu_up: true, ..GAME }), Act::GameBack);
         assert_eq!(press(Start, MENU), Act::CloseMenu);
     }
 
