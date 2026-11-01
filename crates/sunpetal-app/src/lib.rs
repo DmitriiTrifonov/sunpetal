@@ -293,7 +293,11 @@ impl App {
 
     fn send_keys(&self) {
         let touch = self.touch_held.iter().fold(0, |a, n| a | bit(n));
-        let raw = self.kb | self.pad | touch | self.tap.0;
+        let mut raw = self.kb | self.pad | touch | self.tap.0;
+        // a page of paper scrolled: up and down (D-pad, left stick) move it, the game does not get them
+        if self.live().scroll.is_some() && !self.menu.open {
+            raw &= !(bit("UP") | bit("DOWN"));
+        }
         let pressed = raw & !self.keys_before.replace(raw);
         let mut keys = raw;
         // the collection on one screen: A takes the item on the list to its card (the upper screen), B closes the card
@@ -438,7 +442,16 @@ impl App {
             if let Some(d) = self.nav.tick() {
                 self.menu_key(pad::Act::Nav(d));
             }
-        } else if self.rstick != (0.0, 0.0) {
+        } else if self.live().scroll.is_some() {
+            // paper: the D-pad scrolls at a steady pace, the stick in proportion to its tilt
+            let (up, down) = (self.pad & bit("UP") != 0, self.pad & bit("DOWN") != 0);
+            let tilt = self.stick_axes[1];
+            let v = if tilt.abs() > self.settings.input.stick_threshold { -tilt } else { down as i32 as f32 - up as i32 as f32 };
+            if v != 0.0 {
+                self.scroll = (self.scroll + v * 160.0 * dt).clamp(0.0, 192.0);
+            }
+        }
+        if !self.menu.open && self.rstick != (0.0, 0.0) {
             let (speed, dead) = (self.settings.input.stylus_speed, self.settings.input.stylus_dead);
             if let Some(g) = &self.gfx {
                 let size = (g.size().0 as f32, g.size().1 as f32);
