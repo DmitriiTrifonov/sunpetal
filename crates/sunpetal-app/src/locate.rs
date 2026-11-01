@@ -47,6 +47,23 @@ pub fn check_data(path: &Path) -> Result<(), String> {
     sunpetal_data::container::verify_file(path).map(|_| ())
 }
 
+/// Whether a data file was made from this ROM (its `META`'s game code and CRC-32 against the ROM
+/// file's): the message if not. A data file without `META` passes unchecked.
+pub fn check_pair(data: &Path, rom: &Path) -> Result<(), String> {
+    let c = sunpetal_data::container::Container::read_only(data, |t| t == b"META")?;
+    let Some(meta) = c.meta()? else { return Ok(()) };
+    let image = fs::read(rom).map_err(|e| format!("{}: {}", rom.display(), e))?;
+    meta.check_image(&image).map_err(|e| format!("{} with {}: {}", data.display(), rom.display(), e))
+}
+
+/// Tells the player why the game does not start as asked: the terminal, and on a desktop a message
+/// box (the window is not up yet, and a double-clicked program has no terminal to read).
+pub fn tell(message: &str) {
+    eprintln!("{}", message);
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    rfd::MessageDialog::new().set_title("Sunpetal").set_description(message).set_level(rfd::MessageLevel::Error).show();
+}
+
 /// What the player picked in the file dialog.
 #[cfg_attr(any(target_os = "android", target_os = "ios"), allow(dead_code))]
 #[derive(Debug, PartialEq)]
@@ -178,6 +195,32 @@ mod tests {
         b[last] ^= 1;
         fs::write(d.join("bad.data"), b).unwrap();
         assert!(classify(&d.join("bad.data")).unwrap_err().contains("damaged"));
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// A data file beside a ROM it was not made from is told so; the one it was made from, and a
+    /// file with no `META`, pass.
+    #[test]
+    fn a_data_file_is_checked_against_the_rom_beside_it() {
+        let d = dir("pair");
+        let mut image = rom(b"YHNP");
+        image.resize(0x400, 7);
+        fs::write(d.join("a.nds"), &image).unwrap();
+        let mut other = image.clone();
+        other[0x300] ^= 1;
+        fs::write(d.join("b.nds"), &other).unwrap();
+        let mut c = sunpetal_data::container::Container::new();
+        c.add(b"TEXS", vec![0, 0, 0, 0]);
+        c.set_rom(*b"YHNP", sunpetal_data::delta::crc32(&image));
+        c.write(&d.join("a.data")).unwrap();
+        assert_eq!(check_pair(&d.join("a.data"), &d.join("a.nds")), Ok(()));
+        let e = check_pair(&d.join("a.data"), &d.join("b.nds")).unwrap_err();
+        assert!(e.contains("another ROM") && e.contains("b.nds"), "{}", e);
+        let mut old = sunpetal_data::container::Container::new();
+        old.add(b"TEXS", vec![0, 0, 0, 0]);
+        old.write(&d.join("old.data")).unwrap();
+        assert_eq!(check_pair(&d.join("old.data"), &d.join("b.nds")), Ok(()));
+        assert!(check_pair(&d.join("a.data"), &d.join("missing.nds")).is_err());
         fs::remove_dir_all(&d).unwrap();
     }
 

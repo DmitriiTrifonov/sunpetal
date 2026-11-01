@@ -84,6 +84,14 @@ impl Nds {
         if rom.len() < 0x200 {
             return Err(format!("{} is too small to be a cartridge", path.display()));
         }
+        // the ROM kept in a data file is the one its `META` names: another one is a damaged or
+        // mixed-up file, and the window says so instead of starting a game that is not the file's
+        if self.cfg.rom.as_os_str().is_empty() {
+            let c = sunpetal_data::container::Container::read_only(&path, |t| t == b"META")?;
+            if let Some(meta) = c.meta()? {
+                meta.check_image(&rom).map_err(|e| format!("{}: {}", path.display(), e))?;
+            }
+        }
         let mb = ((rom.len() + 0xF_FFFF) >> 20) as u32;
         // as melonDS makes it; of the ROM itself, not of the image the overlay grows
         let chip_id = 0xC2 | ((if mb != 0 { mb - 1 } else { 0 }) & 0xFF) << 8;
