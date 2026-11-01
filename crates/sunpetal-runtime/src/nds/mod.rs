@@ -21,6 +21,7 @@ mod render3d;
 #[cfg(feature = "gpu")]
 mod render3d_gpu;
 mod sound;
+mod pack2d;
 mod texpack;
 mod spi;
 mod system;
@@ -60,6 +61,8 @@ pub struct Config {
     pub dump_textures: Option<PathBuf>,
     /// A folder of PNG replacements for textures, named by their keys (`texpack`).
     pub texture_pack: Option<PathBuf>,
+    /// A folder of 2D pictures that replace the sprites they are named for (`pack2d`).
+    pub pack_2d: Option<PathBuf>,
     /// A folder of files that replace the ROM's by their NitroFS paths (the translation).
     pub overlay: Option<PathBuf>,
     /// The data file (`sunpetal.data`) and the language of its translation to put in (`ru`).
@@ -83,6 +86,7 @@ impl Config {
             trace: false,
             dump_textures: None,
             texture_pack: None,
+            pack_2d: None,
             overlay: None,
             data: None,
             language: None,
@@ -440,6 +444,9 @@ pub fn boot(cfg: Config) -> Result<(), String> {
         n.texpack.dump = n.cfg.dump_textures.clone();
         if let Some(dir) = n.cfg.texture_pack.clone() {
             n.load_pack(&dir)?;
+        }
+        if let Some(dir) = n.cfg.pack_2d.clone() {
+            n.gpu.pack = Some(std::sync::Arc::new(pack2d::Pack2d::load(&dir)?));
         }
         n.cart_open()?;
         n.mmio_reset();
@@ -1069,6 +1076,23 @@ pub fn set_texture_pack(path: Option<&std::path::Path>) -> Result<(), String> {
             Ok(())
         }
     })
+}
+
+/// Sets (or, with `None`, drops) the 2D pack (a folder of pictures named as `dump_2d` names them); how many
+/// pictures it holds. Takes effect with the next frame drawn.
+pub fn set_pack_2d(path: Option<&std::path::Path>) -> Result<usize, String> {
+    let pack = match path {
+        Some(p) => Some(std::sync::Arc::new(pack2d::Pack2d::load(p)?)),
+        None => None,
+    };
+    let n = pack.as_ref().map_or(0, |p| p.len());
+    nds(|d| d.gpu.pack = pack);
+    Ok(n)
+}
+
+/// How many sprites of the last frame drawn the 2D pack replaced.
+pub fn pack_2d_placed() -> usize {
+    nds(|d| d.gpu.placed_count())
 }
 
 /// Sets the 3D's extras (out-of-range and non-numbers are brought in). Takes effect with the next

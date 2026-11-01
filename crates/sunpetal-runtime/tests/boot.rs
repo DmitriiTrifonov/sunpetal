@@ -181,6 +181,124 @@ fn the_2d_dump_is_the_same_on_every_run() {
     assert!(a.iter().any(|n| n.starts_with("bg")), "background layers are dumped");
 }
 
+/// One run to `frames` VBlanks with the last frame drawn: its picture (RGBA, both screens) and, if `dump` is
+/// given, the 2D dump of that frame; `pack` is the 2D pack.
+fn run_2d(rom: &std::path::Path, frames: u64, pack: Option<PathBuf>, dump: Option<PathBuf>, shot: PathBuf) -> (usize, usize, Vec<u8>, usize) {
+    let (rom, shot2) = (rom.to_path_buf(), shot.clone());
+    let placed = std::thread::Builder::new()
+        .stack_size(64 << 20)
+        .spawn(move || {
+            let mut placed = 0;
+            let mut cfg = Config::new(&rom);
+            cfg.stop_vblanks = frames;
+            cfg.input = (400..frames).step_by(100).map(|v| format!("{}:START", v)).collect::<Vec<_>>().join(",");
+            cfg.pack_2d = pack;
+            nds::boot(cfg).expect("boot");
+            loop {
+                nds::set_draw(nds::vblanks() + 1 == frames);
+                if !nds::run_frame() {
+                    break;
+                }
+                if nds::vblanks() == frames {
+                    if let Some(d) = &dump {
+                        nds::dump_2d(d);
+                    }
+                    nds::screenshot(&shot2).expect("screenshot");
+                    placed = nds::pack_2d_placed();
+                }
+            }
+            placed
+        })
+        .unwrap()
+        .join()
+        .expect("the run");
+    let dec = png::Decoder::new(std::fs::File::open(&shot).expect("the picture"));
+    let mut r = dec.read_info().expect("png");
+    let mut buf = vec![0u8; r.output_buffer_size()];
+    let info = r.next_frame(&mut buf).expect("png frame");
+    let rgba: Vec<u8> = match info.color_type {
+        png::ColorType::Rgba => buf[..info.buffer_size()].to_vec(),
+        _ => buf[..info.buffer_size()].chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect(),
+    };
+    (info.width as usize, info.height as usize, rgba, placed)
+}
+
+/// The 2D pack (этап 8е.3): no pack and a pack of nothing draw the same picture; a pack made of the dump of a
+/// frame draws that frame as it was; a pack of one-colour pictures changes the pixels of the sprites it names and
+/// no others.
+#[test]
+fn a_2d_pack_replaces_the_sprites_it_names_and_nothing_else() {
+    let Some(rom) = std::env::var_os("SUNPETAL_ROM").map(PathBuf::from) else {
+        eprintln!("skipped: SUNPETAL_ROM is not set");
+        return;
+    };
+    let tmp = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("pack2d");
+    let _ = std::fs::remove_dir_all(&tmp);
+    let (dump, empty, checker) = (tmp.join("dump"), tmp.join("empty"), tmp.join("checker"));
+    std::fs::create_dir_all(&empty).unwrap();
+    std::fs::create_dir_all(&checker).unwrap();
+    // a frame whose sprites no blend or fade covers (the pack leaves those to the engine)
+    let mut found = None;
+    for frames in [1200u64, 1600, 2000, 2400, 3000, 3600] {
+        let _ = std::fs::remove_dir_all(&dump);
+        let (w, h, plain, _) = run_2d(&rom, frames, None, Some(dump.clone()), tmp.join("plain.png"));
+        let Ok(index) = std::fs::read_to_string(dump.join("index.csv")) else { continue };
+        if !index.lines().any(|l| l.starts_with("obj,")) {
+            continue;
+        }
+        let (_, _, _, placed) = run_2d(&rom, frames, Some(dump.clone()), None, tmp.join("same.png"));
+        if placed > 0 {
+            found = Some((frames, w, h, plain));
+            break;
+        }
+    }
+    let (frames, w, h, plain) = found.expect("some frame shows sprites the pack can replace");
+    let index = std::fs::read_to_string(dump.join("index.csv")).expect("index.csv");
+    let objs: Vec<Vec<String>> = index.lines().skip(1).map(|l| l.split(',').map(str::to_owned).collect::<Vec<String>>()).filter(|c| c[0] == "obj").collect();
+    assert!(!objs.is_empty(), "the frame at VBlank {} shows sprites", frames);
+    let (_, _, none, _) = run_2d(&rom, frames, Some(empty), None, tmp.join("none.png"));
+    assert!(plain == none, "a pack of nothing must not change the picture");
+    // the pack of the dump: sprites are drawn over the engine's own, the picture is the same
+    let (_, _, same, placed) = run_2d(&rom, frames, Some(dump.clone()), None, tmp.join("same.png"));
+    let bad = plain.chunks_exact(4).zip(same.chunks_exact(4)).filter(|(a, b)| a != b).count();
+    assert!(placed > 0);
+    assert_eq!(bad, 0, "a pack of the dump changes {} pixels", bad);
+    // one-colour pictures of the first sprite's size: only its pixels change
+    let mut rects = Vec::new();
+    for c in &objs {
+        let (e, x, y, sw, sh): (usize, i32, i32, i32, i32) = (c[1].parse().unwrap(), c[3].parse().unwrap(), c[4].parse().unwrap(), c[5].parse().unwrap(), c[6].parse().unwrap());
+        let name = &c[8];
+        let mut px = Vec::new();
+        for _ in 0..(sw * sh) {
+            px.extend_from_slice(&[255, 0, 255, 255]);
+        }
+        let f = std::fs::File::create(checker.join(name)).unwrap();
+        let mut enc = png::Encoder::new(std::io::BufWriter::new(f), sw as u32, sh as u32);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.write_header().unwrap().write_image_data(&px).unwrap();
+        rects.push((e, x, y, sw, sh));
+    }
+    let (_, _, painted, placed2) = run_2d(&rom, frames, Some(checker), None, tmp.join("checker.png"));
+    assert!(placed2 > 0 && plain != painted, "the one-colour pack changes the picture");
+    // both screens' rows: whichever engine is on top, a changed pixel lies in a sprite's rectangle of one of them
+    let screen_h = h / 2;
+    let mut changed = 0;
+    for (i, (a, b)) in plain.chunks_exact(4).zip(painted.chunks_exact(4)).enumerate() {
+        if a == b {
+            continue;
+        }
+        changed += 1;
+        let (x, y) = ((i % w) as i32, (i / w) as i32);
+        let inside = rects.iter().any(|&(_, rx, ry, rw, rh)| {
+            let yy = y % screen_h as i32;
+            x >= rx && x < rx + rw && yy >= ry && yy < ry + rh
+        });
+        assert!(inside, "pixel ({}, {}) changed outside every sprite", x, y);
+    }
+    assert!(changed > 0);
+}
+
 /// The GPU's frame is read after the emulation has run on (этап 9.2.3-9.2.4): the picture at VBlank 2400
 /// is the software engine's, drawn by the GPU throughout, and with the renderer switched back and forth
 /// before it (a frame in flight never leaks into the next renderer's).

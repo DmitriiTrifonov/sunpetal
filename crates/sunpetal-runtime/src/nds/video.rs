@@ -266,7 +266,9 @@ impl Nds {
         self.schedule(Ev::Line, LINE_TICKS);
         let stat7 = self.video.rebuild();
         self.set_vram_stat7(stat7);
+        let pack = self.gpu.pack.take();
         self.gpu = super::gpu2d::Gpu2d::new();
+        self.gpu.pack = pack;
         self.gx = super::gx::Gx::new();
         self.gx.set_wide(self.wide);
         self.pending3d = None;

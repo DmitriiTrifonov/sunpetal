@@ -44,11 +44,58 @@ pub(super) struct Gpu2d {
     /// The box of the dark pixels of that text (x0, y0, x1, y1, inclusive), without the portrait's side: [0] the
     /// left 50 columns left out (the portrait is on the left), [1] the right 50 (it is on the right).
     pub(super) text_box: [Option<[u32; 4]>; 2],
+    /// The 2D pack (8е.3): sprites whose pictures it holds are laid over the screen by `overlay_pack`.
+    pub(super) pack: Option<std::sync::Arc<super::pack2d::Pack2d>>,
+    /// [engine][OAM entry]: the sprite is replaced by the pack and not drawn.
+    skip: [[bool; 128]; 2],
+    /// This frame's replaced sprites.
+    placed: Vec<Placed>,
+}
+
+/// A sprite of the pack laid over the screen.
+struct Placed {
+    e: usize,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    flip_h: bool,
+    flip_v: bool,
+    img: std::sync::Arc<super::pack2d::Img>,
+}
+
+/// A sprite lifted out of the object memory (`Nds::sprite_bitmap`).
+pub(super) struct Sprite {
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+    pub rgba: Vec<u8>,
+    /// Hash of the tile data (the palette indices) and of the colours it uses.
+    pub data: u64,
+    pub pal: u64,
+    pub flip_h: bool,
+    pub flip_v: bool,
+    pub affine: bool,
+    /// OBJ mode: 0 normal, 1 semi-transparent, 2 window, 3 bitmap.
+    pub mode: u8,
+    pub prio: u8,
+}
+
+impl Sprite {
+    /// `{w}x{h}_{data}_{pal}`, what names a sprite's picture in a dump and a 2D pack.
+    pub fn key_name(&self) -> String {
+        format!("{}x{}_{:016x}_{:016x}", self.w, self.h, self.data, self.pal)
+    }
 }
 
 impl Gpu2d {
+    pub(super) fn placed_count(&self) -> usize {
+        self.placed.len()
+    }
+
     pub(super) fn new() -> Gpu2d {
-        Gpu2d { px: vec![0; 2 * 192 * 256 * 2], refs: [[[0; 2]; 2]; 2], on: true, mosaic: vec![[0; 256]; 8], hide_dialogue: false, band: (0, 0), text_box: [None; 2] }
+        Gpu2d { px: vec![0; 2 * 192 * 256 * 2], refs: [[[0; 2]; 2]; 2], on: true, mosaic: vec![[0; 256]; 8], hide_dialogue: false, band: (0, 0), text_box: [None; 2], pack: None, skip: [[false; 128]; 2], placed: Vec::new() }
     }
 
     fn at(e: usize, y: usize) -> usize {
@@ -356,6 +403,9 @@ impl Nds {
         let d = l.dispcnt;
         let ext = d & 0x8000_0000 != 0;
         for i in 0..128usize {
+            if self.gpu.skip[l.e][i] {
+                continue;
+            }
             let a0 = self.oam16(l.e, i * 8) as u32;
             let a1 = self.oam16(l.e, i * 8 + 2) as u32;
             let a2 = self.oam16(l.e, i * 8 + 4) as u32;
@@ -485,6 +535,9 @@ impl Nds {
                 self.once("2d", 4, || "2D: display capture (DISPCAPCNT) is not done".to_string());
             }
         }
+        if y == 0 {
+            self.collect_replaced();
+        }
         self.draw_line(0, y);
         self.draw_line(1, y);
     }
@@ -594,6 +647,116 @@ impl Nds {
     }
 
 
+
+    /// The sprite of OAM entry `i` of the engine of `l` as it lies in the object memory (no flip, no
+    /// rotation), with the key of its data; `None` for one that is off, out of the picture, empty
+    /// or of an unknown shape.
+    fn sprite_bitmap(&self, l: &Line, i: usize) -> Option<Sprite> {
+        let (e, d) = (l.e, l.dispcnt);
+        let on = self.io_reg16(9, 0x0400_0304) & if e == 1 { 0x200 } else { 0x2 } != 0;
+        if !on || d & 0x80 != 0 || d & 0x1000 == 0 || (d >> 16) & if e == 1 { 1 } else { 3 } != 1 {
+            return None;
+        }
+        const KW: [[i32; 4]; 3] = [[8, 16, 32, 64], [16, 32, 32, 64], [8, 8, 16, 32]];
+        const KH: [[i32; 4]; 3] = [[8, 16, 32, 64], [8, 8, 16, 32], [16, 32, 32, 64]];
+        let ext = d & 0x8000_0000 != 0;
+        let a0 = self.oam16(e, i * 8) as u32;
+        let a1 = self.oam16(e, i * 8 + 2) as u32;
+        let a2 = self.oam16(e, i * 8 + 4) as u32;
+        let affine = a0 & 0x100 != 0;
+        if (!affine && a0 & 0x200 != 0) || (a0 | a1 | a2) == 0 {
+            return None;
+        }
+        let (shape, sz) = ((a0 >> 14) as usize, (a1 >> 14) as usize);
+        if shape == 3 {
+            return None;
+        }
+        let (w, h) = (KW[shape][sz], KH[shape][sz]);
+        let (mut x0, y0) = ((a1 & 0x1FF) as i32, (a0 & 0xFF) as i32);
+        if x0 >= 256 {
+            x0 -= 512;
+        }
+        if x0 + w <= 0 || x0 >= 256 || (y0 + h <= 256 && y0 >= 192) {
+            return None;
+        }
+        let bitmap = (a0 >> 10) & 3 == 3;
+        let c256 = a0 & 0x2000 != 0;
+        let tile = a2 & 0x3FF;
+        let mut rgba = vec![0u8; (w * h * 4) as usize];
+        let (mut hd, mut hp) = (0xcbf2_9ce4_8422_2325u64, 0xcbf2_9ce4_8422_2325u64);
+        let eat = |hh: &mut u64, v: u32| {
+            for b in v.to_le_bytes() {
+                *hh = (*hh ^ b as u64).wrapping_mul(0x100_0000_01b3);
+            }
+        };
+        let mut used = [false; 256];
+        for ty in 0..h as u32 {
+            for tx in 0..w as u32 {
+                let (wu, o) = (w as u32, ((ty * w as u32 + tx) * 4) as usize);
+                let c;
+                if bitmap {
+                    let addr = if d & 0x40 != 0 {
+                        tile * (128u32 << ((d >> 22) & 1)) + (ty * wu + tx) * 2
+                    } else {
+                        let mask: u32 = if d & 0x20 != 0 { 0x1F } else { 0x0F };
+                        (tile & mask) * 0x10 + (tile & !mask) * 0x80 + ty * if d & 0x20 != 0 { 512 } else { 256 } + tx * 2
+                    };
+                    let v = self.vram_r16(l.aobj, addr);
+                    eat(&mut hd, v as u32);
+                    if v & 0x8000 == 0 {
+                        continue;
+                    }
+                    c = v;
+                } else {
+                    let tbytes = if c256 { 64 } else { 32 };
+                    let addr = if d & 0x10 != 0 {
+                        tile * (32u32 << ((d >> 20) & 3)) + ((ty >> 3) * (wu >> 3) + (tx >> 3)) * tbytes
+                    } else {
+                        tile * 32 + (ty >> 3) * 1024 + (tx >> 3) * tbytes
+                    };
+                    let idx = if c256 {
+                        self.vram_r8(l.aobj, addr + (ty & 7) * 8 + (tx & 7)) as u32
+                    } else {
+                        let b = self.vram_r8(l.aobj, addr + (ty & 7) * 4 + (tx & 7) / 2);
+                        (if tx & 1 != 0 { b >> 4 } else { b & 15 }) as u32
+                    };
+                    eat(&mut hd, idx);
+                    if idx == 0 {
+                        continue;
+                    }
+                    used[idx as usize] = true;
+                    c = if c256 {
+                        if ext { self.vram_r16(l.aobjext, (a2 >> 12) * 512 + idx * 2) } else { self.pal16(e, 0x100 + idx) }
+                    } else {
+                        self.pal16(e, 0x100 + (a2 >> 12) * 16 + idx)
+                    };
+                }
+                let c = c666(c);
+                let ch = |sh: u32| {
+                    let v = (c >> sh & 63) as u8;
+                    v << 2 | v >> 4
+                };
+                rgba[o..o + 4].copy_from_slice(&[ch(0), ch(6), ch(12), 255]);
+            }
+        }
+        // the palette hash covers the colours the sprite uses, in index order
+        for (k, u) in used.iter().enumerate() {
+            if *u {
+                let c = if c256 {
+                    if ext { self.vram_r16(l.aobjext, (a2 >> 12) * 512 + k as u32 * 2) } else { self.pal16(e, 0x100 + k as u32) }
+                } else {
+                    self.pal16(e, 0x100 + (a2 >> 12) * 16 + k as u32)
+                };
+                eat(&mut hp, k as u32);
+                eat(&mut hp, c as u32);
+            }
+        }
+        if rgba.chunks_exact(4).all(|p| p[3] == 0) {
+            return None;
+        }
+        Some(Sprite { x: x0, y: y0, w, h, rgba, data: hd, pal: hp, flip_h: a1 & 0x1000 != 0, flip_v: a1 & 0x2000 != 0, affine, mode: ((a0 >> 10) & 3) as u8, prio: ((a2 >> 10) & 3) as u8 })
+    }
+
     /// Every picture the 2D engines show, for a 2D pack (`docs/2D-UPSCALE.md`, 8е.2): the background
     /// layers as `bg{e}{layer}_{hash}.png` and each visible sprite as it lies in the object memory
     /// (no flip, no rotation) as `obj{e}_{w}x{h}_{data}_{pal}.png`, the key being the hashes of the
@@ -603,131 +766,26 @@ impl Nds {
     pub(super) fn dump_2d(&mut self, dir: &std::path::Path) -> usize {
         let mut rows = Vec::new();
         let mut n = self.dump_backgrounds_rows(dir, &mut rows);
-        let on9 = |s: &Self, e: usize| s.io_reg16(9, 0x0400_0304) & if e == 1 { 0x200 } else { 0x2 } != 0;
-        const KW: [[i32; 4]; 3] = [[8, 16, 32, 64], [16, 32, 32, 64], [8, 8, 16, 32]];
-        const KH: [[i32; 4]; 3] = [[8, 16, 32, 64], [8, 8, 16, 32], [16, 32, 32, 64]];
         for e in 0..2usize {
             let l = self.new_line(e);
-            let d = l.dispcnt;
-            if !on9(self, e) || d & 0x80 != 0 || d & 0x1000 == 0 || (d >> 16) & if e == 1 { 1 } else { 3 } != 1 {
-                continue;
-            }
-            let ext = d & 0x8000_0000 != 0;
             for i in 0..128usize {
-                let a0 = self.oam16(e, i * 8) as u32;
-                let a1 = self.oam16(e, i * 8 + 2) as u32;
-                let a2 = self.oam16(e, i * 8 + 4) as u32;
-                let affine = a0 & 0x100 != 0;
-                if (!affine && a0 & 0x200 != 0) || (a0 | a1 | a2) == 0 {
-                    continue;
-                }
-                let (shape, sz) = ((a0 >> 14) as usize, (a1 >> 14) as usize);
-                if shape == 3 {
-                    continue;
-                }
-                let (w, h) = (KW[shape][sz], KH[shape][sz]);
-                let (mut x0, y0) = ((a1 & 0x1FF) as i32, (a0 & 0xFF) as i32);
-                if x0 >= 256 {
-                    x0 -= 512;
-                }
-                if x0 + w <= 0 || x0 >= 256 || (y0 + h <= 256 && y0 >= 192) {
-                    continue;
-                }
-                let bitmap = (a0 >> 10) & 3 == 3;
-                let c256 = a0 & 0x2000 != 0;
-                let tile = a2 & 0x3FF;
-                let mut rgba = vec![0u8; (w * h * 4) as usize];
-                let (mut hd, mut hp) = (0xcbf2_9ce4_8422_2325u64, 0xcbf2_9ce4_8422_2325u64);
-                let eat = |hh: &mut u64, v: u32| {
-                    for b in v.to_le_bytes() {
-                        *hh = (*hh ^ b as u64).wrapping_mul(0x100_0000_01b3);
-                    }
-                };
-                let mut used = [false; 256];
-                for ty in 0..h as u32 {
-                    for tx in 0..w as u32 {
-                        let (wu, o) = (w as u32, ((ty * w as u32 + tx) * 4) as usize);
-                        let c;
-                        if bitmap {
-                            let addr = if d & 0x40 != 0 {
-                                tile * (128u32 << ((d >> 22) & 1)) + (ty * wu + tx) * 2
-                            } else {
-                                let mask: u32 = if d & 0x20 != 0 { 0x1F } else { 0x0F };
-                                (tile & mask) * 0x10 + (tile & !mask) * 0x80 + ty * if d & 0x20 != 0 { 512 } else { 256 } + tx * 2
-                            };
-                            let v = self.vram_r16(l.aobj, addr);
-                            eat(&mut hd, v as u32);
-                            if v & 0x8000 == 0 {
-                                continue;
-                            }
-                            c = v;
-                        } else {
-                            let tbytes = if c256 { 64 } else { 32 };
-                            let addr = if d & 0x10 != 0 {
-                                tile * (32u32 << ((d >> 20) & 3)) + ((ty >> 3) * (wu >> 3) + (tx >> 3)) * tbytes
-                            } else {
-                                tile * 32 + (ty >> 3) * 1024 + (tx >> 3) * tbytes
-                            };
-                            let idx = if c256 {
-                                self.vram_r8(l.aobj, addr + (ty & 7) * 8 + (tx & 7)) as u32
-                            } else {
-                                let b = self.vram_r8(l.aobj, addr + (ty & 7) * 4 + (tx & 7) / 2);
-                                (if tx & 1 != 0 { b >> 4 } else { b & 15 }) as u32
-                            };
-                            eat(&mut hd, idx);
-                            if idx == 0 {
-                                continue;
-                            }
-                            c = if c256 {
-                                used[idx as usize] = true;
-                                if ext {
-                                    self.vram_r16(l.aobjext, (a2 >> 12) * 512 + idx * 2)
-                                } else {
-                                    self.pal16(e, 0x100 + idx)
-                                }
-                            } else {
-                                used[idx as usize] = true;
-                                self.pal16(e, 0x100 + (a2 >> 12) * 16 + idx)
-                            };
-                        }
-                        let c = c666(c);
-                        let ch = |sh: u32| {
-                            let v = (c >> sh & 63) as u8;
-                            v << 2 | v >> 4
-                        };
-                        rgba[o..o + 4].copy_from_slice(&[ch(0), ch(6), ch(12), 255]);
-                    }
-                }
-                // the palette hash covers the colours the sprite uses, in index order
-                for (k, u) in used.iter().enumerate() {
-                    if *u {
-                        let c = if c256 {
-                            if ext { self.vram_r16(l.aobjext, (a2 >> 12) * 512 + k as u32 * 2) } else { self.pal16(e, 0x100 + k as u32) }
-                        } else {
-                            self.pal16(e, 0x100 + (a2 >> 12) * 16 + k as u32)
-                        };
-                        eat(&mut hp, k as u32);
-                        eat(&mut hp, c as u32);
-                    }
-                }
-                if rgba.chunks_exact(4).all(|p| p[3] == 0) {
-                    continue;
-                }
-                let name = format!("obj{}_{}x{}_{:016x}_{:016x}.png", e, w, h, hd, hp);
+                let Some(sp) = self.sprite_bitmap(&l, i) else { continue };
+                let name = format!("obj{}_{}", e, sp.key_name());
+                let name = format!("{}.png", name);
                 let _ = std::fs::create_dir_all(dir);
                 let path = dir.join(&name);
                 if !path.exists() {
                     if let Ok(f) = std::fs::File::create(&path) {
-                        let mut enc = png::Encoder::new(std::io::BufWriter::new(f), w as u32, h as u32);
+                        let mut enc = png::Encoder::new(std::io::BufWriter::new(f), sp.w as u32, sp.h as u32);
                         enc.set_color(png::ColorType::Rgba);
                         enc.set_depth(png::BitDepth::Eight);
                         if let Ok(mut wr) = enc.write_header() {
-                            let _ = wr.write_image_data(&rgba);
+                            let _ = wr.write_image_data(&sp.rgba);
                             n += 1;
                         }
                     }
                 }
-                rows.push(format!("obj,{},{},{},{},{},{},{:016x}_{:016x},{}", e, i, x0, y0, w, h, hd, hp, name));
+                rows.push(format!("obj,{},{},{},{},{},{},{:016x}_{:016x},{}", e, i, sp.x, sp.y, sp.w, sp.h, sp.data, sp.pal, name));
             }
         }
         // merge with the index an earlier call wrote
@@ -743,6 +801,67 @@ impl Nds {
         }
         let _ = std::fs::write(idx, text);
         n
+    }
+
+    /// At a frame's first line: which sprites the pack holds a picture for (a plain sprite: not
+    /// rotated, not blended, not a window, not a bitmap), so that they are not drawn and are laid
+    /// over by `overlay_pack`.
+    fn collect_replaced(&mut self) {
+        self.gpu.skip = [[false; 128]; 2];
+        self.gpu.placed.clear();
+        let Some(pack) = self.gpu.pack.clone() else { return };
+        if pack.is_empty() {
+            return;
+        }
+        for e in 0..2usize {
+            let l = self.new_line(e);
+            // a blend or a fade over the sprites would be lost under a picture laid over them: the engine draws them as they are
+            let (bldcnt, bright) = (self.g16(l.io + 0x50), self.g16(l.io + 0x6C));
+            if (bldcnt >> 6 & 3 != 0 && (bldcnt & 0x10 != 0 || bldcnt >> 6 & 3 == 1)) || (bright >> 14 & 3 != 0 && bright & 31 != 0) {
+                continue;
+            }
+            for i in 0..128usize {
+                let Some(sp) = self.sprite_bitmap(&l, i) else { continue };
+                if sp.affine || sp.mode != 0 {
+                    continue;
+                }
+                let Some(img) = pack.get(&(sp.w, sp.h, sp.data, sp.pal)) else { continue };
+                self.gpu.skip[e][i] = true;
+                self.gpu.placed.push(Placed { e, x: sp.x, y: sp.y, w: sp.w, h: sp.h, flip_h: sp.flip_h, flip_v: sp.flip_v, img });
+            }
+        }
+    }
+
+    /// Lays the pack's pictures over `rgb` (the two screens, `CH` bytes a pixel, `s` times the DS's size).
+    fn overlay_pack(&self, rgb: &mut [u8], s: usize, ch: usize, a_top: bool) {
+        let (w, h3) = (256 * s, 192 * s);
+        for p in &self.gpu.placed {
+            let top = if (p.e == 0) == a_top { 0 } else { h3 };
+            let (pw, ph) = ((p.w as usize) * s, (p.h as usize) * s);
+            for dy in 0..ph {
+                let sy = (p.y * s as i32 + dy as i32) & (256 * s as i32 - 1);
+                if sy as usize >= h3 {
+                    continue;
+                }
+                for dx in 0..pw {
+                    let sx = p.x * s as i32 + dx as i32;
+                    if sx < 0 || sx as usize >= w {
+                        continue;
+                    }
+                    let (fx, fy) = ((dx as f32 + 0.5) / pw as f32, (dy as f32 + 0.5) / ph as f32);
+                    let (fx, fy) = (if p.flip_h { 1.0 - fx } else { fx }, if p.flip_v { 1.0 - fy } else { fy });
+                    let c = p.img.sample(fx, fy);
+                    if c[3] == 0 {
+                        continue;
+                    }
+                    let o = ((top + sy as usize) * w + sx as usize) * ch;
+                    let a = c[3] as u32;
+                    for k in 0..3 {
+                        rgb[o + k] = ((c[k] as u32 * a + rgb[o + k] as u32 * (255 - a) + 127) / 255) as u8;
+                    }
+                }
+            }
+        }
     }
 
     fn draw_line(&mut self, e: usize, y: usize) {
@@ -1012,6 +1131,7 @@ impl Nds {
                 });
             }
         });
+        self.overlay_pack(&mut rgb, s, CH, a_top);
         rgb
     }
 }

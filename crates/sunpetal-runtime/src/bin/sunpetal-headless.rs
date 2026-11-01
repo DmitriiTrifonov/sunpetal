@@ -3,7 +3,7 @@
 //! the same ROM must be linked in (docs/ABI.md).
 //!
 //!     sunpetal-headless ROM.nds [--vblanks N] [--trace] [--out DIR] [--save FILE]
-//!                              [--save-size BYTES] [--dump-textures DIR] [--dump-bg DIR] [--dump-2d DIR] [--texture-pack DIR] [--shots V,V,...] [--shot-every N] [--input SCRIPT] [--wav FILE] [--scale N] [--wide PIXELS_EACH_SIDE] [--texture-filter nearest|bilinear] [--msaa 0|2|4] [--outline 0-1] [--outline-width 0.25-2] [--shadow 0-1] [--shadow-radius 0.5-6] [--renderer software|gpu]
+//!                              [--save-size BYTES] [--dump-textures DIR] [--dump-bg DIR] [--dump-2d DIR] [--pack-2d DIR] [--texture-pack DIR] [--shots V,V,...] [--shot-every N] [--input SCRIPT] [--wav FILE] [--scale N] [--wide PIXELS_EACH_SIDE] [--texture-filter nearest|bilinear] [--msaa 0|2|4] [--outline 0-1] [--outline-width 0.25-2] [--shadow 0-1] [--shadow-radius 0.5-6] [--renderer software|gpu]
 //!
 //! Both screens are written as PNGs (DIR/v<N>.png) at the VBlanks asked for; --wav writes the sound
 //! (16-bit stereo, 32 728 Hz); --draw-all draws every frame (for timing).
@@ -17,7 +17,7 @@ fn main() -> ExitCode {
     let mut rest = Vec::new();
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--vblanks" | "--out" | "--save" | "--save-size" | "--dump-textures" | "--dump-bg" | "--dump-2d" | "--texture-pack" | "--overlay" | "--data" | "--lang" | "--shots" | "--shot-every" | "--input" | "--wav" | "--scale" | "--outline" | "--outline-width" | "--shadow" | "--shadow-radius" | "--texture-filter" | "--wide" | "--msaa" | "--renderer" => rest.push((a, args.next().unwrap_or_default())),
+            "--vblanks" | "--out" | "--save" | "--save-size" | "--dump-textures" | "--dump-bg" | "--dump-2d" | "--pack-2d" | "--texture-pack" | "--overlay" | "--data" | "--lang" | "--shots" | "--shot-every" | "--input" | "--wav" | "--scale" | "--outline" | "--outline-width" | "--shadow" | "--shadow-radius" | "--texture-filter" | "--wide" | "--msaa" | "--renderer" => rest.push((a, args.next().unwrap_or_default())),
             "--trace" | "--draw-all" => rest.push((a, String::new())),
             _ if cfg.is_none() => cfg = Some(Config::new(a)),
             _ => {
@@ -45,6 +45,7 @@ fn main() -> ExitCode {
             "--out" => cfg.out = v.into(),
             "--dump-textures" => cfg.dump_textures = Some(v.into()),
             "--dump-bg" => dump_bg = Some(std::path::PathBuf::from(v)),
+            "--pack-2d" => cfg.pack_2d = Some(v.into()),
             "--dump-2d" => dump_2d = Some(std::path::PathBuf::from(v)),
             "--texture-pack" => cfg.texture_pack = Some(v.into()),
             "--overlay" => cfg.overlay = Some(v.into()),

@@ -987,6 +987,8 @@ pub fn run(o: Options, el: EventLoop<()>) {
     cfg.out = o.out.unwrap_or_else(|| beside.and_then(|p| p.parent()).map(|p| p.to_path_buf()).unwrap_or_default());
     cfg.save = o.save;
     cfg.dump_textures = o.dump;
+    // a folder of 2D pictures (8е.3); a part of `sunpetal.data` comes with 8е.5
+    cfg.pack_2d = std::env::var_os("SUNPETAL_PACK_2D").map(PathBuf::from).filter(|p| p.is_dir());
     cfg.texture_pack = o.pack.or_else(|| {
         let p = PathBuf::from(&settings.video.texture_pack);
         if settings.video.texture_pack.is_empty() {
