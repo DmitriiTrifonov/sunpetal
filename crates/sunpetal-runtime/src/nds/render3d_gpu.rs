@@ -4256,7 +4256,9 @@ mod tests {
     fn bench_supersampling() {
         let Some(path) = std::env::var_os("SUNPETAL_BENCH_DUMP") else { return };
         let mut d = super::super::jobdump::read(std::path::Path::new(&path)).unwrap();
-        for scale in [1usize, 2] {
+        let scales: Vec<usize> = std::env::var("SUNPETAL_BENCH_SCALES").ok().map(|v| v.split(',').filter_map(|n| n.parse().ok()).collect()).unwrap_or_else(|| vec![1, 2]);
+        println!("job width {}, polys {}", d.job.width, d.job.polys.len());
+        for scale in scales {
             for msaa in [0u8, 2, 4] {
                 d.job.extras.msaa = msaa;
                 let job = &d.job;

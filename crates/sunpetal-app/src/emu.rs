@@ -74,6 +74,7 @@ pub struct Shared {
     pub scale: AtomicUsize,
     /// The engine that draws the 3D: 0 software, 1 the GPU one (`Renderer`), changed by the window.
     pub renderer: AtomicU8,
+    pub pipeline: std::sync::atomic::AtomicBool,
     /// The 3D's outline and shading.
     pub extras: Mutex<nds::Extras>,
     /// A texture pack to swap in before the next frame (`Some(None)`: none); the window sets it, the emulation takes it.
@@ -148,6 +149,7 @@ impl Shared {
             frame: Mutex::new(None),
             scale: AtomicUsize::new(2),
             renderer: AtomicU8::new(0),
+            pipeline: std::sync::atomic::AtomicBool::new(false),
             extras: Mutex::new(nds::Extras::default()),
             pack_swap: Mutex::new(None),
             logo_click: AtomicBool::new(false),
@@ -264,6 +266,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             last_e = want_e;
         }
         nds::set_renderer(if shared.renderer.load(Ordering::Relaxed) == 1 { nds::Renderer::Gpu } else { nds::Renderer::Software });
+        nds::set_pipeline(shared.pipeline.load(Ordering::Relaxed));
         nds::set_scale(if skipping_now { 1 } else { shared.scale.load(Ordering::Relaxed) });
         let mut extras = *shared.extras.lock().unwrap();
         // the window's 3D is drawn at scale x samples at most (`effects::MSAA_BUDGET`, the video card's is larger): more would not keep up

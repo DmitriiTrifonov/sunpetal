@@ -349,6 +349,9 @@ impl App {
         if s.video.res != a.video.res {
             self.shared.scale.store(s.video.res, Ordering::Relaxed);
         }
+        if s.emulation.pipeline != a.emulation.pipeline {
+            self.shared.pipeline.store(s.emulation.pipeline, Ordering::Relaxed);
+        }
         if s.video.renderer != a.video.renderer {
             self.shared.renderer.store((config::parse_renderer(&s.video.renderer) == Some(sunpetal_runtime::nds::Renderer::Gpu)) as u8, Ordering::Relaxed);
         }
@@ -1150,6 +1153,8 @@ pub struct Options {
     pub wide: Option<bool>,
     /// The 3D engine for this run (`--renderer software|gpu`), over the setting.
     pub renderer: Option<String>,
+    /// `--pipeline`: do not wait for the GPU's 3D frame (stage 8ж.5).
+    pub pipeline: bool,
 }
 
 /// Runs the game in a window until it closes.
@@ -1165,6 +1170,9 @@ pub fn run(o: Options, el: EventLoop<()>) {
     if let Some(r) = o.renderer {
         settings.video.renderer = r;
         settings.sanitize(); // an unknown name becomes `software`
+    }
+    if o.pipeline {
+        settings.emulation.pipeline = true;
     }
     if let Some(l) = o.lang {
         settings.game.language = if l == "none" { String::new() } else { l };
@@ -1227,6 +1235,7 @@ pub fn run(o: Options, el: EventLoop<()>) {
     let shared = Shared::new();
     shared.scale.store(settings.video.res, Ordering::Relaxed);
     shared.renderer.store((config::parse_renderer(&settings.video.renderer) == Some(sunpetal_runtime::nds::Renderer::Gpu)) as u8, Ordering::Relaxed);
+    shared.pipeline.store(settings.emulation.pipeline, Ordering::Relaxed);
     *shared.extras.lock().unwrap() = settings.effects.extras();
     // the stream must outlive the machine's use of the ring
     let (ring, _stream) = if o.mute {
@@ -1360,7 +1369,7 @@ mod save_command_tests {
     use std::path::PathBuf;
 
     fn options() -> Options {
-        Options { rom: PathBuf::new(), out: None, save: None, mute: false, res: None, menu: false, full_menu: false, dump: None, pack: None, lang: None, wide: None, renderer: None }
+        Options { rom: PathBuf::new(), out: None, save: None, mute: false, res: None, menu: false, full_menu: false, dump: None, pack: None, lang: None, wide: None, renderer: None, pipeline: false }
     }
 
     #[test]
@@ -1465,7 +1474,7 @@ fn save_command(export: Option<&std::path::Path>, import: Option<&std::path::Pat
 pub fn desktop_main() {
     let mut args = std::env::args().skip(1);
     let mut rom: Option<PathBuf> = None;
-    let mut o = Options { rom: PathBuf::new(), out: None, save: None, mute: false, res: None, menu: false, full_menu: false, dump: None, pack: None, lang: None, wide: None, renderer: None };
+    let mut o = Options { rom: PathBuf::new(), out: None, save: None, mute: false, res: None, menu: false, full_menu: false, dump: None, pack: None, lang: None, wide: None, renderer: None, pipeline: false };
     // the save file out to a copy, or a copy in (`--export-save FILE`, `--import-save FILE`): done with no window
     let (mut export_save, mut import_save): (Option<PathBuf>, Option<PathBuf>) = (None, None);
     while let Some(a) = args.next() {
@@ -1488,6 +1497,7 @@ pub fn desktop_main() {
             "--texture-pack" => o.pack = args.next().map(PathBuf::from),
             "--lang" => o.lang = args.next(),
             "--wide" => o.wide = args.next().map(|v| !matches!(v.as_str(), "off" | "0" | "no")),
+            "--pipeline" => o.pipeline = true,
             "--renderer" => match args.next() {
                 Some(v) if config::parse_renderer(&v).is_some() => o.renderer = Some(v),
                 v => {
@@ -1563,7 +1573,7 @@ pub fn desktop_main() {
                         }
                         return;
                     }
-                    eprintln!("usage: sunpetal-app [ROM.nds] [--out DIR] [--save FILE] [--export-save FILE] [--import-save FILE] [--mute] [--res N] [--menu] [--texture-pack FILE] [--lang ru|none] [--renderer software|gpu]");
+                    eprintln!("usage: sunpetal-app [ROM.nds] [--out DIR] [--save FILE] [--export-save FILE] [--import-save FILE] [--mute] [--res N] [--menu] [--texture-pack FILE] [--lang ru|none] [--renderer software|gpu] [--pipeline]");
                     eprintln!("{}", locate::no_game(&dirs));
                     std::process::exit(2);
                 }
@@ -1645,7 +1655,7 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
             let _ = std::fs::write(&marker, b"");
         }
     }
-    run(Options { rom, out: Some(dir), save: None, mute: false, res: Some(1), menu: false, dump: None, pack, lang: None, wide: None, renderer: None }, el);
+    run(Options { rom, out: Some(dir), save: None, mute: false, res: Some(1), menu: false, dump: None, pack, lang: None, wide: None, renderer: None, pipeline: false }, el);
 }
 
 #[cfg(target_os = "android")]
