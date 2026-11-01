@@ -540,7 +540,37 @@ fn pick(layouts: &[Layout], v: &crate::config::Video, live: &Live) -> Layout {
     l
 }
 
+/// Parts of the window the system takes (a notch, rounded corners, gesture bars), in pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub struct Insets {
+    pub left: f32,
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
+}
+
+impl Insets {
+    /// The safe area of a window: its corner and size (never below one pixel).
+    pub fn area(&self, win: (f32, f32)) -> ((f32, f32), (f32, f32)) {
+        let (l, t) = (self.left.max(0.0).min(win.0 - 1.0), self.top.max(0.0).min(win.1 - 1.0));
+        let size = ((win.0 - l - self.right.max(0.0)).max(1.0), (win.1 - t - self.bottom.max(0.0)).max(1.0));
+        ((l, t), size)
+    }
+}
+
 impl Layout {
+    /// As `fit`, inside the window's safe area.
+    pub fn fit_safe(&self, win: (f32, f32), ins: Insets) -> [Option<Rect>; 2] {
+        let (o, size) = ins.area(win);
+        self.fit(size).map(|r| r.map(|r| Rect { x: r.x + o.0, y: r.y + o.1, ..r }))
+    }
+
+    /// As `touch`, with the layout inside the window's safe area.
+    pub fn touch_safe(&self, win: (f32, f32), ins: Insets, p: (f32, f32), clamp: bool) -> Option<(i32, i32)> {
+        let (o, size) = ins.area(win);
+        self.touch(size, (p.0 - o.0, p.1 - o.1), clamp)
+    }
+
     /// The layout fitted into a window of `win` pixels, centred: each screen's rectangle in
     /// pixels.
     pub fn fit(&self, win: (f32, f32)) -> [Option<Rect>; 2] {
@@ -627,6 +657,28 @@ mod tests {
 
     /// Windows of every common shape: the picture fits inside, keeps its proportions, the bars are
     /// symmetric, and a touch at a screen's centre lands at the DS screen's centre.
+    /// A notch and a gesture bar: the picture stays inside the safe area, and a touch is counted
+    /// from the area's corner.
+    #[test]
+    fn insets_keep_the_layout_in_the_safe_area_and_the_touch_follows() {
+        let win = (2400.0, 1080.0);
+        let ins = Insets { left: 120.0, top: 0.0, right: 60.0, bottom: 48.0 };
+        for l in [single(false), stacked(), side_by_side(), top_only()] {
+            for r in l.fit_safe(win, ins).iter().flatten() {
+                assert!(r.x >= 120.0 - 0.01 && r.x + r.w <= 2340.0 + 0.01 && r.y >= -0.01 && r.y + r.h <= 1032.0 + 0.01, "{}: {:?}", l.name, r);
+            }
+        }
+        let l = single(true);
+        let lo = l.fit_safe(win, ins)[1].unwrap();
+        let mid = (lo.x + lo.w / 2.0, lo.y + lo.h / 2.0);
+        assert_eq!(l.touch_safe(win, ins, mid, false), Some((128, 96)));
+        assert_eq!(l.touch_safe(win, ins, (lo.x - 1.0, mid.1), false), None);
+        // no insets: the same as the plain fit
+        assert_eq!(l.fit_safe(win, Insets::default()), l.fit(win));
+        // absurd insets do not break the maths
+        assert!(l.fit_safe((100.0, 100.0), Insets { left: 500.0, top: 500.0, right: 500.0, bottom: 500.0 })[1].is_some());
+    }
+
     #[test]
     fn every_window_shape_fits_the_layouts_with_symmetric_bars_and_a_reversible_touch() {
         let wins = [(1920.0, 1080.0), (1920.0, 1200.0), (2560.0, 1080.0), (1080.0, 2400.0), (800.0, 800.0), (360.0, 800.0)];
