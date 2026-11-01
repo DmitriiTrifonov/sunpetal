@@ -293,6 +293,8 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
                 if let Some(ram) = nds::main_ram() {
                     let _ = std::fs::write(format!("{}.ram", stem.display()), ram);
                 }
+                // the 2D pictures on show and their keys (for the pack: which sprite is which)
+                let _ = nds::dump_2d(&std::path::PathBuf::from(format!("{}_2d", stem.display())));
             }
             let json = format!(
                 "{{\"vblank\":{},\"scene\":{},\"script\":{{\"idle\":{},\"waits\":{},\"mark\":{},\"step\":{}}},\"frame_scale\":{},{}}}\n",
