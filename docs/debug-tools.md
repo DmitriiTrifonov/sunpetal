@@ -128,6 +128,8 @@ python3 tools/debug/check_log.py out/c04.jsonl --scene C04_16 --s patched/Chapte
 
 ## REPL
 
+Кадр всего окна приложения (раскладки, чёткий текст, эффекты) этот отладчик не даёт: он показывает только экраны DS. Для окна — `sunpetal-app --script` (`docs/TOOLS.md`, «Кадр окна без окна»).
+
 `--repl` читает команды, по одной в строке; ответ — строка `{"ok":true,"vblank":N,…}` или `{"error":"…"}`:
 
 `skip [FRAMES]` (как F7 в приложении: без нажатий, до команды `WAIT` скрипта или до свободной ходьбы; ответ `stopped`: waits/idle/limit) | `request N` | `setvalue I V` | `value I` | `teleport X Y Z` | `changemap MAP X Y Z` (приложение обработчика: действует только внутри идущего скрипта) | `run N` | `press KEYS [FRAMES]` | `tap X Y [FRAMES]` | `shot FILE` | `log FILE|off` | `advance [FRAMES]` | `walk N [FRAMES]` | `shown` | `quit`.

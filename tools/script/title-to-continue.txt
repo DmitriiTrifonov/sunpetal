@@ -1,0 +1,16 @@
+size 512 768
+set video.show_stats false
+set video.layout stacked
+set video.auto false
+wait 900
+press START
+wait 500
+press START
+wait 400
+tap 310 418
+wait 200
+tap 290 418
+wait 200
+tap 300 418
+wait 200
+tap 310 418

@@ -82,3 +82,13 @@
 ## Тулчейн PS2-разведки (K-087, 2026-11-02)
 
 `tools/ps2/ingest.py` (сбор снимков PCSX2 и кадров из сохранений в `artifacts/ps2-recon/`, манифест, кадры из записей, контактный лист), `p2s.py` (чтение `.p2s`: zip + zstd, нужен системный `zstd`), `vram.py` (VRAM из состояния в PNG, свизл PSMCT32 пока приблизительный), чек-лист режимов `tools/ps2/modes.md`. Каждое сохранение PCSX2 содержит готовый `Screenshot.png`, его и забираем. Записи Рабочего стола не читаем: выгружены в iCloud, чтение зависает; видео — встроенной записью PCSX2.
+
+## Кадр окна без окна (K-090, 2026-11-02)
+
+`sunpetal-app ROM --script FILE|-` — приложение целиком (раскладки, один экран, чёткий текст реплик, пакет 2D, эффекты, меню) рисует в текстуру вне экрана; команды по строке, ответ — строка JSON. Настройки берутся из `config.toml` игрока, но не сохраняются; сохранение — временная копия (игра игрока не трогается). Звука и геймпада нет, `fast` включён.
+
+Команды: `size W H [PPP]`, `wait N` (кадры машины), `press BUTTON [N]`, `tap X Y [N]` (пиксели окна, через раскладку), `touch X Y [N]` (пиксели нижнего экрана DS), `swap`, `menu`, `set KEY VALUE` (путь в `config.toml`: `video.layout single`, `video.dialogue_font nunito`), `fast on|off`, `shot FILE`, `status`, `quit`. Описание — `crates/sunpetal-app/src/script.rs`.
+
+Маршрут «титул → Начать игру → Данные-01 → Загрузка → Продолжить» (сохранение игрока): `tools/script/title-to-continue.txt`, ≈ 2300 кадров, потом свободная ходьба. Пример: `{ cat tools/script/title-to-continue.txt; echo "wait 400"; echo "size 1280 720"; echo "set video.layout single"; echo "shot /tmp/a.png"; } | sunpetal-app ROM --script -`.
+
+Чего нет: перехода к сцене (`--goto` есть только у `sunpetal-debug`, там нет окна), подписи кадров (`dump_shot`) по команде.

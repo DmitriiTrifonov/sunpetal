@@ -198,9 +198,11 @@ struct Screen {
 }
 
 pub struct Gfx {
-    window: Arc<Window>,
+    /// The window and its egui input; `None` when the picture is drawn off screen (`Gfx::offscreen`).
+    window: Option<(Arc<Window>, egui_winit::State)>,
     egui_ctx: egui::Context,
-    egui_state: egui_winit::State,
+    /// Off screen: the texture drawn into instead of the window's surface, and egui's points per pixel.
+    offscreen: Option<(wgpu::Texture, f32)>,
     /// Keys the pad presses for the menu (its arrows, Enter, Escape), given to egui with the next frame's input.
     pad_keys: Vec<egui::Key>,
     egui_renderer: egui_wgpu::Renderer,
@@ -209,7 +211,7 @@ pub struct Gfx {
     linear_sampler: wgpu::Sampler,
     /// The screens' textures are this many times 256x192.
     scale: usize,
-    surface: wgpu::Surface<'static>,
+    surface: Option<wgpu::Surface<'static>>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
@@ -337,7 +339,62 @@ impl Gfx {
             view_formats: vec![],
         };
         surface.configure(&device, &config);
+        let egui_ctx = egui::Context::default();
+        let egui_state = egui_winit::State::new(
+            egui_ctx.clone(),
+            egui::ViewportId::ROOT,
+            &*w,
+            Some(w.scale_factor() as f32),
+            None,
+            Some(device.limits().max_texture_dimension_2d as usize),
+        );
+        Ok(Self::build(device, queue, config, egui_ctx, Some((w, egui_state)), Some(surface), None))
+    }
 
+    /// The picture drawn into a texture of `w` by `h` (no window, no surface): what the window would show, for
+    /// `capture` to write. `ppp` is egui's pixels per point (the window's scale factor: 2 on a Retina screen).
+    pub fn offscreen(w: u32, h: u32, ppp: f32) -> Result<Gfx, String> {
+        let instance = wgpu::Instance::default();
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).map_err(|e| format!("no GPU: {}", e))?;
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).map_err(|e| e.to_string())?;
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            width: w.max(1),
+            height: h.max(1),
+            present_mode: wgpu::PresentMode::Fifo,
+            desired_maximum_frame_latency: 2,
+            alpha_mode: wgpu::CompositeAlphaMode::Opaque,
+            color_space: wgpu::SurfaceColorSpace::Auto,
+            view_formats: vec![],
+        };
+        let tex = Self::target_texture(&device, &config);
+        Ok(Self::build(device, queue, config, egui::Context::default(), None, None, Some((tex, ppp.max(0.25)))))
+    }
+
+    fn target_texture(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> wgpu::Texture {
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("offscreen"),
+            size: wgpu::Extent3d { width: config.width, height: config.height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: config.format,
+            usage: config.usage,
+            view_formats: &[],
+        })
+    }
+
+    fn build(
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        config: wgpu::SurfaceConfiguration,
+        egui_ctx: egui::Context,
+        window: Option<(Arc<Window>, egui_winit::State)>,
+        surface: Option<wgpu::Surface<'static>>,
+        offscreen: Option<(wgpu::Texture, f32)>,
+    ) -> Gfx {
+        let format = config.format;
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("screens"),
             source: wgpu::ShaderSource::Wgsl(SHADER.into()),
@@ -408,19 +465,10 @@ impl Gfx {
         let (nearest, linear) = (sampler(wgpu::FilterMode::Nearest), sampler(wgpu::FilterMode::Linear));
         let screens = [make_screen(&device, &bgl, &nearest, &linear, 1, "upper"), make_screen(&device, &bgl, &nearest, &linear, 1, "lower")];
         let glow = make_texture(&device, &bgl, &nearest, &linear, GLOW_W as u32, GLOW_H as u32, "glow");
-        let egui_ctx = egui::Context::default();
         egui_ctx.set_fonts(crate::fonts::definitions(None));
-        let egui_state = egui_winit::State::new(
-            egui_ctx.clone(),
-            egui::ViewportId::ROOT,
-            &*w,
-            Some(w.scale_factor() as f32),
-            None,
-            Some(device.limits().max_texture_dimension_2d as usize),
-        );
         let egui_renderer = egui_wgpu::Renderer::new(&device, format, egui_wgpu::RendererOptions::default());
         let post_kit = post::Kit::new(&device, format);
-        Ok(Gfx { window: w, egui_ctx, egui_state, pad_keys: Vec::new(), egui_renderer, bgl, nearest, linear_sampler: linear, scale: 1, surface, device, queue, config, pipeline, post_kit, post: None, screens, glow, glow_grid: vec![0.0; GLOW_W * GLOW_H * 3], background: true, edge_bars: false, capture: None, bar_color: None, wide_screen: None, wide_e: 0, linear: true, reserve: 0.0 })
+        Gfx { window, egui_ctx, offscreen, pad_keys: Vec::new(), egui_renderer, bgl, nearest, linear_sampler: linear, scale: 1, surface, device, queue, config, pipeline, post_kit, post: None, screens, glow, glow_grid: vec![0.0; GLOW_W * GLOW_H * 3], background: true, edge_bars: false, capture: None, bar_color: None, wide_screen: None, wide_e: 0, linear: true, reserve: 0.0 }
     }
 
     pub fn resize(&mut self, w: u32, h: u32) {
@@ -429,7 +477,12 @@ impl Gfx {
         }
         self.config.width = w;
         self.config.height = h;
-        self.surface.configure(&self.device, &self.config);
+        if let Some(s) = &self.surface {
+            s.configure(&self.device, &self.config);
+        }
+        if let Some((t, _)) = &mut self.offscreen {
+            *t = Self::target_texture(&self.device, &self.config);
+        }
     }
 
     /// The window's size in pixels.
@@ -534,7 +587,10 @@ impl Gfx {
 
     /// A window event for the menu. True if the menu used it (the game should not).
     pub fn ui_event(&mut self, ev: &winit::event::WindowEvent) -> bool {
-        self.egui_state.on_window_event(&self.window, ev).consumed
+        match &mut self.window {
+            Some((w, st)) => st.on_window_event(w, ev).consumed,
+            None => false,
+        }
     }
 
     /// A key for the menu, from the pad. An arrow with nothing focused yet is a Tab: it focuses the first widget.
@@ -552,19 +608,24 @@ impl Gfx {
     /// Draws the screens, then, with `menu`, the menu over them.
     pub fn draw(&mut self, layout: &Layout, fx: &Effects, menu: Option<&mut dyn FnMut(&egui::Context)>) {
         use wgpu::CurrentSurfaceTexture as T;
-        let frame = match self.surface.get_current_texture() {
-            T::Success(f) | T::Suboptimal(f) => f,
-            T::Outdated | T::Lost => {
-                self.surface.configure(&self.device, &self.config);
-                return;
-            }
-            _ => {
-                // the window cannot be shown (hidden, covered, the screen locked): the uploads of this frame
-                // are still queued, and without a submit they pile up (B-06, gigabytes in a minute)
-                self.queue.submit(std::iter::empty());
-                return;
-            }
+        // the window's surface, or the texture drawn off screen
+        let frame = match &self.surface {
+            Some(surface) => match surface.get_current_texture() {
+                T::Success(f) | T::Suboptimal(f) => Some(f),
+                T::Outdated | T::Lost => {
+                    surface.configure(&self.device, &self.config);
+                    return;
+                }
+                _ => {
+                    // the window cannot be shown (hidden, covered, the screen locked): the uploads of this frame
+                    // are still queued, and without a submit they pile up (B-06, gigabytes in a minute)
+                    self.queue.submit(std::iter::empty());
+                    return;
+                }
+            },
+            None => None,
         };
+        let Some(texture) = frame.as_ref().map(|f| f.texture.clone()).or_else(|| self.offscreen.as_ref().map(|(t, _)| t.clone())) else { return };
         let (w, h) = self.window_size();
         let rects = layout.fit(self.size());
         let smooth = [fx.smooth_mode(), fx.smooth_strength, self.scale as f32, 0.0];
@@ -631,7 +692,7 @@ impl Gfx {
             let q = Quad { rect: [-1.0, 1.0, 1.0, -1.0], fx: [0.0, 0.0, 0.55, 0.0], color: [1.1, 0.9, -0.2, 1.0], dims: [GLOW_W as f32, GLOW_H as f32, 0.0, 0.0], uvr: WHOLE, sm: [0.0; 4] };
             self.queue.write_buffer(&self.glow.uniform, 0, bytemuck::bytes_of(&q));
         }
-        let view = frame.texture.create_view(&Default::default());
+        let view = texture.create_view(&Default::default());
         let use_post = fx.bloom > 0.0 || fx.fxaa;
         if !use_post {
             self.post = None;
@@ -685,14 +746,25 @@ impl Gfx {
         let mut buffers = Vec::new();
         let mut freed = Vec::new();
         if let Some(menu) = menu {
-            let mut raw = self.egui_state.take_egui_input(&self.window);
+            let mut raw = match (&mut self.window, &self.offscreen) {
+                (Some((w, st)), _) => st.take_egui_input(w),
+                // off screen: the whole texture is the screen, at the scale asked for
+                (None, Some((_, ppp))) => {
+                    let mut raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(self.config.width as f32 / ppp, self.config.height as f32 / ppp))), ..Default::default() };
+                    raw.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(*ppp);
+                    raw
+                }
+                (None, None) => egui::RawInput::default(),
+            };
             for key in self.pad_keys.drain(..) {
                 for pressed in [true, false] {
                     raw.events.push(egui::Event::Key { key, physical_key: Some(key), pressed, repeat: false, modifiers: egui::Modifiers::NONE });
                 }
             }
             let out = self.egui_ctx.run_pass(raw, |ctx| menu(ctx));
-            self.egui_state.handle_platform_output(&self.window, out.platform_output);
+            if let Some((w, st)) = &mut self.window {
+                st.handle_platform_output(w, out.platform_output);
+            }
             let jobs = self.egui_ctx.tessellate(out.shapes, out.pixels_per_point);
             for (id, deltas) in &out.textures_delta.set {
                 for delta in deltas {
@@ -730,7 +802,7 @@ impl Gfx {
             let row = (w * 4).div_ceil(256) * 256;
             let buf = self.device.create_buffer(&wgpu::BufferDescriptor { label: Some("capture"), size: (row * h) as u64, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
             enc.copy_texture_to_buffer(
-                wgpu::TexelCopyTextureInfo { texture: &frame.texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                wgpu::TexelCopyTextureInfo { texture: &texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
                 wgpu::TexelCopyBufferInfo { buffer: &buf, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(h) } },
                 wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
             );
@@ -770,7 +842,9 @@ impl Gfx {
         for id in &freed {
             self.egui_renderer.free_texture(id);
         }
-        self.queue.present(frame);
+        if let Some(f) = frame {
+            self.queue.present(f);
+        }
     }
 }
 

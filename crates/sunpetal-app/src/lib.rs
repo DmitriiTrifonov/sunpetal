@@ -27,6 +27,7 @@ pub mod screen_report;
 mod locate;
 mod pad;
 mod post;
+mod script;
 mod touchpad;
 mod ui;
 mod uitext;
@@ -224,6 +225,8 @@ struct App {
     tap: (u32, u32),
     /// The restart was asked for: once the machine has stopped, the program starts again.
     restart: bool,
+    /// Driven by a script with no window (`--script`): the settings are not saved.
+    scripted: bool,
 }
 
 impl App {
@@ -346,6 +349,9 @@ impl App {
     }
 
     fn save(&mut self) {
+        if self.scripted {
+            return;
+        }
         let k = self.window.as_ref().map_or(1.0, |w| w.scale_factor());
         self.settings.video.window = [(self.win_size.0 as f64 / k) as u32, (self.win_size.1 as f64 / k) as u32];
         config::save(&self.settings);
@@ -622,6 +628,307 @@ impl App {
         let i = self.layouts.iter().position(|l| l.name == self.settings.video.layout).unwrap_or(0);
         self.settings.video.layout = self.layouts[(i + 1) % self.layouts.len()].name.to_string();
     }
+
+    /// One frame of the window: the picture taken from the machine, what it shows worked out, drawn (into the
+    /// window, or off screen). False when the program is to end (the machine stopped, Quit, a restart).
+    fn redraw(&mut self) -> bool {
+        self.poll_pads();
+        // the machine stopped (a failed boot, a fatal error): say so, do not sit black
+        let stopped = self.shared.stopped.lock().unwrap().clone();
+        if let Some(why) = stopped {
+            eprintln!("stopped: {}", why);
+            self.save();
+            if !self.settings.touch_controls_on() && !cfg!(target_os = "android") {
+                return false;
+            }
+            // on a phone the window stays, with the reason
+            self.stopped_msg = Some(why);
+        }
+        if self.tap.1 > 0 {
+            self.tap.1 -= 1;
+            if self.tap.1 == 0 {
+                self.tap.0 = 0;
+                self.send_keys();
+            }
+        }
+        // the picture and its wide partner, taken together (the emulation writes them so)
+        let (frame, wide_pair) = {
+            let mut slot = self.shared.frame.lock().unwrap();
+            let f = slot.take();
+            let w = if f.is_some() { self.shared.wide_frame.lock().unwrap().take() } else { None };
+            (f, w)
+        };
+        if let Some((scale, rgba)) = &frame {
+            self.dial_scene = dial::recognise(*scale, rgba);
+            // the dial's answer plays out on the upper screen a while after the dial is gone
+            let was = self.puzzle_hold;
+            self.puzzle_hold = if self.dial_scene {
+                PUZZLE_FRAMES
+            } else if layout::counter_in(*scale, rgba) {
+                0 // the map is back: the walk goes on
+            } else {
+                self.puzzle_hold.saturating_sub(1)
+            };
+            if was > 0 && self.puzzle_hold == 0 && layout::counter_in(*scale, rgba) {
+                // the puzzle is done: straight to the upper screen, the lower's map is not shown after it
+                self.auto_lower = false;
+                self.hold = None;
+                self.want = (false, AUTO_FRAMES);
+            }
+            // the digits' place is known once they are there; the layout then stays till the puzzle is done
+            self.puzzle_side = self.puzzle_hold > 0 && (self.puzzle_side || layout::led_under_panel(*scale, rgba));
+            self.counter_seen = layout::counter_in(*scale, rgba);
+            self.hint_seen = layout::hint_in(*scale, rgba);
+            let coll = layout::collection_in(*scale, rgba);
+            if coll != self.coll_seen {
+                // on the list again when the collection is entered or left
+                self.coll_card.set(false);
+                self.coll_seen = coll;
+            }
+            // a pink flash of the screen's own art can take the sign off for a few frames (the hint blinked on the
+            // option screen, B-05): it goes off only when it has been missing for `EDO_HOLD` frames
+            if layout::edo_in(*scale, rgba) && !layout::edo_title_in_hint(*scale, rgba) {
+                self.edo_seen = true;
+                self.edo_off = 0;
+            } else if self.edo_seen {
+                self.edo_off += 1;
+                self.edo_seen = self.edo_off < EDO_HOLD;
+            }
+            self.prompt = layout::prompt_box(*scale, rgba);
+            if let Some(left) = layout::portrait_left(*scale, rgba) {
+                self.portrait_left = left;
+            }
+            let paper = layout::paper_in(*scale, rgba);
+            if paper && !self.paper {
+                self.scroll = 0.0;
+            }
+            self.paper = paper;
+            // the bars of the window: the picture's edge colour if that is one
+            let layout = self.layout();
+            let ask = if self.settings.video.bars_match && matches!(self.settings.video.background.as_str(), "glow" | "edge") { layout::edge_color(&layout, *scale, rgba) } else { None };
+            let same = match (ask, self.bar_ask.0) {
+                (Some(a), Some(b)) => (0..3).all(|c| (a[c] - b[c]).abs() < 0.04),
+                (None, None) => true,
+                _ => false,
+            };
+            self.bar_ask = if same { (self.bar_ask.0, self.bar_ask.1 + 1) } else { (ask, 0) };
+            if self.bar_ask.1 >= BAR_FRAMES {
+                self.bar_color = self.bar_ask.0;
+            }
+            // a flat edge that only changes its shade (a logo fading in or out) is followed at once: waiting for
+            // it to hold leaves the old colour round a picture gone dark
+            if let (Some(a), Some(_)) = (ask, self.bar_color) {
+                self.bar_color = Some(a);
+            }
+            // a change of screen waits until the picture has held for a moment (a fade, a
+            // flash between scenes would flicker it)
+            if let Some(w) = layout::lower_wanted(*scale, rgba) {
+                // leaving by SELECT: another B until the lower screen is the map again
+                if self.leaving.0 > 0 {
+                    if !w {
+                        self.leaving = (0, 0);
+                    } else if self.leaving.1 == 0 {
+                        self.leaving = (self.leaving.0 - 1, LEAVE_GAP);
+                        self.press("B");
+                    } else {
+                        self.leaving.1 -= 1;
+                    }
+                }
+                self.want = if w == self.want.0 { (w, self.want.1 + 1) } else { (w, 0) };
+                if self.want.1 >= AUTO_FRAMES {
+                    self.auto_lower = w;
+                }
+                self.hold = next_hold(self.hold, w, self.want.1 >= AUTO_FRAMES);
+            }
+        }
+        if let (Some((scale, rgba)), Some(g)) = (frame, &mut self.gfx) {
+            g.upload(scale, &rgba);
+            // the 3D scene widened, when the emulation made one for this picture
+            match wide_pair {
+                Some((sc, e, px)) => {
+                    g.upload_wide(sc, e, &px);
+                    self.wide_now = e;
+                }
+                None => self.wide_now = 0,
+            }
+        }
+        // the picture goes dark for a skip and comes back after it
+        let target = if self.shared.skip.load(Ordering::Relaxed) { 1.0 } else { 0.0 };
+        self.skip_fade += (target - self.skip_fade).clamp(-0.07, 0.07);
+        let fade = self.skip_fade;
+        let mut action = None;
+        let mut want_shape: Option<f32> = None;
+        {
+            let (cursor, pen_now) = (self.stylus.pos.filter(|_| !self.menu.open), self.pen_down);
+            let App { gfx, menu, force_full, settings, layouts, touch_held, stopped_msg, shared, counter_seen, hint_seen, puzzle_hold, puzzle_side, coll_seen, coll_card, pending_capture, edo_seen, prompt, bar_color, auto_lower, hold, wide_now, paper, scroll, portrait_left, .. } = self;
+            let live = layout::Live { vblank: shared.vblank.load(Ordering::Relaxed), counter_seen: *counter_seen, hint_seen: *hint_seen, both: *puzzle_hold > 0, both_side: *puzzle_side, collection: coll_seen.then(|| coll_card.get()), lower: *auto_lower || hold.is_some(), edo: *edo_seen, prompt: *prompt, wide: *wide_now as f32, scroll: (*paper && *auto_lower).then_some(*scroll) };
+            if let Some(g) = gfx {
+                let layout = layout::find(layouts, &settings.video, &live);
+                g.bar_color = *bar_color;
+                if let Some(p) = pending_capture.take() {
+                    g.capture = Some(p);
+                }
+                // the 3D view is widened to the window's shape when the upper screen is alone
+                let base = layout::find(layouts, &settings.video, &layout::Live { wide: 0.0, ..live });
+                // the layout the setting names, not what the game moves to for a moment (a puzzle, a card)
+                if settings.video.follow_shape && !settings.video.fullscreen {
+                    let named = layouts.iter().find(|l| l.name == settings.video.layout).unwrap_or(&base);
+                    want_shape = Some(named.size.0 * named.fit.par.clamp(0.25, 4.0) / named.size.1);
+                }
+                let upper_alone = base.screens[0].is_some() && (base.screens[1].is_none() || base.name == "overlay");
+                let want = if settings.video.wide && upper_alone {
+                    layout::wide_each_side(g.size(), settings.video.pixel_aspect, layout::wide_cap(settings.video.wide_limit, sunpetal_runtime::nds::WIDE_MAX))
+                } else {
+                    0
+                };
+                shared.wide_px.store(want, Ordering::Relaxed);
+                let names: Vec<&str> = layouts.iter().map(|l| l.name).collect();
+                let fx = settings.effects.clone();
+                let internal = (256 * settings.video.res as u32, 192 * settings.video.res as u32);
+                let pad_on = settings.touch_controls_on();
+                let (ww, wh) = g.window_size();
+                let band = touchpad::band(ww, wh);
+                g.reserve = if pad_on { band.h } else { 0.0 };
+                let corner_on = cfg!(target_os = "android") && !pad_on;
+                // the touch panel and the Android corner show the speed figures themselves; elsewhere they go over the picture
+                let stats_on = settings.video.show_stats && !pad_on && !corner_on;
+                // the dialogue line, drawn here in the window's resolution (the game's raster text is hidden)
+                let vrect = layout.fit(g.size())[0];
+                let crisp = match settings.video.dialogue_text.as_str() {
+                    "pixel" => false,
+                    "crisp" => vrect.is_some(),
+                    _ => vrect.is_some_and(|r| r.h / 192.0 >= 2.0),
+                };
+                shared.crisp_text.store(crisp, Ordering::Relaxed);
+                // the line goes with the picture it was made for (empty when that picture has the game's own letters)
+                let vline = shared.dialogue_text.lock().unwrap().clone();
+                let vwide = *wide_now as f32;
+                menu.short = !(settings.ui.full_menu || *force_full);
+                if menu.open || pad_on || corner_on || stats_on || fade > 0.0 || vline.is_some() || cursor.is_some() {
+                    let held = touch_held.clone();
+                    let mut f = |ctx: &egui::Context| {
+                        if fade > 0.0 {
+                            // first, so that the buttons stay on top of it and can cancel the skip
+                            let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("skipfade")));
+                            p.rect_filled(ctx.content_rect(), 0.0, egui::Color32::from_black_alpha((fade * 255.0) as u8));
+                        }
+                        if let (Some(text), Some(r)) = (&vline, vrect) {
+                            paint_dialogue(ctx, r, vwide, *portrait_left, &text.0, text.1, &settings.video.dialogue_font);
+                        }
+                        if corner_on {
+                            let info = match stopped_msg {
+                                Some(why) => format!("stopped: {}", why),
+                                None if settings.video.show_stats => shared.status.lock().unwrap().clone(),
+                                None => String::new(),
+                            };
+                            let fast = settings.emulation.fast_button.then(|| shared.fast.load(Ordering::Relaxed));
+                            let skip = settings.emulation.skip_button.then(|| shared.skip.load(Ordering::Relaxed));
+                            touchpad::paint_menu_button(ctx, ww, wh, &info, fast, skip);
+                        }
+                        if stats_on {
+                            // one line, in the top right corner (the game's own counter is at the left)
+                            let info = match stopped_msg {
+                                Some(why) => format!("stopped: {}", why),
+                                None => shared.status.lock().unwrap().lines().take(2).collect::<Vec<_>>().join("   "),
+                            };
+                            let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("stats")));
+                            let galley = p.layout_no_wrap(info, egui::FontId::monospace(13.0), egui::Color32::WHITE);
+                            let at = ctx.content_rect().right_top() + egui::vec2(-8.0 - galley.size().x, 8.0);
+                            p.rect_filled(egui::Rect::from_min_size(at, galley.size()).expand(4.0), 3.0, egui::Color32::from_black_alpha(160));
+                            p.galley(at, galley, egui::Color32::WHITE);
+                        }
+                        if pad_on {
+                            let info = match stopped_msg {
+                                Some(why) => format!("stopped: {}", why),
+                                None if settings.video.show_stats => shared.status.lock().unwrap().clone(),
+                                None => String::new(),
+                            };
+                            touchpad::paint(ctx, band, &held, &info);
+                        }
+                        if let Some((x, y)) = cursor {
+                            // the pad's stylus: a ring, filled while it touches
+                            let ppp = ctx.pixels_per_point();
+                            let c = egui::pos2(x / ppp, y / ppp);
+                            let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("stylus")));
+                            if pen_now {
+                                p.circle_filled(c, 7.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 170));
+                            }
+                            p.circle_stroke(c, 8.0, egui::Stroke::new(3.0, egui::Color32::BLACK));
+                            p.circle_stroke(c, 8.0, egui::Stroke::new(1.5, egui::Color32::WHITE));
+                        }
+                        if menu.open {
+                            action = menu.show(ctx, settings, &names, internal);
+                        }
+                    };
+                    g.draw(&layout, &fx, Some(&mut f));
+                } else {
+                    g.draw(&layout, &fx, None);
+                }
+            }
+        }
+        // the window takes the picture's shape, keeping its area (once per change of shape, so a window the player drags stays)
+        match want_shape {
+            Some(a) if (a - self.shape_last).abs() > 0.004 => {
+                let area = self.win_size.0 as f32 * self.win_size.1 as f32;
+                let w = (area * a).sqrt();
+                if let Some(win) = &self.window {
+                    let _ = win.request_inner_size(winit::dpi::PhysicalSize::new(w as u32, (w / a) as u32));
+                }
+                self.shape_last = a;
+            }
+            Some(_) => {}
+            None => self.shape_last = 0.0,
+        }
+        if action == Some(ui::Action::Quit) {
+            self.save();
+            return false;
+        }
+        // a save to export or import: the emulation does it (paused or not); what it did comes back below
+        match &action {
+            Some(ui::Action::ExportSave(to)) => *self.shared.save_job.lock().unwrap() = Some(emu::SaveJob::Export(to.clone())),
+            Some(ui::Action::ImportSave(from)) => *self.shared.save_job.lock().unwrap() = Some(emu::SaveJob::Import(from.clone())),
+            _ => {}
+        }
+        let done = self.shared.save_done.lock().unwrap().take();
+        match done {
+            Some((false, said)) => self.menu.say(said.unwrap_or_else(|e| e)),
+            // the file is in place: the game starts anew and reads it (the machine writes nothing more)
+            Some((true, Ok(said))) => {
+                eprintln!("{}", said);
+                action = Some(ui::Action::Restart);
+            }
+            Some((true, Err(e))) => self.menu.say(e),
+            None => {}
+        }
+        if action == Some(ui::Action::Restart) {
+            self.save();
+            self.restart = true;
+            *self.shared.restart.lock().unwrap() = Some(restart_args(std::env::args_os().skip(1).collect(), &self.settings.video.texture_pack));
+            return false;
+        }
+        if self.settings != self.applied {
+            let layout_changed = self.settings.video.layout != self.applied.video.layout
+                || self.settings.video.lower != self.applied.video.lower
+                || self.settings.video.panel != self.applied.video.panel
+                || self.settings.video.auto != self.applied.video.auto
+                || self.settings.video.res != self.applied.video.res
+                || self.settings.interface.language != self.applied.interface.language;
+            self.apply();
+            if layout_changed {
+                self.set_title();
+            }
+            if !self.menu.open {
+                self.save();
+            }
+        }
+        // the machine waits while the menu is open
+        let pause = self.menu.open && self.settings.emulation.pause_in_menu;
+        self.shared.paused.store(pause, Ordering::Relaxed);
+        if let Some(w) = &self.window {
+            w.request_redraw();
+        }
+        true
+    }
 }
 
 impl ApplicationHandler for App {
@@ -867,303 +1174,8 @@ impl ApplicationHandler for App {
                 self.update_pen();
             }
             WindowEvent::RedrawRequested => {
-                self.poll_pads();
-                // the machine stopped (a failed boot, a fatal error): say so, do not sit black
-                let stopped = self.shared.stopped.lock().unwrap().clone();
-                if let Some(why) = stopped {
-                    eprintln!("stopped: {}", why);
-                    self.save();
-                    if !self.settings.touch_controls_on() && !cfg!(target_os = "android") {
-                        el.exit();
-                        return;
-                    }
-                    // on a phone the window stays, with the reason
-                    self.stopped_msg = Some(why);
-                }
-                if self.tap.1 > 0 {
-                    self.tap.1 -= 1;
-                    if self.tap.1 == 0 {
-                        self.tap.0 = 0;
-                        self.send_keys();
-                    }
-                }
-                // the picture and its wide partner, taken together (the emulation writes them so)
-                let (frame, wide_pair) = {
-                    let mut slot = self.shared.frame.lock().unwrap();
-                    let f = slot.take();
-                    let w = if f.is_some() { self.shared.wide_frame.lock().unwrap().take() } else { None };
-                    (f, w)
-                };
-                if let Some((scale, rgba)) = &frame {
-                    self.dial_scene = dial::recognise(*scale, rgba);
-                    // the dial's answer plays out on the upper screen a while after the dial is gone
-                    let was = self.puzzle_hold;
-                    self.puzzle_hold = if self.dial_scene {
-                        PUZZLE_FRAMES
-                    } else if layout::counter_in(*scale, rgba) {
-                        0 // the map is back: the walk goes on
-                    } else {
-                        self.puzzle_hold.saturating_sub(1)
-                    };
-                    if was > 0 && self.puzzle_hold == 0 && layout::counter_in(*scale, rgba) {
-                        // the puzzle is done: straight to the upper screen, the lower's map is not shown after it
-                        self.auto_lower = false;
-                        self.hold = None;
-                        self.want = (false, AUTO_FRAMES);
-                    }
-                    // the digits' place is known once they are there; the layout then stays till the puzzle is done
-                    self.puzzle_side = self.puzzle_hold > 0 && (self.puzzle_side || layout::led_under_panel(*scale, rgba));
-                    self.counter_seen = layout::counter_in(*scale, rgba);
-                    self.hint_seen = layout::hint_in(*scale, rgba);
-                    let coll = layout::collection_in(*scale, rgba);
-                    if coll != self.coll_seen {
-                        // on the list again when the collection is entered or left
-                        self.coll_card.set(false);
-                        self.coll_seen = coll;
-                    }
-                    // a pink flash of the screen's own art can take the sign off for a few frames (the hint blinked on the
-                    // option screen, B-05): it goes off only when it has been missing for `EDO_HOLD` frames
-                    if layout::edo_in(*scale, rgba) && !layout::edo_title_in_hint(*scale, rgba) {
-                        self.edo_seen = true;
-                        self.edo_off = 0;
-                    } else if self.edo_seen {
-                        self.edo_off += 1;
-                        self.edo_seen = self.edo_off < EDO_HOLD;
-                    }
-                    self.prompt = layout::prompt_box(*scale, rgba);
-                    if let Some(left) = layout::portrait_left(*scale, rgba) {
-                        self.portrait_left = left;
-                    }
-                    let paper = layout::paper_in(*scale, rgba);
-                    if paper && !self.paper {
-                        self.scroll = 0.0;
-                    }
-                    self.paper = paper;
-                    // the bars of the window: the picture's edge colour if that is one
-                    let layout = self.layout();
-                    let ask = if self.settings.video.bars_match && matches!(self.settings.video.background.as_str(), "glow" | "edge") { layout::edge_color(&layout, *scale, rgba) } else { None };
-                    let same = match (ask, self.bar_ask.0) {
-                        (Some(a), Some(b)) => (0..3).all(|c| (a[c] - b[c]).abs() < 0.04),
-                        (None, None) => true,
-                        _ => false,
-                    };
-                    self.bar_ask = if same { (self.bar_ask.0, self.bar_ask.1 + 1) } else { (ask, 0) };
-                    if self.bar_ask.1 >= BAR_FRAMES {
-                        self.bar_color = self.bar_ask.0;
-                    }
-                    // a flat edge that only changes its shade (a logo fading in or out) is followed at once: waiting for
-                    // it to hold leaves the old colour round a picture gone dark
-                    if let (Some(a), Some(_)) = (ask, self.bar_color) {
-                        self.bar_color = Some(a);
-                    }
-                    // a change of screen waits until the picture has held for a moment (a fade, a
-                    // flash between scenes would flicker it)
-                    if let Some(w) = layout::lower_wanted(*scale, rgba) {
-                        // leaving by SELECT: another B until the lower screen is the map again
-                        if self.leaving.0 > 0 {
-                            if !w {
-                                self.leaving = (0, 0);
-                            } else if self.leaving.1 == 0 {
-                                self.leaving = (self.leaving.0 - 1, LEAVE_GAP);
-                                self.press("B");
-                            } else {
-                                self.leaving.1 -= 1;
-                            }
-                        }
-                        self.want = if w == self.want.0 { (w, self.want.1 + 1) } else { (w, 0) };
-                        if self.want.1 >= AUTO_FRAMES {
-                            self.auto_lower = w;
-                        }
-                        self.hold = next_hold(self.hold, w, self.want.1 >= AUTO_FRAMES);
-                    }
-                }
-                if let (Some((scale, rgba)), Some(g)) = (frame, &mut self.gfx) {
-                    g.upload(scale, &rgba);
-                    // the 3D scene widened, when the emulation made one for this picture
-                    match wide_pair {
-                        Some((sc, e, px)) => {
-                            g.upload_wide(sc, e, &px);
-                            self.wide_now = e;
-                        }
-                        None => self.wide_now = 0,
-                    }
-                }
-                // the picture goes dark for a skip and comes back after it
-                let target = if self.shared.skip.load(Ordering::Relaxed) { 1.0 } else { 0.0 };
-                self.skip_fade += (target - self.skip_fade).clamp(-0.07, 0.07);
-                let fade = self.skip_fade;
-                let mut action = None;
-                let mut want_shape: Option<f32> = None;
-                {
-                    let (cursor, pen_now) = (self.stylus.pos.filter(|_| !self.menu.open), self.pen_down);
-                    let App { gfx, menu, force_full, settings, layouts, touch_held, stopped_msg, shared, counter_seen, hint_seen, puzzle_hold, puzzle_side, coll_seen, coll_card, pending_capture, edo_seen, prompt, bar_color, auto_lower, hold, wide_now, paper, scroll, portrait_left, .. } = self;
-                    let live = layout::Live { vblank: shared.vblank.load(Ordering::Relaxed), counter_seen: *counter_seen, hint_seen: *hint_seen, both: *puzzle_hold > 0, both_side: *puzzle_side, collection: coll_seen.then(|| coll_card.get()), lower: *auto_lower || hold.is_some(), edo: *edo_seen, prompt: *prompt, wide: *wide_now as f32, scroll: (*paper && *auto_lower).then_some(*scroll) };
-                    if let Some(g) = gfx {
-                        let layout = layout::find(layouts, &settings.video, &live);
-                        g.bar_color = *bar_color;
-                        if let Some(p) = pending_capture.take() {
-                            g.capture = Some(p);
-                        }
-                        // the 3D view is widened to the window's shape when the upper screen is alone
-                        let base = layout::find(layouts, &settings.video, &layout::Live { wide: 0.0, ..live });
-                        // the layout the setting names, not what the game moves to for a moment (a puzzle, a card)
-                        if settings.video.follow_shape && !settings.video.fullscreen {
-                            let named = layouts.iter().find(|l| l.name == settings.video.layout).unwrap_or(&base);
-                            want_shape = Some(named.size.0 * named.fit.par.clamp(0.25, 4.0) / named.size.1);
-                        }
-                        let upper_alone = base.screens[0].is_some() && (base.screens[1].is_none() || base.name == "overlay");
-                        let want = if settings.video.wide && upper_alone {
-                            layout::wide_each_side(g.size(), settings.video.pixel_aspect, layout::wide_cap(settings.video.wide_limit, sunpetal_runtime::nds::WIDE_MAX))
-                        } else {
-                            0
-                        };
-                        shared.wide_px.store(want, Ordering::Relaxed);
-                        let names: Vec<&str> = layouts.iter().map(|l| l.name).collect();
-                        let fx = settings.effects.clone();
-                        let internal = (256 * settings.video.res as u32, 192 * settings.video.res as u32);
-                        let pad_on = settings.touch_controls_on();
-                        let (ww, wh) = g.window_size();
-                        let band = touchpad::band(ww, wh);
-                        g.reserve = if pad_on { band.h } else { 0.0 };
-                        let corner_on = cfg!(target_os = "android") && !pad_on;
-                        // the touch panel and the Android corner show the speed figures themselves; elsewhere they go over the picture
-                        let stats_on = settings.video.show_stats && !pad_on && !corner_on;
-                        // the dialogue line, drawn here in the window's resolution (the game's raster text is hidden)
-                        let vrect = layout.fit(g.size())[0];
-                        let crisp = match settings.video.dialogue_text.as_str() {
-                            "pixel" => false,
-                            "crisp" => vrect.is_some(),
-                            _ => vrect.is_some_and(|r| r.h / 192.0 >= 2.0),
-                        };
-                        shared.crisp_text.store(crisp, Ordering::Relaxed);
-                        // the line goes with the picture it was made for (empty when that picture has the game's own letters)
-                        let vline = shared.dialogue_text.lock().unwrap().clone();
-                        let vwide = *wide_now as f32;
-                        menu.short = !(settings.ui.full_menu || *force_full);
-                        if menu.open || pad_on || corner_on || stats_on || fade > 0.0 || vline.is_some() || cursor.is_some() {
-                            let held = touch_held.clone();
-                            let mut f = |ctx: &egui::Context| {
-                                if fade > 0.0 {
-                                    // first, so that the buttons stay on top of it and can cancel the skip
-                                    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("skipfade")));
-                                    p.rect_filled(ctx.content_rect(), 0.0, egui::Color32::from_black_alpha((fade * 255.0) as u8));
-                                }
-                                if let (Some(text), Some(r)) = (&vline, vrect) {
-                                    paint_dialogue(ctx, r, vwide, *portrait_left, &text.0, text.1, &settings.video.dialogue_font);
-                                }
-                                if corner_on {
-                                    let info = match stopped_msg {
-                                        Some(why) => format!("stopped: {}", why),
-                                        None if settings.video.show_stats => shared.status.lock().unwrap().clone(),
-                                        None => String::new(),
-                                    };
-                                    let fast = settings.emulation.fast_button.then(|| shared.fast.load(Ordering::Relaxed));
-                                    let skip = settings.emulation.skip_button.then(|| shared.skip.load(Ordering::Relaxed));
-                                    touchpad::paint_menu_button(ctx, ww, wh, &info, fast, skip);
-                                }
-                                if stats_on {
-                                    // one line, in the top right corner (the game's own counter is at the left)
-                                    let info = match stopped_msg {
-                                        Some(why) => format!("stopped: {}", why),
-                                        None => shared.status.lock().unwrap().lines().take(2).collect::<Vec<_>>().join("   "),
-                                    };
-                                    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("stats")));
-                                    let galley = p.layout_no_wrap(info, egui::FontId::monospace(13.0), egui::Color32::WHITE);
-                                    let at = ctx.content_rect().right_top() + egui::vec2(-8.0 - galley.size().x, 8.0);
-                                    p.rect_filled(egui::Rect::from_min_size(at, galley.size()).expand(4.0), 3.0, egui::Color32::from_black_alpha(160));
-                                    p.galley(at, galley, egui::Color32::WHITE);
-                                }
-                                if pad_on {
-                                    let info = match stopped_msg {
-                                        Some(why) => format!("stopped: {}", why),
-                                        None if settings.video.show_stats => shared.status.lock().unwrap().clone(),
-                                        None => String::new(),
-                                    };
-                                    touchpad::paint(ctx, band, &held, &info);
-                                }
-                                if let Some((x, y)) = cursor {
-                                    // the pad's stylus: a ring, filled while it touches
-                                    let ppp = ctx.pixels_per_point();
-                                    let c = egui::pos2(x / ppp, y / ppp);
-                                    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("stylus")));
-                                    if pen_now {
-                                        p.circle_filled(c, 7.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 170));
-                                    }
-                                    p.circle_stroke(c, 8.0, egui::Stroke::new(3.0, egui::Color32::BLACK));
-                                    p.circle_stroke(c, 8.0, egui::Stroke::new(1.5, egui::Color32::WHITE));
-                                }
-                                if menu.open {
-                                    action = menu.show(ctx, settings, &names, internal);
-                                }
-                            };
-                            g.draw(&layout, &fx, Some(&mut f));
-                        } else {
-                            g.draw(&layout, &fx, None);
-                        }
-                    }
-                }
-                // the window takes the picture's shape, keeping its area (once per change of shape, so a window the player drags stays)
-                match want_shape {
-                    Some(a) if (a - self.shape_last).abs() > 0.004 => {
-                        let area = self.win_size.0 as f32 * self.win_size.1 as f32;
-                        let w = (area * a).sqrt();
-                        if let Some(win) = &self.window {
-                            let _ = win.request_inner_size(winit::dpi::PhysicalSize::new(w as u32, (w / a) as u32));
-                        }
-                        self.shape_last = a;
-                    }
-                    Some(_) => {}
-                    None => self.shape_last = 0.0,
-                }
-                if action == Some(ui::Action::Quit) {
-                    self.save();
+                if !self.redraw() {
                     el.exit();
-                    return;
-                }
-                // a save to export or import: the emulation does it (paused or not); what it did comes back below
-                match &action {
-                    Some(ui::Action::ExportSave(to)) => *self.shared.save_job.lock().unwrap() = Some(emu::SaveJob::Export(to.clone())),
-                    Some(ui::Action::ImportSave(from)) => *self.shared.save_job.lock().unwrap() = Some(emu::SaveJob::Import(from.clone())),
-                    _ => {}
-                }
-                let done = self.shared.save_done.lock().unwrap().take();
-                match done {
-                    Some((false, said)) => self.menu.say(said.unwrap_or_else(|e| e)),
-                    // the file is in place: the game starts anew and reads it (the machine writes nothing more)
-                    Some((true, Ok(said))) => {
-                        eprintln!("{}", said);
-                        action = Some(ui::Action::Restart);
-                    }
-                    Some((true, Err(e))) => self.menu.say(e),
-                    None => {}
-                }
-                if action == Some(ui::Action::Restart) {
-                    self.save();
-                    self.restart = true;
-                    *self.shared.restart.lock().unwrap() = Some(restart_args(std::env::args_os().skip(1).collect(), &self.settings.video.texture_pack));
-                    el.exit();
-                    return;
-                }
-                if self.settings != self.applied {
-                    let layout_changed = self.settings.video.layout != self.applied.video.layout
-                        || self.settings.video.lower != self.applied.video.lower
-                        || self.settings.video.panel != self.applied.video.panel
-                        || self.settings.video.auto != self.applied.video.auto
-                        || self.settings.video.res != self.applied.video.res
-                        || self.settings.interface.language != self.applied.interface.language;
-                    self.apply();
-                    if layout_changed {
-                        self.set_title();
-                    }
-                    if !self.menu.open {
-                        self.save();
-                    }
-                }
-                // the machine waits while the menu is open
-                let pause = self.menu.open && self.settings.emulation.pause_in_menu;
-                self.shared.paused.store(pause, Ordering::Relaxed);
-                if let Some(w) = &self.window {
-                    w.request_redraw();
                 }
             }
             _ => {}
@@ -1195,6 +1207,30 @@ pub struct Options {
 
 /// Runs the game in a window until it closes.
 pub fn run(o: Options, el: EventLoop<()>) {
+    let (mut app, shared, _stream) = prepare(o, false);
+    el.set_control_flow(ControlFlow::Poll);
+    el.run_app(&mut app).expect("the event loop");
+    stop_machine(&shared);
+}
+
+/// The window is closed (or the script done): stop the machine (its thread saves the backup memory and exits).
+fn stop_machine(shared: &Shared) {
+    shared.quit.store(true, Ordering::Relaxed);
+    for _ in 0..100 {
+        if shared.stopped.lock().unwrap().is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let why = shared.stopped.lock().unwrap().clone();
+    if let Some(why) = why {
+        eprintln!("stopped: {}", why);
+    }
+}
+
+/// The settings read and put over by the options, the machine started, the app made (no window yet). `scripted`:
+/// no sound, no pads, the settings never saved.
+fn prepare(o: Options, scripted: bool) -> (App, Arc<Shared>, Option<cpal::Stream>) {
     let rom = o.rom;
     let mut settings = config::load();
     if let Some(r) = o.res {
@@ -1285,7 +1321,7 @@ pub fn run(o: Options, el: EventLoop<()>) {
     shared.pipeline.store(settings.emulation.pipeline, Ordering::Relaxed);
     *shared.extras.lock().unwrap() = settings.effects.extras();
     // the stream must outlive the machine's use of the ring
-    let (ring, _stream) = if o.mute {
+    let (ring, stream) = if o.mute || scripted {
         (None, None)
     } else {
         match audio::open() {
@@ -1297,8 +1333,7 @@ pub fn run(o: Options, el: EventLoop<()>) {
         }
     };
     emu::spawn(cfg, shared.clone(), ring.clone());
-    el.set_control_flow(ControlFlow::Poll);
-    let mut app = App {
+    let app = App {
         shared: shared.clone(),
         ring,
         window: None,
@@ -1337,7 +1372,7 @@ pub fn run(o: Options, el: EventLoop<()>) {
         stopped_msg: None,
         kb: 0,
         pad: 0,
-        pads: gilrs::Gilrs::new().map_err(|e| eprintln!("no pads: {}", e)).ok(),
+        pads: if scripted { None } else { gilrs::Gilrs::new().map_err(|e| eprintln!("no pads: {}", e)).ok() },
         pad_log: std::env::var_os("SUNPETAL_PAD_LOG").is_some_and(|v| v != "0"),
         rstick: (0.0, 0.0),
         stylus: pad::Stylus::default(),
@@ -1373,20 +1408,9 @@ pub fn run(o: Options, el: EventLoop<()>) {
         hold: None,
         tap: (0, 0),
         restart: false,
+        scripted,
     };
-    el.run_app(&mut app).expect("the event loop");
-    // the window is closed: stop the machine (its thread saves the backup memory and exits)
-    shared.quit.store(true, Ordering::Relaxed);
-    for _ in 0..100 {
-        if shared.stopped.lock().unwrap().is_some() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
-    let why = shared.stopped.lock().unwrap().clone();
-    if let Some(why) = why {
-        eprintln!("stopped: {}", why);
-    }
+    (app, shared, stream)
 }
 
 /// The command line of the restarted program: the same, except that what the settings now hold wins over the
@@ -1525,10 +1549,13 @@ pub fn desktop_main() {
     let mut o = Options { rom: PathBuf::new(), out: None, save: None, mute: false, res: None, menu: false, full_menu: false, dump: None, pack: None, lang: None, wide: None, renderer: None, pipeline: false };
     // the save file out to a copy, or a copy in (`--export-save FILE`, `--import-save FILE`): done with no window
     let (mut export_save, mut import_save): (Option<PathBuf>, Option<PathBuf>) = (None, None);
+    // `--script FILE|-`: no window, the commands drive the app and take its pictures (script.rs)
+    let mut script: Option<String> = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--export-save" => export_save = args.next().map(PathBuf::from),
             "--import-save" => import_save = args.next().map(PathBuf::from),
+            "--script" => script = args.next(),
             "--out" => o.out = args.next().map(PathBuf::from),
             "--save" => o.save = args.next().map(PathBuf::from),
             "--res" => o.res = args.next().and_then(|v| v.parse().ok()),
@@ -1629,7 +1656,39 @@ pub fn desktop_main() {
         }
     };
     o.rom = rom;
+    if let Some(from) = script {
+        std::process::exit(run_script(o, &from));
+    }
     run(o, EventLoop::new().expect("an event loop"));
+}
+
+/// `--script`: the save is a copy (the player's own, or `--save`'s), so the game the player may have open keeps its
+/// file; the settings are read but not written.
+fn run_script(mut o: Options, from: &str) -> i32 {
+    let source = if o.rom.as_os_str().is_empty() { o.pack.clone().unwrap_or_default() } else { o.rom.clone() };
+    let save = save_file_of(&o, &source);
+    let copy = std::env::temp_dir().join(format!("sunpetal-script-{}.sav", std::process::id()));
+    if save.is_file() {
+        if let Err(e) = std::fs::copy(&save, &copy) {
+            eprintln!("the save {}: {}", save.display(), e);
+            return 1;
+        }
+    }
+    o.save = Some(copy.clone());
+    o.mute = true;
+    let code = if from == "-" {
+        script::run(o, std::io::stdin().lock())
+    } else {
+        match std::fs::File::open(from) {
+            Ok(f) => script::run(o, std::io::BufReader::new(f)),
+            Err(e) => {
+                eprintln!("{}: {}", from, e);
+                1
+            }
+        }
+    };
+    let _ = std::fs::remove_file(&copy);
+    code
 }
 
 /// No game to play: the file dialog asks for a ROM or a data file until a good one is picked (the
