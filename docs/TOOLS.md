@@ -78,3 +78,7 @@
 - Python 3.12 + `venv`, `ndspy`, `Pillow`, `numpy` для скриптов
 - Хранилище ассетов вне хранилища Obsidian: `~/Developer/games/sunpetal` (ром и оригинальные данные в git не попадают)
 - Проверка названия: USPTO TESS, EUIPO eSearch, WIPO Global Brand Database, поиск по GitHub и сторам
+
+## Тулчейн PS2-разведки (K-087, 2026-11-02)
+
+`tools/ps2/ingest.py` (сбор снимков PCSX2 и кадров из сохранений в `artifacts/ps2-recon/`, манифест, кадры из записей, контактный лист), `p2s.py` (чтение `.p2s`: zip + zstd, нужен системный `zstd`), `vram.py` (VRAM из состояния в PNG, свизл PSMCT32 пока приблизительный), чек-лист режимов `tools/ps2/modes.md`. Каждое сохранение PCSX2 содержит готовый `Screenshot.png`, его и забираем. Записи Рабочего стола не читаем: выгружены в iCloud, чтение зависает; видео — встроенной записью PCSX2.
