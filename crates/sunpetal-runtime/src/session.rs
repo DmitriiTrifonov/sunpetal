@@ -94,17 +94,26 @@ impl Session {
     /// and `data`, a data file with the language of its translation: the files are named by the
     /// image the game reads, the overlaid one.
     pub fn open_with(rom: impl Into<PathBuf>, save: Option<PathBuf>, overlay: Option<PathBuf>, data: Option<(PathBuf, String)>) -> Result<Session, String> {
-        let rom = rom.into();
-        let mut image = std::fs::read(&rom).map_err(|e| format!("{}: {}", rom.display(), e))?;
-        let rom_path = rom.clone();
-        let mut cfg = Config::new(rom);
+        let mut cfg = Config::new(rom.into());
         cfg.overlay = overlay;
         (cfg.data, cfg.language) = data.map_or((None, None), |(d, l)| (Some(d), Some(l)));
+        cfg.save = save;
+        cfg.save_size = 65536;
+        Session::open_cfg(cfg)
+    }
+
+    /// Boots the machine as `cfg` says (its texture and 2D packs too: the app's machine, `sunpetal-app --script`
+    /// with `goto`); the ROM is the file named, or the image kept in the data file when none is.
+    pub fn open_cfg(cfg: Config) -> Result<Session, String> {
+        let rom_path = if cfg.rom.as_os_str().is_empty() { cfg.data.clone().unwrap_or_default() } else { cfg.rom.clone() };
+        let mut image = if cfg.rom.as_os_str().is_empty() {
+            sunpetal_data::dsrom::read(&rom_path)?.ok_or_else(|| format!("{} holds no ROM", rom_path.display()))?
+        } else {
+            std::fs::read(&rom_path).map_err(|e| format!("{}: {}", rom_path.display(), e))?
+        };
         let files = nds::overlay_files(&cfg, &image)?;
         crate::nitrofs::apply_overlay(&mut image, &files)?;
         let fs = NitroFs::parse(&image)?;
-        cfg.save = save;
-        cfg.save_size = 65536;
         nds::boot(cfg)?;
         nds::set_sound_keep(false);
         // the session draws only the frames a picture asks for (`shot`, autoplay): the 3D job of a

@@ -87,8 +87,14 @@
 
 `sunpetal-app ROM --script FILE|-` — приложение целиком (раскладки, один экран, чёткий текст реплик, пакет 2D, эффекты, меню) рисует в текстуру вне экрана; команды по строке, ответ — строка JSON. Настройки берутся из `config.toml` игрока, но не сохраняются; сохранение — временная копия (игра игрока не трогается). Звука и геймпада нет, `fast` включён.
 
-Команды: `size W H [PPP]`, `wait N` (кадры машины), `press BUTTON [N]`, `tap X Y [N]` (пиксели окна, через раскладку), `touch X Y [N]` (пиксели нижнего экрана DS), `swap`, `menu`, `set KEY VALUE` (путь в `config.toml`: `video.layout single`, `video.dialogue_font nunito`), `fast on|off`, `shot FILE`, `status`, `quit`. Описание — `crates/sunpetal-app/src/script.rs`.
+Команды: `size W H [PPP]`, `wait N` (кадры машины), `until dialogue|idle [N]` (до реплики, нажимая A раз в секунду, как `advance` отладчика | до свободной ходьбы), `press BUTTON [N]`, `tap X Y [N]` (пиксели окна, через раскладку), `touch X Y [N]` (пиксели нижнего экрана DS), `swap`, `menu`, `set KEY VALUE` (путь в `config.toml`: `video.layout single`, `video.dialogue_font nunito`), `fast on|off`, `shot FILE`, `status`, `quit`. Описание — `crates/sunpetal-app/src/script.rs`.
 
 Маршрут «титул → Начать игру → Данные-01 → Загрузка → Продолжить» (сохранение игрока): `tools/script/title-to-continue.txt`, ≈ 2300 кадров, потом свободная ходьба. Пример: `{ cat tools/script/title-to-continue.txt; echo "wait 400"; echo "size 1280 720"; echo "set video.layout single"; echo "shot /tmp/a.png"; } | sunpetal-app ROM --script -`.
 
-Чего нет: перехода к сцене (`--goto` есть только у `sunpetal-debug`, там нет окна), подписи кадров (`dump_shot`) по команде.
+`--goto Cnn_yy` (вместе с `--script`): машина сначала доходит до сцены через меню запросов, как `sunpetal-debug --goto` (`Session::open_cfg` на машине приложения, с его пакетами); нужно сохранение с открытыми запросами, например `--save build/full100.sav` (берётся копия). Скрипт ждёт первую картинку (`{"ready":true}`), дальше команды. Пример — реплики всеми шрифтами:
+
+    { echo "size 1280 720 2"; echo "set video.layout single"; echo "until dialogue"; echo "wait 40";
+      for f in nunito noto rubik ubuntu; do echo "set video.dialogue_font $f"; echo "shot /tmp/d_$f.png"; done; } \
+      | sunpetal-app ROM --save build/full100.sav --goto C02_01 --script -
+
+Чего нет: подписи кадров (`dump_shot`) по команде.

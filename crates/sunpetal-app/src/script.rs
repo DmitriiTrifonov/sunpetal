@@ -5,6 +5,8 @@
 //!
 //!     size W H [PPP]       the window, in pixels (PPP: egui's pixels per point, 2 on a Retina screen; default 1)
 //!     wait N               N frames of the machine (the app draws each)
+//!     until dialogue|idle [N]  frames until a dialogue line is shown (A pressed each second, as the debugger's
+//!                          `advance`) | the player has the control (at most N, 3000)
 //!     press BUTTON [N]     a DS button (A B X Y L R START SELECT UP DOWN LEFT RIGHT) held N frames (default 8)
 //!     tap X Y [N]          the stylus at window pixel X Y for N frames (through the layout, as the mouse)
 //!     touch X Y [N]        the stylus at lower-screen DS pixel X Y for N frames (no layout)
@@ -31,6 +33,17 @@ pub fn run(o: Options, input: impl BufRead) -> i32 {
     }
     shared.fast.store(true, Ordering::Relaxed);
     shared.paused.store(false, Ordering::Relaxed);
+    // the first picture: the machine has booted (and played to the `--goto` scene), its frame count is the real one
+    let since = std::time::Instant::now();
+    while shared.frame.lock().unwrap().is_none() {
+        if shared.stopped.lock().unwrap().is_some() || since.elapsed().as_secs() > 900 {
+            println!("{{\"error\":{:?}}}", shared.stopped.lock().unwrap().clone().unwrap_or_else(|| "no picture in 15 minutes".into()));
+            crate::stop_machine(&shared);
+            return 1;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    println!("{{\"ready\":true,\"vblank\":{}}}", shared.vblank.load(Ordering::Relaxed));
     let mut code = 0;
     for line in input.lines() {
         let Ok(line) = line else { break };
@@ -106,6 +119,32 @@ fn command(app: &mut App, words: &[&str]) -> Result<String, String> {
         }
         "wait" => {
             wait(app, num(words, 1, None)?)?;
+            Ok(format!("\"vblank\":{}", app.shared.vblank.load(Ordering::Relaxed)))
+        }
+        "until" => {
+            let what = *words.get(1).ok_or("until dialogue|idle [N]")?;
+            let most: u64 = num(words, 2, Some(3000))?;
+            let start = app.shared.vblank.load(Ordering::Relaxed);
+            loop {
+                let met = match what {
+                    // the box, whatever draws its text (the crisp line is only there when the window draws it)
+                    "dialogue" => app.shared.line_drawn.load(Ordering::Relaxed),
+                    "idle" => app.shared.idle.load(Ordering::Relaxed),
+                    other => return Err(format!("until {}: dialogue or idle", other)),
+                };
+                if met {
+                    break;
+                }
+                let now = app.shared.vblank.load(Ordering::Relaxed);
+                if now >= start + most {
+                    return Err(format!("no {} in {} frames", what, most));
+                }
+                // the scene waits for A between its lines (a line still being written is finished by it)
+                if what == "dialogue" && (now - start) % 60 == 59 {
+                    app.press("A");
+                }
+                wait(app, 1)?;
+            }
             Ok(format!("\"vblank\":{}", app.shared.vblank.load(Ordering::Relaxed)))
         }
         "press" => {

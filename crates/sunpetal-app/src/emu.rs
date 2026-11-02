@@ -122,6 +122,11 @@ pub struct Shared {
     pub save_job: Mutex<Option<SaveJob>>,
     /// What the emulation did with the job: whether it was an import, and the words for the player or the error.
     pub save_done: Mutex<Option<(bool, Result<String, String>)>>,
+    /// Play to this scene (`Cnn_yy`, as `sunpetal-debug --goto`) before the frames start (`--script`'s `goto`;
+    /// set before the machine is spawned).
+    pub goto: Mutex<Option<String>>,
+    /// The game has drawn a dialogue line (whoever shows its text: the game's raster or the window).
+    pub line_drawn: AtomicBool,
 }
 
 /// The menu's request for the game's save file.
@@ -173,6 +178,8 @@ impl Shared {
             status: Mutex::new(String::from("starting")),
             save_job: Mutex::new(None),
             save_done: Mutex::new(None),
+            goto: Mutex::new(None),
+            line_drawn: AtomicBool::new(false),
         })
     }
 }
@@ -201,7 +208,18 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         std::mem::forget(token);
     }
     *shared.status.lock().unwrap() = "booting".into();
-    if let Err(e) = nds::boot(cfg) {
+    let goto = shared.goto.lock().unwrap().take();
+    let booted = match goto {
+        // through the menu of requests to the scene, as the debugger does; the session is kept (dropped, it would end the machine)
+        Some(scene) => sunpetal_runtime::session::Session::open_cfg(cfg).and_then(|mut s| {
+            *shared.status.lock().unwrap() = format!("going to {}", scene);
+            let r = s.goto(&scene, None);
+            std::mem::forget(s);
+            r
+        }),
+        None => nds::boot(cfg),
+    };
+    if let Err(e) = booted {
         *shared.stopped.lock().unwrap() = Some(e);
         return;
     }
@@ -359,6 +377,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
                 middle = Some(m);
             }
             let dialogue = nds::dialogue();
+            shared.line_drawn.store(dialogue.as_ref().is_some_and(|d| d.drawn), Ordering::Relaxed);
             // the game's raster text is hidden from the moment a line is set, before its letters come; ours shows when they do.
             // The window gets the line only for a picture that was drawn with the raster hidden (a menu that pauses the game
             // changes the setting before the picture can follow)

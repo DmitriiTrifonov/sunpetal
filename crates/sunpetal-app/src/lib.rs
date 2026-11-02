@@ -1203,6 +1203,8 @@ pub struct Options {
     pub renderer: Option<String>,
     /// `--pipeline`: do not wait for the GPU's 3D frame (stage 8ж.5).
     pub pipeline: bool,
+    /// `--goto Cnn_yy` (with `--script`): the machine plays to that scene through the menu of requests first.
+    pub goto: Option<String>,
 }
 
 /// Runs the game in a window until it closes.
@@ -1332,6 +1334,7 @@ fn prepare(o: Options, scripted: bool) -> (App, Arc<Shared>, Option<cpal::Stream
             }
         }
     };
+    *shared.goto.lock().unwrap() = o.goto.clone();
     emu::spawn(cfg, shared.clone(), ring.clone());
     let app = App {
         shared: shared.clone(),
@@ -1441,7 +1444,7 @@ mod save_command_tests {
     use std::path::PathBuf;
 
     fn options() -> Options {
-        Options { rom: PathBuf::new(), out: None, save: None, mute: false, res: None, menu: false, full_menu: false, dump: None, pack: None, lang: None, wide: None, renderer: None, pipeline: false }
+        Options { rom: PathBuf::new(), out: None, save: None, mute: false, res: None, menu: false, full_menu: false, dump: None, pack: None, lang: None, wide: None, renderer: None, pipeline: false, goto: None }
     }
 
     #[test]
@@ -1546,7 +1549,7 @@ fn save_command(export: Option<&std::path::Path>, import: Option<&std::path::Pat
 pub fn desktop_main() {
     let mut args = std::env::args().skip(1);
     let mut rom: Option<PathBuf> = None;
-    let mut o = Options { rom: PathBuf::new(), out: None, save: None, mute: false, res: None, menu: false, full_menu: false, dump: None, pack: None, lang: None, wide: None, renderer: None, pipeline: false };
+    let mut o = Options { rom: PathBuf::new(), out: None, save: None, mute: false, res: None, menu: false, full_menu: false, dump: None, pack: None, lang: None, wide: None, renderer: None, pipeline: false, goto: None };
     // the save file out to a copy, or a copy in (`--export-save FILE`, `--import-save FILE`): done with no window
     let (mut export_save, mut import_save): (Option<PathBuf>, Option<PathBuf>) = (None, None);
     // `--script FILE|-`: no window, the commands drive the app and take its pictures (script.rs)
@@ -1556,6 +1559,7 @@ pub fn desktop_main() {
             "--export-save" => export_save = args.next().map(PathBuf::from),
             "--import-save" => import_save = args.next().map(PathBuf::from),
             "--script" => script = args.next(),
+            "--goto" => o.goto = args.next(),
             "--out" => o.out = args.next().map(PathBuf::from),
             "--save" => o.save = args.next().map(PathBuf::from),
             "--res" => o.res = args.next().and_then(|v| v.parse().ok()),
