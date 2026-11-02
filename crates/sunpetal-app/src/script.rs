@@ -5,11 +5,12 @@
 //!
 //!     size W H [PPP]       the window, in pixels (PPP: egui's pixels per point, 2 on a Retina screen; default 1)
 //!     wait N               N frames of the machine (the app draws each)
-//!     until dialogue|idle [N]  frames until a dialogue line is shown (A pressed each second, as the debugger's
-//!                          `advance`) | the player has the control (at most N, 3000)
+//!     until dialogue|idle [N]  frames until a dialogue line is shown | the player has the control (at most N, 3000);
+//!                          A is pressed each second meanwhile, as the debugger's `advance` (the lines go by)
 //!     press BUTTON [N]     a DS button (A B X Y L R START SELECT UP DOWN LEFT RIGHT) held N frames (default 8)
 //!     tap X Y [N]          the stylus at window pixel X Y for N frames (through the layout, as the mouse)
 //!     touch X Y [N]        the stylus at lower-screen DS pixel X Y for N frames (no layout)
+//!     pen X Y | lift       the stylus put down at lower-screen DS pixel X Y and kept there | lifted (for a shot while held)
 //!     swap | menu          the screen swap (F8) | the settings menu (F1)
 //!     set KEY VALUE        a setting by its path in config.toml (video.layout single, video.dialogue_font nunito)
 //!     fast on|off          run without waiting for the clock (on at the start)
@@ -140,7 +141,7 @@ fn command(app: &mut App, words: &[&str]) -> Result<String, String> {
                     return Err(format!("no {} in {} frames", what, most));
                 }
                 // the scene waits for A between its lines (a line still being written is finished by it)
-                if what == "dialogue" && (now - start) % 60 == 59 {
+                if (now - start) % 60 == 59 {
                     app.press("A");
                 }
                 wait(app, 1)?;
@@ -180,6 +181,16 @@ fn command(app: &mut App, words: &[&str]) -> Result<String, String> {
             app.pen_down = false;
             app.shared.input.lock().unwrap().pen = None;
             held.map(|_| format!("\"pen\":{}", on.map_or("null".to_string(), |(x, y)| format!("[{},{}]", x, y))))
+        }
+        "pen" => {
+            let p = (num::<f32>(words, 1, None)?.clamp(0.0, 255.0) as i32, num::<f32>(words, 2, None)?.clamp(0.0, 191.0) as i32);
+            app.shared.input.lock().unwrap().pen = Some(p);
+            Ok(format!("\"pen\":[{},{}]", p.0, p.1))
+        }
+        "lift" => {
+            app.pen_down = false;
+            app.shared.input.lock().unwrap().pen = None;
+            Ok(String::from("\"pen\":null"))
         }
         "swap" => {
             app.swap_screen();
