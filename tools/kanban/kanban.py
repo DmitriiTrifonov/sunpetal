@@ -13,7 +13,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 DB = pathlib.Path(__file__).with_name("tasks.json")
 OUT = ROOT / "docs" / "KANBAN.md"
 BOOST = 1.5
-WIP = 2
+WIP = 3
 COLS = ["doing", "check", "backlog", "blocked", "done"]
 TITLE = {"doing": "В работе", "check": "Проверка (ручная, нужен автор)", "backlog": "Очередь (по RICE)",
          "blocked": "Ждёт слова автора / отложено", "done": "Сделано"}

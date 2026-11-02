@@ -414,6 +414,73 @@ pub fn prompt_box(scale: usize, rgba: &[u8]) -> Option<Rect> {
     Some(Rect { x: x0, y: y0, w: x1 - x0, h: y1 - y0 })
 }
 
+/// The title menu's two keys on the lower screen ("Начать игру" and "Видео"): wide orange
+/// plaques (two or more bands) with sprite keys on them, to the right of the lower screen. `rgba`: both screens,
+/// the upper first, `scale` times 256x192 each. The "Press START" box has none, and no other
+/// screen has two such plaques.
+pub fn title_menu_in(scale: usize, rgba: &[u8]) -> bool {
+    let (w, h) = (256 * scale, 192 * scale);
+    let top = h;
+    if rgba.len() < w * h * 2 * 4 {
+        return false;
+    }
+    // thresholds on the DS's own pixels (pixel counts and areas are scaled by scale² below);
+    // they are guessed from the frames' description, to be tuned after a run of the tests
+    const MIN_PLAQUE: usize = 900; // plaque pixels (at scale 1)
+    const X0: usize = 90;          // the bbox's left edge
+    const X1: usize = 235;         // its right edge
+    const MIN_WIDTH: usize = 100;  // the bbox's width
+    const ROW_MIN: usize = 60;     // plaque pixels a row needs to count as one
+    const MIN_ROWS: usize = 12;    // such rows
+    const MIN_BANDS: usize = 2;    // separate runs of rows
+    const GAP: usize = 3;          // rows of none between two bands
+    const MIN_FILL: usize = 30;    // the plaque covers the bbox this much (%)
+
+    let s = scale.max(1);
+    // the bbox and the fill come from the dense rows only: scattered orange pixels of the
+    // background must not stretch them
+    let (mut x0, mut y0, mut x1, mut y1) = (usize::MAX, usize::MAX, 0usize, 0usize);
+    let mut plaque = 0usize;
+    let mut rows = 0usize;
+    let mut bands = 0usize;
+    let mut gap = GAP; // the first run counts as separated
+    for y in (0..h).step_by(s) {
+        let mut row = 0usize;
+        let (mut rx0, mut rx1) = (usize::MAX, 0usize);
+        for yy in y..y + s {
+            for x in X0 * s..w {
+                let o = ((top + yy) * w + x) * 4;
+                let (r, g, b) = (rgba[o] as i32, rgba[o + 1] as i32, rgba[o + 2] as i32);
+                if r >= 170 && b <= 95 && g <= 205 && r - b >= 100 && r - g >= 25 {
+                    row += 1;
+                    rx0 = rx0.min(x);
+                    rx1 = rx1.max(x);
+                }
+            }
+        }
+        if row >= ROW_MIN * s * s {
+            rows += 1;
+            plaque += row;
+            (x0, y0, x1, y1) = (x0.min(rx0), y0.min(y), x1.max(rx1), y1.max(y));
+            if gap >= GAP {
+                bands += 1;
+            }
+            gap = 0;
+        } else {
+            gap += 1;
+        }
+    }
+    if plaque < MIN_PLAQUE * s * s || rows == 0 {
+        return false;
+    }
+    let (x0, y0, x1, y1) = (x0 / s, y0 / s, x1 / s, y1 / s);
+    if x0 < X0 || x1 < X1 || x1 - x0 + 1 < MIN_WIDTH || rows < MIN_ROWS || bands < MIN_BANDS {
+        return false;
+    }
+    let area = (x1 - x0 + 1) * (y1 - y0 + 1);
+    plaque * 100 >= area * MIN_FILL * s * s
+}
+
 /// What the picture says now, for the layouts that depend on it.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Live {
@@ -939,6 +1006,65 @@ mod tests {
             }
             assert_eq!(prompt_box(scale, &menu), None);
         }
+    }
+
+    #[test]
+    fn the_title_menu_is_two_orange_keys_on_the_lower_screen() {
+        // two orange plaques 140 x 20 to the right, a dark gap between them: the title menu
+        let menu = frame(1, |x, y| {
+            let plaque = (100..240).contains(&x) && ((70..90).contains(&y) || (110..130).contains(&y));
+            if plaque { [240, 120, 30] } else { [0, 0, 0] }
+        });
+        assert!(title_menu_in(1, &menu), "two orange keys");
+        // the plain "Press START" title: a blue box alone is not the menu
+        let prompt = frame(1, |x, y| if (46..210).contains(&x) && (78..114).contains(&y) { [0, 150, 255] } else { [0, 0, 0] });
+        assert!(!title_menu_in(1, &prompt), "the Press START box");
+        // a black lower screen: no menu
+        assert!(!title_menu_in(1, &frame(1, |_, _| [0, 0, 0])), "black");
+        // two plaques too narrow are no menu
+        let narrow = frame(1, |x, y| {
+            let plaque = (100..140).contains(&x) && ((70..90).contains(&y) || (110..130).contains(&y));
+            if plaque { [240, 120, 30] } else { [0, 0, 0] }
+        });
+        assert!(!title_menu_in(1, &narrow), "too narrow");
+    }
+
+    #[test]
+    fn the_title_menu_is_found_on_the_recorded_screens() {
+        let dir = std::env::var("SUNPETAL_SCREENS").unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../../artifacts/screens").into());
+        let dir = std::path::Path::new(&dir);
+        if !dir.is_dir() {
+            eprintln!("skipped: no {}", dir.display());
+            return;
+        }
+        // (file, the title menu is on)
+        let cases = [
+            ("title_menu.png", true),
+            ("t0.png", true),
+            ("c1.png", false),
+            ("goods.png", false),
+            ("q1.png", false),
+            ("memo.png", false),
+            ("badge.png", false),
+            ("case.png", false),
+            ("m150.png", false),
+        ];
+        let mut wrong = Vec::new();
+        for (file, want) in cases {
+            let Some(rgba) = load_rgba(&dir.join(file)) else { continue };
+            // a whole frame of both screens: its scale is in the byte count
+            let scale = ((rgba.len() / (256 * 384 * 4)) as f64).sqrt().round() as usize;
+            if scale == 0 || scale * scale * 256 * 384 * 4 != rgba.len() {
+                eprintln!("{}: not a whole frame of both screens, skipped", file);
+                continue;
+            }
+            let got = title_menu_in(scale, &rgba);
+            eprintln!("{:14} -> {} (scale {})", file, got, scale);
+            if got != want {
+                wrong.push(format!("{}: got {}, want {}", file, got, want));
+            }
+        }
+        assert!(wrong.is_empty(), "{:#?}", wrong);
     }
 
     #[test]
