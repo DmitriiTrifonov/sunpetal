@@ -202,7 +202,11 @@ fn command(app: &mut App, words: &[&str]) -> Result<String, String> {
         }
         "set" => {
             let (key, value) = (words.get(1).ok_or("set KEY VALUE")?, words[2..].join(" "));
-            app.settings = set(&app.settings, key, &value)?;
+            let new = set(&app.settings, key, &value)?;
+            if new.video.pack_variants != app.settings.video.pack_variants {
+                crate::apply_variants(&new.video.pack_variants);
+            }
+            app.settings = new;
             // put into effect now, so that a shot taken next sees it
             app.redraw();
             Ok(format!("\"set\":{:?}", key))
@@ -249,7 +253,8 @@ fn set(s: &Settings, key: &str, value: &str) -> Result<Settings, String> {
     for (i, part) in parts.iter().enumerate() {
         let table = at.as_table_mut().ok_or_else(|| format!("{}: not a table", parts[..i].join(".")))?;
         if i + 1 == parts.len() {
-            if !table.contains_key(*part) {
+            // a table of free keys (the pack's variant groups) takes new ones
+            if !table.contains_key(*part) && parts[..i] != ["video", "pack_variants"] {
                 return Err(format!("no setting {}", key));
             }
             table.insert(part.to_string(), parsed.clone());
@@ -272,6 +277,8 @@ mod tests {
         let t = set(&s, "video.layout", "single").unwrap();
         assert_eq!(t.video.layout, "single");
         let t = set(&t, "video.res", "3").unwrap();
+        assert_eq!(set(&t, "video.pack_variants.digits", "rubik").unwrap().video.pack_variants["digits"], "rubik");
+        assert!(set(&t, "video.nope", "1").is_err());
         assert_eq!(t.video.res, 3);
         let t = set(&t, "video.wide", "false").unwrap();
         assert!(!t.video.wide);

@@ -55,6 +55,9 @@ pub(super) struct Gpu2d {
     held: [Vec<Option<(Placed, u8)>>; 2],
     /// [engine][y][x]: the layer on top of the pixel (0-3 BG, 4 OBJ, 5 backdrop) as the last line drawn left it.
     top: Vec<u8>,
+    /// Per pixel: the engine's own sprite that wins there (priority << 8 | OAM index), 0xFFFF for none; the pictures
+    /// laid over a sprite the pack did not replace must give way to one that stands above them.
+    topobj: Vec<u16>,
     /// This frame's replaced background layers: engine, layer, picture.
     layers_placed: Vec<(usize, usize, std::sync::Arc<super::pack2d::Img>)>,
 }
@@ -73,6 +76,13 @@ struct Placed {
     flip_h: bool,
     flip_v: bool,
     img: std::sync::Arc<super::pack2d::Img>,
+    /// The sprite's priority (0 first): a background layer of a higher one over it hides the picture as it hid the sprite.
+    prio: u8,
+    /// Its OAM entry: of two sprites of a priority the lower number is on top.
+    idx: u8,
+    /// An affine sprite: its matrix (pa, pb, pc, pd, 8.8) and its box (twice the size with the double-size flag); the
+    /// picture is drawn through the matrix as the sprite is (the dial's digit squashed as it turns, B-15).
+    aff: Option<([i32; 4], i32, i32)>,
 }
 
 /// A sprite lifted out of the object memory (`Nds::sprite_bitmap`).
@@ -91,6 +101,9 @@ pub(super) struct Sprite {
     /// OBJ mode: 0 normal, 1 semi-transparent, 2 window, 3 bitmap.
     pub mode: u8,
     pub prio: u8,
+    /// An affine sprite's matrix (pa, pb, pc, pd) and whether its box is twice its size.
+    pub mat: [i32; 4],
+    pub double: bool,
 }
 
 impl Sprite {
@@ -106,7 +119,7 @@ impl Gpu2d {
     }
 
     pub(super) fn new() -> Gpu2d {
-        Gpu2d { px: vec![0; 2 * 192 * 256 * 2], refs: [[[0; 2]; 2]; 2], on: true, mosaic: vec![[0; 256]; 8], hide_dialogue: false, band: (0, 0), text_box: [None; 2], pack: None, skip: [[false; 128]; 2], placed: Vec::new(), held: [vec![None; 128], vec![None; 128]], top: vec![5; 2 * 192 * 256], layers_placed: Vec::new() }
+        Gpu2d { px: vec![0; 2 * 192 * 256 * 2], refs: [[[0; 2]; 2]; 2], on: true, mosaic: vec![[0; 256]; 8], hide_dialogue: false, band: (0, 0), text_box: [None; 2], pack: None, skip: [[false; 128]; 2], placed: Vec::new(), held: [vec![None; 128], vec![None; 128]], top: vec![5; 2 * 192 * 256], topobj: vec![0xFFFF; 2 * 192 * 256], layers_placed: Vec::new() }
     }
 
     fn at(e: usize, y: usize) -> usize {
@@ -172,6 +185,7 @@ struct Line {
     /// The sprites' line: pixel, `PX_OPAQUE` if any.
     obj: [u32; 256],
     objprio: [u8; 256],
+    objidx: [u8; 256],
     objwin: [u8; 256],
     top: [u32; 256],
     below: [u32; 256],
@@ -405,6 +419,7 @@ impl Nds {
     fn sprites(&mut self, l: &mut Line, y: i32) {
         l.obj.fill(0);
         l.objprio.fill(4);
+        l.objidx.fill(0);
         l.objwin.fill(0);
         if l.dispcnt & 0x1000 == 0 {
             return;
@@ -531,6 +546,7 @@ impl Nds {
                 if prio < l.objprio[xu] {
                     l.obj[xu] = px;
                     l.objprio[xu] = prio;
+                    l.objidx[xu] = i as u8;
                 }
             }
         }
@@ -566,6 +582,7 @@ impl Nds {
             win: [0; 256],
             obj: [0; 256],
             objprio: [4; 256],
+            objidx: [0; 256],
             objwin: [0; 256],
             top: [0; 256],
             below: [0; 256],
@@ -772,7 +789,14 @@ impl Nds {
         if rgba.chunks_exact(4).all(|p| p[3] == 0) {
             return None;
         }
-        Some(Sprite { x: x0, y: y0, w, h, rgba, data: hd, pal: hp, flip_h: a1 & 0x1000 != 0, flip_v: a1 & 0x2000 != 0, affine, mode: ((a0 >> 10) & 3) as u8, prio: ((a2 >> 10) & 3) as u8 })
+        let mut mat = [0x100, 0, 0, 0x100];
+        if affine {
+            let g = (((a1 >> 9) & 31) * 32) as usize;
+            mat = [6, 14, 22, 30].map(|k| self.oam16(e, g + k) as i16 as i32);
+        }
+        let double = affine && a0 & 0x200 != 0;
+        // an affine sprite's bits 12-13 of attribute 1 pick its matrix, they are no flips
+        Some(Sprite { x: x0, y: y0, w, h, rgba, data: hd, pal: hp, flip_h: !affine && a1 & 0x1000 != 0, flip_v: !affine && a1 & 0x2000 != 0, affine, mode: ((a0 >> 10) & 3) as u8, prio: ((a2 >> 10) & 3) as u8, mat, double })
     }
 
     /// Every picture the 2D engines show, for a 2D pack (`docs/2D-UPSCALE.md`, 8е.2): the background
@@ -872,28 +896,29 @@ impl Nds {
                 self.gpu.held[e].fill(None);
                 continue;
             }
+            // last frame's pictures: a sprite in the same place and size with other tiles keeps one a few frames, whatever
+            // its OAM entry now (the dial's digit window swaps its two entries as the digit turns, B-15)
+            let mut prev = std::mem::replace(&mut self.gpu.held[e], vec![None; 128]);
             for i in 0..128usize {
-                let Some(sp) = self.sprite_bitmap(&l, i) else {
-                    self.gpu.held[e][i] = None;
-                    continue;
-                };
-                if sp.affine || sp.mode != 0 {
-                    self.gpu.held[e][i] = None;
+                let Some(sp) = self.sprite_bitmap(&l, i) else { continue };
+                if sp.mode != 0 {
                     continue;
                 }
                 let Some(img) = pack.get(&(sp.w, sp.h, sp.data, sp.pal)) else {
-                    // the same sprite in the same place and size, with other tiles: the picture it had stays a few frames
-                    if let Some((p, age)) = self.gpu.held[e][i].take() {
-                        if age < HOLD_FRAMES && (p.x, p.y, p.w, p.h) == (sp.x, sp.y, sp.w, sp.h) {
-                            self.gpu.skip[e][i] = true;
-                            self.gpu.placed.push(p.clone());
-                            self.gpu.held[e][i] = Some((p, age + 1));
-                        }
+                    let same = |h: &Option<(Placed, u8)>| h.as_ref().is_some_and(|(p, age)| *age < HOLD_FRAMES && (p.x, p.y, p.w, p.h) == (sp.x, sp.y, sp.w, sp.h));
+                    let j = if same(&prev[i]) { Some(i) } else { prev.iter().position(same) };
+                    if let Some((p, age)) = j.and_then(|j| prev[j].take()) {
+                        self.gpu.skip[e][i] = true;
+                        let p = Placed { idx: i as u8, ..p };
+                        self.gpu.placed.push(p.clone());
+                        self.gpu.held[e][i] = Some((p, age + 1));
                     }
                     continue;
                 };
                 self.gpu.skip[e][i] = true;
-                let p = Placed { e, x: sp.x, y: sp.y, w: sp.w, h: sp.h, flip_h: sp.flip_h, flip_v: sp.flip_v, img };
+                let k = if sp.double { 2 } else { 1 };
+                let aff = sp.affine.then(|| (sp.mat, sp.w * k, sp.h * k));
+                let p = Placed { e, x: sp.x, y: sp.y, w: sp.w, h: sp.h, flip_h: sp.flip_h, flip_v: sp.flip_v, img, prio: sp.prio, idx: i as u8, aff };
                 self.gpu.held[e][i] = Some((p.clone(), 0));
                 self.gpu.placed.push(p);
             }
@@ -912,10 +937,17 @@ impl Nds {
             let (m, f) = fade[e];
             let mut o = [c[0] as u32, c[1] as u32, c[2] as u32];
             for v in o.iter_mut() {
-                *v = match m {
-                    1 => *v + ((255 - *v) * f >> 4),
-                    2 => *v - ((*v * f + 7) >> 4),
-                    _ => *v,
+                // a DS colour (a 6-bit value widened): faded in 6 bits as the engine does, the same byte; else in 8
+                let c = *v >> 2;
+                *v = if m != 0 && *v == (c << 2 | c >> 4) {
+                    let c = if m == 1 { c + ((63 - c) * f >> 4) } else if m == 2 { c - ((c * f + 7) >> 4) } else { c };
+                    c << 2 | c >> 4
+                } else {
+                    match m {
+                        1 => *v + ((255 - *v) * f >> 4),
+                        2 => *v - ((*v * f + 7) >> 4),
+                        _ => *v,
+                    }
                 };
             }
             o
@@ -950,22 +982,62 @@ impl Nds {
                 }
             }
         }
-        for p in &self.gpu.placed {
+        // each engine's background priorities: a layer over a sprite (a lower number) hides its picture where it is on top
+        let bgprio = [0usize, 1].map(|e| {
+            let io = if e == 1 { 0x0400_1000 } else { 0x0400_0000 };
+            [0u32, 1, 2, 3].map(|bg| (self.g16(io + 8 + 2 * bg) & 3) as u8)
+        });
+        // the engine's order: the first OAM entry of the lowest priority number on top, so those are laid last
+        let mut order: Vec<usize> = (0..self.gpu.placed.len()).collect();
+        order.sort_by_key(|&j| (std::cmp::Reverse(self.gpu.placed[j].prio), std::cmp::Reverse(j)));
+        for p in order.iter().map(|&j| &self.gpu.placed[j]) {
             let top = if (p.e == 0) == a_top { 0 } else { h3 };
-            let (pw, ph) = ((p.w as usize) * s, (p.h as usize) * s);
+            let (bw, bh) = p.aff.map_or((p.w, p.h), |(_, bw, bh)| (bw, bh));
+            let (pw, ph) = ((bw as usize) * s, (bh as usize) * s);
             for dy in 0..ph {
                 let sy = (p.y * s as i32 + dy as i32) & (256 * s as i32 - 1);
                 if sy as usize >= h3 {
                     continue;
                 }
+                let mask = &self.gpu.top[(p.e * 192 + sy as usize / s) * 256..][..256];
                 for dx in 0..pw {
                     let sx = p.x * s as i32 + dx as i32;
                     if sx < 0 || sx as usize >= w {
                         continue;
                     }
-                    let (fx, fy) = ((dx as f32 + 0.5) / pw as f32, (dy as f32 + 0.5) / ph as f32);
-                    let (fx, fy) = (if p.flip_h { 1.0 - fx } else { fx }, if p.flip_v { 1.0 - fy } else { fy });
-                    let c = p.img.sample(fx, fy);
+                    let t = mask[sx as usize / s];
+                    if t < 4 && bgprio[p.e][t as usize] < p.prio {
+                        continue;
+                    }
+                    // a sprite of the engine's own (not replaced) that stands above this one hides it
+                    if self.gpu.topobj[(p.e * 192 + sy as usize / s) * 256 + sx as usize / s] < (p.prio as u16) << 8 | p.idx as u16 {
+                        continue;
+                    }
+                    let (fx, fy) = match p.aff {
+                        // the box's point through the matrix to the sprite's own, as the engine maps it
+                        Some((m, bw, bh)) => {
+                            // in DS pixels, whole numbers at the DS pixels' own points (the engine's `sx - bw / 2`)
+                            let (u, v) = ((dx as f32 + 0.5) / s as f32 - 0.5, (dy as f32 + 0.5) / s as f32 - 0.5);
+                            let (cx, cy) = (u - (bw / 2) as f32, v - (bh / 2) as f32);
+                            let tx = (m[0] as f32 * cx + m[1] as f32 * cy) / 256.0 + (p.w / 2) as f32;
+                            let ty = (m[2] as f32 * cx + m[3] as f32 * cy) / 256.0 + (p.h / 2) as f32;
+                            if tx < 0.0 || ty < 0.0 || tx >= p.w as f32 || ty >= p.h as f32 {
+                                continue;
+                            }
+                            // a picture of the sprite's own size: the engine's texel (it drops the fraction), else smooth
+                            if p.img.w == p.w as usize && p.img.h == p.h as usize {
+                                (-1.0 - tx.floor(), ty.floor())
+                            } else {
+                                ((tx + 0.5) / p.w as f32, (ty + 0.5) / p.h as f32)
+                            }
+                        }
+                        None => {
+                            let (fx, fy) = ((dx as f32 + 0.5) / pw as f32, (dy as f32 + 0.5) / ph as f32);
+                            (if p.flip_h { 1.0 - fx } else { fx }, if p.flip_v { 1.0 - fy } else { fy })
+                        }
+                    };
+                    // (a negative fx: the texel -1 - fx, fy itself, no sampling)
+                    let c = if fx < 0.0 { p.img.texel((-1.0 - fx) as usize, fy as usize) } else { p.img.sample(fx, fy) };
                     if c[3] == 0 {
                         continue;
                     }
@@ -1031,6 +1103,9 @@ impl Nds {
         let e = l.e;
         let d = l.dispcnt;
         self.sprites(l, y);
+        for x in 0..256 {
+            self.gpu.topobj[(e * 192 + y as usize) * 256 + x] = if l.objprio[x] < 4 && l.obj[x] & PX_OPAQUE != 0 { (l.objprio[x] as u16) << 8 | l.objidx[x] as u16 } else { 0xFFFF };
+        }
         self.windows(l, y);
         let backdrop = c666(self.pal16(e, 0));
         l.top.fill(backdrop);

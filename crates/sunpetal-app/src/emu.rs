@@ -127,6 +127,8 @@ pub struct Shared {
     pub goto: Mutex<Option<String>>,
     /// The game has drawn a dialogue line (whoever shows its text: the game's raster or the window).
     pub line_drawn: AtomicBool,
+    /// The 2D pack's groups of variant pictures and their variants (set by the emulation once the pack is in, for the menu).
+    pub pack_groups: Mutex<std::collections::BTreeMap<String, Vec<String>>>,
 }
 
 /// The menu's request for the game's save file.
@@ -180,6 +182,7 @@ impl Shared {
             save_done: Mutex::new(None),
             goto: Mutex::new(None),
             line_drawn: AtomicBool::new(false),
+            pack_groups: Mutex::new(Default::default()),
         })
     }
 }
@@ -233,6 +236,10 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     // the frames right after it, to artifacts/shots/touch_N: what a press shows for a moment (the knob pressed) gets its keys
     let touch_dump = std::env::var_os("SUNPETAL_DUMP_ON_TOUCH").is_some_and(|v| v != "0");
     let (mut pen_was, mut touch_frames) = (false, 0u32);
+    // SUNPETAL_DUMP_2D_NEW=1: every frame drawn, the 2D pictures not seen before go to artifacts/shots/new_2d (with their
+    // keys in index.csv): what shows only for a frame or two (the dial's digit turning) is caught whatever the input
+    let mut groups_told = false;
+    let dump_new = std::env::var_os("SUNPETAL_DUMP_2D_NEW").is_some_and(|v| v != "0");
     let mut last_placed = usize::MAX;
     let (mut dry, mut partial) = (0u32, 0u32);
     // the side of the dialogue portrait and the panel's middle, last seen (the window draws the text with them)
@@ -312,6 +319,11 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         if !nds::run_frame() {
             break;
         }
+        if !groups_told {
+            // the pack is in by the first frame: the menu's choices of variant pictures
+            *shared.pack_groups.lock().unwrap() = nds::pack_2d_groups();
+            groups_told = true;
+        }
         if pack_log {
             let placed = nds::pack_2d_placed();
             // B-16: a picture of the frames with nothing placed (5th, 20th, 35th) and of those with only a few (2nd), with the 2D dump
@@ -347,6 +359,12 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             let _ = nds::screenshot(&std::path::PathBuf::from(format!("{}.png", stem.display())));
             let n = nds::dump_2d(&std::path::PathBuf::from(format!("{}_2d", stem.display())));
             eprintln!("touch dump: {} ({} 2D images)", stem.display(), n);
+        }
+        if dump_new && draw {
+            let n = nds::dump_2d(std::path::Path::new("artifacts/shots/new_2d"));
+            if n > 0 {
+                eprintln!("new 2D: vblank {}, {} pictures", nds::vblanks(), n);
+            }
         }
         if shared.dump.swap(false, Ordering::Relaxed) {
             let stem = std::path::PathBuf::from(format!("artifacts/shots/v{}", nds::vblanks()));

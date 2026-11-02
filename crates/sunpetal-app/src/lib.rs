@@ -388,6 +388,9 @@ impl App {
         if s.effects.extras() != a.effects.extras() {
             *self.shared.extras.lock().unwrap() = s.effects.extras();
         }
+        if s.video.pack_variants != a.video.pack_variants {
+            apply_variants(&s.video.pack_variants);
+        }
         if let Some(g) = &mut self.gfx {
             g.linear = s.video.linear;
             g.background = s.video.background == "glow";
@@ -867,6 +870,7 @@ impl App {
                             p.circle_stroke(c, 8.0, egui::Stroke::new(1.5, egui::Color32::WHITE));
                         }
                         if menu.open {
+                            menu.pack_groups = shared.pack_groups.lock().unwrap().clone();
                             action = menu.show(ctx, settings, &names, internal);
                         }
                     };
@@ -1332,6 +1336,7 @@ fn prepare(o: Options, scripted: bool) -> (App, Arc<Shared>, Option<cpal::Stream
     shared.renderer.store((config::parse_renderer(&settings.video.renderer) == Some(sunpetal_runtime::nds::Renderer::Gpu)) as u8, Ordering::Relaxed);
     shared.pipeline.store(settings.emulation.pipeline, Ordering::Relaxed);
     *shared.extras.lock().unwrap() = settings.effects.extras();
+    apply_variants(&settings.video.pack_variants);
     // the stream must outlive the machine's use of the ring
     let (ring, stream) = if o.mute || scripted {
         (None, None)
@@ -1811,5 +1816,12 @@ mod hold_tests {
         }
         assert_eq!(h, None);
         assert_eq!(next_hold(None, true, true), None);
+    }
+}
+
+/// The 2D pack's variant pictures chosen in the settings, for the runtime (its choice is the process's, any thread).
+pub(crate) fn apply_variants(v: &std::collections::BTreeMap<String, String>) {
+    for (group, variant) in v {
+        sunpetal_runtime::nds::set_pack_2d_variant(group, variant);
     }
 }

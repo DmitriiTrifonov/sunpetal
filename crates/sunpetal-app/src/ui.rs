@@ -37,6 +37,8 @@ pub struct Menu {
     main_ask: bool,
     /// The focus ring (for the pad and the keyboard) was put into egui's style.
     focus_style: bool,
+    /// The 2D pack's groups of variant pictures and their variants (set by the window from the emulation).
+    pub pack_groups: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 /// What the short menu holds, in order; everything else (effects, keys, profiles, debug...) is the full menu's.
@@ -53,7 +55,7 @@ pub const SHORT: [Block; 5] = [Block::Sound, Block::Screen, Block::Graphics, Blo
 
 impl Menu {
     pub fn new() -> Menu {
-        Menu { open: false, rebinding: None, profile_name: String::new(), profiles: config::profiles(), message: String::new(), restart_ask: false, import_ask: false, font_set: None, short: false, main_ask: false, focus_style: false }
+        Menu { open: false, rebinding: None, profile_name: String::new(), profiles: config::profiles(), message: String::new(), restart_ask: false, import_ask: false, font_set: None, short: false, main_ask: false, focus_style: false, pack_groups: Default::default() }
     }
 
     /// A line under the settings (what a save export or import did).
@@ -94,6 +96,27 @@ impl Menu {
                 self.import_ask = !ask;
             }
         });
+    }
+
+    /// A choice per group of the 2D pack's variant pictures (the dial's digits: which font), and the game's own art.
+    fn variant_rows(&mut self, ui: &mut egui::Ui, s: &mut Settings, tx: &dyn Fn(&'static str, &'static str) -> String) {
+        for (group, names) in &self.pack_groups {
+            let label = match group.as_str() {
+                "digits" => tx("Device digits", "Цифры устройства"),
+                g => g.to_string(),
+            };
+            let shown = |v: &str| if v == "original" { tx("original (pixel)", "оригинал (пиксельные)") } else { variant_label(v) };
+            let now = s.video.pack_variants.get(group).cloned().unwrap_or_else(|| names.first().cloned().unwrap_or_default());
+            let mut pick = now.clone();
+            egui::ComboBox::from_label(label).selected_text(shown(&now)).show_ui(ui, |ui| {
+                for v in names.iter().map(String::as_str).chain(["original"]) {
+                    ui.selectable_value(&mut pick, v.to_string(), shown(v));
+                }
+            });
+            if pick != now {
+                s.video.pack_variants.insert(group.clone(), pick);
+            }
+        }
     }
 
     #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -145,6 +168,7 @@ impl Menu {
                         ui.selectable_value(&mut s.video.dialogue_font, "ubuntu".to_string(), "Ubuntu");
                     });
                     ui.checkbox(&mut s.video.linear, tx("Smooth when stretched (linear filter)", "Сглаживание при растяжении (линейный фильтр)"));
+                    self.variant_rows(ui, s, tx);
                 }
                 Block::Saves => {
                     ui.heading(tx("Saves", "Сохранения"));
@@ -305,6 +329,7 @@ impl Menu {
                     ui.selectable_value(&mut s.video.dialogue_font, "rubik".to_string(), "Rubik");
                     ui.selectable_value(&mut s.video.dialogue_font, "ubuntu".to_string(), "Ubuntu");
                 });
+                self.variant_rows(ui, s, &tx);
                 ui.checkbox(&mut s.video.follow_shape, tx("Window follows the picture's shape", "Окно по форме картинки"));
                 ui.checkbox(&mut s.video.logos_in_turn, tx("Logos in turn when one screen is shown", "Логотипы по очереди, когда виден один экран"));
                 if matches!(s.video.layout.as_str(), "single" | "overlay") && s.video.auto {
@@ -585,6 +610,17 @@ impl Menu {
             self.open = false;
         }
         action
+    }
+}
+
+/// A variant's name as the menu shows it: the font names written out, others as they are.
+fn variant_label(v: &str) -> String {
+    match v {
+        "rubik" => "Rubik Black".into(),
+        "nunito" => "Nunito Black".into(),
+        "philosopher" => "Philosopher".into(),
+        "fira" => "Fira Sans".into(),
+        _ => v.to_string(),
     }
 }
 

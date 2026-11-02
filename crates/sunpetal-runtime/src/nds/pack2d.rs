@@ -3,7 +3,11 @@
 //! serves either screen). A sprite whose key is in the pack is not drawn by the 2D engine; its
 //! picture, of any size (usually the original's times a whole number), is laid over the screen
 //! at the picture's resolution (`Nds::overlay_pack`). Without a pack nothing changes.
-use std::collections::HashMap;
+//!
+//! A picture may be one of a group's variants: `obj0_16x32_{data}_{pal}@digits.rubik.png` is the variant `rubik`
+//! of the group `digits`. The variant chosen for the group (`set_variant`) is drawn; `original` draws the game's
+//! own sprite; with none chosen, the picture without a variant, else the group's first variant by name.
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
@@ -40,9 +44,31 @@ impl Entry {
     }
 }
 
+/// The variant chosen for each group (`set_variant`), for every pack.
+static CHOSEN: std::sync::RwLock<BTreeMap<String, String>> = std::sync::RwLock::new(BTreeMap::new());
+
+/// The variant drawn for `group` from now on (`original`: the game's own sprites).
+pub fn set_variant(group: &str, variant: &str) {
+    CHOSEN.write().unwrap().insert(group.to_owned(), variant.to_owned());
+}
+
+/// The variant chosen for `group`, if one was.
+pub fn chosen_variant(group: &str) -> Option<String> {
+    CHOSEN.read().unwrap().get(group).cloned()
+}
+
+/// A variant of a sprite's picture: its group, its name.
+struct Variant {
+    group: String,
+    name: String,
+    entry: Entry,
+}
+
 #[derive(Default)]
 pub(super) struct Pack2d {
     entries: HashMap<Key, Entry>,
+    /// Pictures that are variants of a group, by key, sorted by variant name.
+    variants: HashMap<Key, Vec<Variant>>,
     /// Background layers, by the hash of their pixels.
     layers: HashMap<u64, Entry>,
 }
@@ -55,6 +81,17 @@ pub(super) fn parse_layer_name(name: &str) -> Option<u64> {
         return None;
     }
     u64::from_str_radix(h, 16).ok()
+}
+
+/// `obj0_32x16_{16 hex}_{16 hex}@group.variant.png` -> the key, the group and the variant.
+pub(super) fn parse_variant_name(name: &str) -> Option<(Key, String, String)> {
+    let stem = name.strip_suffix(".png")?;
+    let (base, v) = stem.split_once('@')?;
+    let (group, variant) = v.split_once('.')?;
+    if group.is_empty() || variant.is_empty() || variant.contains('.') {
+        return None;
+    }
+    Some((parse_name(&format!("{}.png", base))?, group.to_owned(), variant.to_owned()))
 }
 
 /// `obj0_32x16_{16 hex}_{16 hex}.png` -> its key.
@@ -73,39 +110,52 @@ pub(super) fn parse_name(name: &str) -> Option<Key> {
 impl Pack2d {
     /// A folder of PNGs, or a data file with a 2D part (`sunpetal-pack-2d`).
     pub fn load(dir: &Path) -> Result<Pack2d, String> {
-        let mut entries = HashMap::new();
-        let mut layers = HashMap::new();
+        let mut p = Pack2d::default();
         if dir.is_file() {
             let c = sunpetal_data::container::Container::read_only(dir, |t| t == sunpetal_data::pack2d::TAG)?;
             for s in c.all(sunpetal_data::pack2d::TAG) {
                 for (name, png) in sunpetal_data::pack2d::unpack(&s.data)? {
-                    if let Some(k) = parse_name(&name) {
-                        entries.insert(k, Entry { source: Source::Bytes(png), image: OnceLock::new() });
-                    } else if let Some(h) = parse_layer_name(&name) {
-                        layers.insert(h, Entry { source: Source::Bytes(png), image: OnceLock::new() });
-                    }
+                    p.add(&name, Source::Bytes(png));
                 }
             }
-            return Ok(Pack2d { entries, layers });
-        }
-        let rd = std::fs::read_dir(dir).map_err(|e| format!("2D pack {}: {}", dir.display(), e))?;
-        for f in rd.flatten() {
-            let name = f.file_name().to_string_lossy().into_owned();
-            if let Some(k) = parse_name(&name) {
-                entries.insert(k, Entry { source: Source::Path(f.path()), image: OnceLock::new() });
-            } else if let Some(h) = parse_layer_name(&name) {
-                layers.insert(h, Entry { source: Source::Path(f.path()), image: OnceLock::new() });
+        } else {
+            let rd = std::fs::read_dir(dir).map_err(|e| format!("2D pack {}: {}", dir.display(), e))?;
+            for f in rd.flatten() {
+                p.add(&f.file_name().to_string_lossy(), Source::Path(f.path()));
             }
         }
-        Ok(Pack2d { entries, layers })
+        for v in p.variants.values_mut() {
+            v.sort_by(|a, b| (&a.group, &a.name).cmp(&(&b.group, &b.name)));
+        }
+        Ok(p)
+    }
+
+    fn add(&mut self, name: &str, source: Source) {
+        let entry = Entry { source, image: OnceLock::new() };
+        if let Some((k, group, name)) = parse_variant_name(name) {
+            self.variants.entry(k).or_default().push(Variant { group, name, entry });
+        } else if let Some(k) = parse_name(name) {
+            self.entries.insert(k, entry);
+        } else if let Some(h) = parse_layer_name(name) {
+            self.layers.insert(h, entry);
+        }
+    }
+
+    /// The groups of variants and the variants of each.
+    pub fn groups(&self) -> BTreeMap<String, BTreeSet<String>> {
+        let mut g: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for v in self.variants.values().flatten() {
+            g.entry(v.group.clone()).or_default().insert(v.name.clone());
+        }
+        g
     }
 
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty() && self.layers.is_empty()
+        self.entries.is_empty() && self.layers.is_empty() && self.variants.is_empty()
     }
 
     pub fn len(&self) -> usize {
-        self.entries.len() + self.layers.len()
+        self.entries.len() + self.layers.len() + self.variants.values().map(Vec::len).sum::<usize>()
     }
 
     pub fn has_layers(&self) -> bool {
@@ -119,6 +169,22 @@ impl Pack2d {
 
     /// The picture of `key`, decoded the first time it is asked for; `None` if there is none or it does not read.
     pub fn get(&self, key: &Key) -> Option<Arc<Img>> {
+        if let Some(vs) = self.variants.get(key) {
+            let chosen = chosen_variant(&vs[0].group);
+            match chosen.as_deref() {
+                Some("original") => return None,
+                Some(c) => {
+                    if let Some(v) = vs.iter().find(|v| v.name == c) {
+                        return v.entry.picture();
+                    }
+                }
+                None => {}
+            }
+            return match self.entries.get(key) {
+                Some(e) => e.picture(),
+                None => vs[0].entry.picture(),
+            };
+        }
         self.entries.get(key)?.picture()
     }
 }
@@ -161,6 +227,12 @@ impl Img {
         v
     }
 
+    /// The pixel at (`x`, `y`), (r, g, b, a) bytes.
+    pub fn texel(&self, x: usize, y: usize) -> [u8; 4] {
+        let o = (y.min(self.h - 1) * self.w + x.min(self.w - 1)) * 4;
+        [self.rgba[o], self.rgba[o + 1], self.rgba[o + 2], self.rgba[o + 3]]
+    }
+
     /// The picture at (`fx`, `fy`) in 0..1 across and down, bilinear, alpha premultiplied while it
     /// is mixed; (r, g, b, a) bytes.
     pub fn sample(&self, fx: f32, fy: f32) -> [u8; 4] {
@@ -200,6 +272,42 @@ mod tests {
         assert_eq!(parse_layer_name("obj0_8x8_00000000000000ab.png"), None);
         assert_eq!(parse_name("obj0_32x16_ab_cd_ef.png"), None);
         assert_eq!(parse_name("obj0_32x16_ab_cd.jpg"), None);
+    }
+
+    fn png(rgba: [u8; 4]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut enc = png::Encoder::new(&mut out, 1, 1);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.write_header().unwrap().write_image_data(&rgba).unwrap();
+        out
+    }
+
+    #[test]
+    fn a_group_draws_the_variant_chosen_for_it() {
+        assert_eq!(parse_variant_name("obj0_8x8_00000000000000ab_00000000000000cd@dig.rubik.png"), Some(((8, 8, 0xab, 0xcd), "dig".into(), "rubik".into())));
+        assert_eq!(parse_variant_name("obj0_8x8_00000000000000ab_00000000000000cd.png"), None);
+        assert_eq!(parse_variant_name("obj0_8x8_00000000000000ab_00000000000000cd@dig.png"), None);
+        let base = "obj0_8x8_00000000000000ab_00000000000000cd";
+        let mut p = Pack2d::default();
+        // a test-only group, so that the global choice does not touch other tests
+        p.add(&format!("{}@tgroup.b.png", base), Source::Bytes(png([0, 0, 255, 255])));
+        p.add(&format!("{}@tgroup.a.png", base), Source::Bytes(png([255, 0, 0, 255])));
+        for v in p.variants.values_mut() {
+            v.sort_by(|a, b| (&a.group, &a.name).cmp(&(&b.group, &b.name)));
+        }
+        let key = (8, 8, 0xab, 0xcd);
+        let red = |p: &Pack2d| p.get(&key).map(|i| i.rgba[0]);
+        assert_eq!(p.groups()["tgroup"].iter().map(String::as_str).collect::<Vec<_>>(), ["a", "b"]);
+        assert_eq!(red(&p), Some(255), "none chosen: the first variant by name");
+        set_variant("tgroup", "b");
+        assert_eq!(red(&p), Some(0));
+        set_variant("tgroup", "original");
+        assert!(p.get(&key).is_none(), "original: the game's own sprite");
+        set_variant("tgroup", "gone");
+        assert_eq!(red(&p), Some(255), "an unknown variant: as with none chosen");
+        p.add(&format!("{}.png", base), Source::Bytes(png([7, 7, 7, 255])));
+        assert_eq!(red(&p), Some(7), "the picture without a variant is the default");
     }
 
     #[test]

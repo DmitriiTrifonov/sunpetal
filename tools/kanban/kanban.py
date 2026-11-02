@@ -42,6 +42,12 @@ def eff(t, by, seen=()):
     return v
 
 
+def waiting(t, by):
+    """Пометка «(после …)»: только незакрытые предшественницы."""
+    a = [x for x in t.get("after", []) if not by.get(x) or by[x]["col"] != "done"]
+    return " (после " + ",".join(a) + ")" if a else ""
+
+
 def render():
     d = load()
     ts = d["tasks"]
@@ -69,7 +75,7 @@ def render():
         if col in ("backlog", "blocked"):
             L += ["| # | ID | Задача | P0 | ★ | R | I | C | E | RICE | Примечание |", "|--:|---|---|:-:|:-:|--:|--:|--:|--:|--:|---|"]
             for n, t in enumerate(items, 1):
-                L.append(f"| {n} | {t['id']} | {t['t']} | {'**P0**' if t.get('p0') else ''} | {'★' if t.get('theme') else ''} | {t['r']} | {t['i']} | {t['c']} | {t['e']} | {score(t):.2f}{' (после '+','.join(t['after'])+')' if t.get('after') else ''} | {t.get('note','')} |")
+                L.append(f"| {n} | {t['id']} | {t['t']} | {'**P0**' if t.get('p0') else ''} | {'★' if t.get('theme') else ''} | {t['r']} | {t['i']} | {t['c']} | {t['e']} | {score(t):.2f}{waiting(t, by)} | {t.get('note','')} |")
         else:
             for t in items:
                 L.append(f"- **{t['id']}** {t['t']}" + (f" — {t['note']}" if t.get("note") else ""))

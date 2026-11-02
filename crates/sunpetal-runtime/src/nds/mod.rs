@@ -1093,6 +1093,16 @@ pub fn set_pack_2d(path: Option<&std::path::Path>) -> Result<usize, String> {
     Ok(n)
 }
 
+/// The 2D pack's groups of variant pictures and the variants of each (`pack2d`: `…@group.variant.png`).
+pub fn pack_2d_groups() -> std::collections::BTreeMap<String, Vec<String>> {
+    nds(|d| d.gpu.pack.as_ref().map(|p| p.groups().into_iter().map(|(g, v)| (g, v.into_iter().collect())).collect()).unwrap_or_default())
+}
+
+/// The variant of a 2D pack's group drawn from the next frame on (`original`: the game's own sprites).
+pub fn set_pack_2d_variant(group: &str, variant: &str) {
+    pack2d::set_variant(group, variant);
+}
+
 /// How many sprites of the last frame drawn the 2D pack replaced.
 pub fn pack_2d_placed() -> usize {
     nds(|d| d.gpu.placed_count())
