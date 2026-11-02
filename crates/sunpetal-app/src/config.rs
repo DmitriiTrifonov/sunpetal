@@ -47,7 +47,7 @@ pub struct Video {
     /// The dialogue lines: `crisp` (the app draws them in the window's resolution), `pixel` (the game's own raster text)
     /// or `auto` (crisp from 2 window pixels to a DS pixel).
     pub dialogue_text: String,
-    /// The font of the crisp dialogue text: `noto`, `rubik` or `ubuntu` (`fonts::DIALOGUE_FONTS`).
+    /// The font of the crisp dialogue text: `nunito` (default), `noto`, `rubik` or `ubuntu` (`fonts::DIALOGUE_FONTS`).
     pub dialogue_font: String,
     /// The window takes the shape of the chosen layout's picture when the layout changes (no bars at the sides).
     pub follow_shape: bool,
@@ -86,7 +86,7 @@ pub fn parse_renderer(name: &str) -> Option<nds::Renderer> {
 
 impl Default for Video {
     fn default() -> Video {
-        Video { res: 2, linear: true, layout: "stacked".into(), lower: false, panel: false, counter: true, auto: true, wide: true, wide_limit: 0.0, bars_match: true, fit: "fit".into(), pixel_aspect: 1.0, logos_in_turn: true, puzzle: "side".into(), dialogue_text: "auto".into(), dialogue_font: "noto".into(), follow_shape: false, fullscreen: false, background: "edge".into(), show_stats: false, texture_pack: String::new(), pack_2d: String::new(), renderer: default_renderer().into(), window: [512, 768] }
+        Video { res: 2, linear: true, layout: "stacked".into(), lower: false, panel: false, counter: true, auto: true, wide: true, wide_limit: 0.0, bars_match: true, fit: "fit".into(), pixel_aspect: 1.0, logos_in_turn: true, puzzle: "side".into(), dialogue_text: "auto".into(), dialogue_font: "nunito".into(), follow_shape: false, fullscreen: false, background: "edge".into(), show_stats: false, texture_pack: String::new(), pack_2d: String::new(), renderer: default_renderer().into(), window: [512, 768] }
     }
 }
 
@@ -313,7 +313,7 @@ impl Settings {
             self.interface.language = "auto".into();
         }
         if !crate::fonts::DIALOGUE_FONTS.contains(&self.video.dialogue_font.as_str()) {
-            self.video.dialogue_font = "noto".into();
+            self.video.dialogue_font = "nunito".into();
         }
         if !matches!(self.video.dialogue_text.as_str(), "auto" | "pixel" | "crisp") {
             self.video.dialogue_text = "auto".into();

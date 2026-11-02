@@ -136,8 +136,10 @@ impl Menu {
                     egui::ComboBox::from_label(tx("Dialogue font", "Шрифт реплик")).selected_text(match s.video.dialogue_font.as_str() {
                         "rubik" => "Rubik",
                         "ubuntu" => "Ubuntu",
-                        _ => "Noto Sans",
+                        "noto" => "Noto Sans",
+                        _ => "Nunito",
                     }).show_ui(ui, |ui| {
+                        ui.selectable_value(&mut s.video.dialogue_font, "nunito".to_string(), "Nunito");
                         ui.selectable_value(&mut s.video.dialogue_font, "noto".to_string(), "Noto Sans");
                         ui.selectable_value(&mut s.video.dialogue_font, "rubik".to_string(), "Rubik");
                         ui.selectable_value(&mut s.video.dialogue_font, "ubuntu".to_string(), "Ubuntu");
@@ -295,8 +297,10 @@ impl Menu {
                 egui::ComboBox::from_label(tx("Dialogue font", "Шрифт реплик")).selected_text(match s.video.dialogue_font.as_str() {
                     "rubik" => "Rubik",
                     "ubuntu" => "Ubuntu",
-                    _ => "Noto Sans",
+                    "noto" => "Noto Sans",
+                    _ => "Nunito",
                 }).show_ui(ui, |ui| {
+                    ui.selectable_value(&mut s.video.dialogue_font, "nunito".to_string(), "Nunito");
                     ui.selectable_value(&mut s.video.dialogue_font, "noto".to_string(), "Noto Sans");
                     ui.selectable_value(&mut s.video.dialogue_font, "rubik".to_string(), "Rubik");
                     ui.selectable_value(&mut s.video.dialogue_font, "ubuntu".to_string(), "Ubuntu");

@@ -30,30 +30,33 @@ fn read(p: &Path) -> Option<Vec<u8>> {
 
 const NOTO_SANS: &[u8] = include_bytes!("../fonts/NotoSans.ttf");
 const RUBIK: &[u8] = include_bytes!("../fonts/Rubik.ttf");
+const NUNITO: &[u8] = include_bytes!("../fonts/Nunito.ttf");
 
 /// The fonts of the dialogue text (SIL OFL 1.1, the licences are beside the files in `fonts/`): the name in
 /// `video.dialogue_font` and the family that draws it. `ubuntu` is the menu's bundled font.
-pub const DIALOGUE_FONTS: [&str; 3] = ["noto", "rubik", "ubuntu"];
+pub const DIALOGUE_FONTS: [&str; 4] = ["nunito", "noto", "rubik", "ubuntu"];
 
-/// The family for a `video.dialogue_font` name; anything unknown is the first one.
+/// The family for a `video.dialogue_font` name; anything unknown is the default (Nunito).
 pub fn dialogue_family(name: &str) -> egui::FontFamily {
     match name {
         "ubuntu" => egui::FontFamily::Proportional,
         "rubik" => egui::FontFamily::Name("dialogue-rubik".into()),
-        _ => egui::FontFamily::Name("dialogue-noto".into()),
+        "noto" => egui::FontFamily::Name("dialogue-noto".into()),
+        _ => egui::FontFamily::Name("dialogue-nunito".into()),
     }
 }
 
-/// The variable fonts are set to the regular weight (their default axis may be thinner).
-fn dialogue_font(bytes: &'static [u8]) -> egui::FontData {
-    egui::FontData::from_static(bytes).tweak(egui::FontTweak { coords: egui::epaint::text::VariationCoords::new([(b"wght", 400.0)]), ..Default::default() })
+/// The variable fonts are set to a fixed weight (their default axis may be thinner): 400, Nunito 600
+/// (SemiBold, close to the PS2 look).
+fn dialogue_font(bytes: &'static [u8], weight: f32) -> egui::FontData {
+    egui::FontData::from_static(bytes).tweak(egui::FontTweak { coords: egui::epaint::text::VariationCoords::new([(b"wght", weight)]), ..Default::default() })
 }
 
 /// The fonts for egui: the bundled ones, the dialogue fonts, and `bytes` after them as the last resort in both families.
 pub fn definitions(bytes: Option<Vec<u8>>) -> egui::FontDefinitions {
     let mut d = egui::FontDefinitions::default();
-    for (key, data) in [("dialogue-noto", NOTO_SANS), ("dialogue-rubik", RUBIK)] {
-        d.font_data.insert(key.into(), Arc::new(dialogue_font(data)));
+    for (key, data, weight) in [("dialogue-nunito", NUNITO, 600.0), ("dialogue-noto", NOTO_SANS, 400.0), ("dialogue-rubik", RUBIK, 400.0)] {
+        d.font_data.insert(key.into(), Arc::new(dialogue_font(data, weight)));
         // a character the font lacks falls to the bundled fonts
         let mut list = vec![key.to_string()];
         list.extend(d.families[&egui::FontFamily::Proportional].iter().cloned());
@@ -101,7 +104,7 @@ mod tests {
             let f = dialogue_family(name);
             assert!(d.families.contains_key(&f), "{}", name);
         }
-        for bytes in [NOTO_SANS, RUBIK] {
+        for bytes in [NUNITO, NOTO_SANS, RUBIK] {
             let font = ab_glyph::FontRef::try_from_slice(bytes).unwrap();
             for c in "Ёё…—«»Привет".chars() {
                 assert!(ab_glyph::Font::glyph_id(&font, c).0 != 0, "{}", c);
@@ -122,9 +125,9 @@ mod tests {
             }
         });
         out.textures_delta.clear();
-        assert_eq!(widths.len(), 3);
+        assert_eq!(widths.len(), DIALOGUE_FONTS.len());
         assert!(widths.iter().all(|w| *w > 100.0), "{:?}", widths);
-        assert!(widths[0] != widths[1] && widths[1] != widths[2], "{:?}", widths);
+        assert!(widths.windows(2).all(|w| w[0] != w[1]), "{:?}", widths);
     }
 
     #[test]
