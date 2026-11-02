@@ -99,9 +99,19 @@ fn paint_dialogue(ctx: &egui::Context, r: layout::Rect, wide: f32, left: bool, t
     let lines: Vec<&str> = text.split('\n').map(|l| l.trim_end_matches('\r')).collect();
     let top = ds_cy - lines.len() as f32 * PITCH / 2.0;
     let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("dialogue")));
+    let id = egui::FontId::new(SIZE * ky, fonts::dialogue_family(font));
+    // the fonts put their baseline at different depths below the row's top (Nunito's ascent is taller): each line sits on
+    // the baseline Rubik has, so that a change of font does not move the text up or down
+    let baseline = |f: &egui::FontId| {
+        ctx.fonts_mut(|fo| {
+            let g = fo.layout_no_wrap("Ж".into(), f.clone(), egui::Color32::BLACK);
+            g.rows.first().and_then(|r| r.row.glyphs.first().map(|gl| r.pos.y + gl.pos.y)).unwrap_or(0.0)
+        })
+    };
+    let shift = baseline(&egui::FontId::new(SIZE * ky, fonts::dialogue_family("rubik"))) - baseline(&id);
     for (i, l) in lines.iter().enumerate() {
-        let at = egui::pos2(x0, r.y + (top + i as f32 * PITCH) * ky);
-        p.text(at, egui::Align2::LEFT_TOP, l, egui::FontId::new(SIZE * ky, fonts::dialogue_family(font)), egui::Color32::from_rgb(16, 16, 24));
+        let at = egui::pos2(x0, r.y + (top + i as f32 * PITCH) * ky + shift);
+        p.text(at, egui::Align2::LEFT_TOP, l, id.clone(), egui::Color32::from_rgb(16, 16, 24));
     }
 }
 

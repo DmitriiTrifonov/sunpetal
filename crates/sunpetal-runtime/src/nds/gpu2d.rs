@@ -926,7 +926,9 @@ impl Nds {
             for y in 0..h3 {
                 let mask = &self.gpu.top[(e * 192 + y / s) * 256..][..256];
                 for x in 0..w {
-                    if mask[x / s] != *bg as u8 {
+                    // the layer's own pixels, and the backdrop showing through its clear ones: the picture stands for the whole
+                    // layer (a clear pixel of the game's art next to a letter would show black through the picture, B-15/K-004)
+                    if mask[x / s] != *bg as u8 && mask[x / s] != 5 {
                         continue;
                     }
                     let c = &pic[(y * w + x) * 4..][..4];

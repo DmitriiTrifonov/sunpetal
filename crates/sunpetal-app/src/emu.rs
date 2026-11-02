@@ -229,6 +229,10 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     let stats = std::env::var_os("SUNPETAL_STATS").is_some();
     // SUNPETAL_PACK_LOG=1: how many sprites and layers the 2D pack placed, each time it changes (a dip is a frame with the old art, B-16)
     let pack_log = std::env::var_os("SUNPETAL_PACK_LOG").is_some();
+    // SUNPETAL_DUMP_ON_TOUCH=1: each touch of the lower screen writes the picture and the 2D on show (with their keys) for
+    // the frames right after it, to artifacts/shots/touch_N: what a press shows for a moment (the knob pressed) gets its keys
+    let touch_dump = std::env::var_os("SUNPETAL_DUMP_ON_TOUCH").is_some_and(|v| v != "0");
+    let (mut pen_was, mut touch_frames) = (false, 0u32);
     let mut last_placed = usize::MAX;
     let (mut dry, mut partial) = (0u32, 0u32);
     // the side of the dialogue portrait and the panel's middle, last seen (the window draws the text with them)
@@ -276,6 +280,10 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         {
             let i = shared.input.lock().unwrap();
             nds::set_input(i.keys, i.pen);
+            if touch_dump && i.pen.is_some() && !pen_was {
+                touch_frames = 8;
+            }
+            pen_was = i.pen.is_some();
         }
         // with the game's marks a skip draws nothing (the screen is dark for it: the frames cost only the game's
         // own time); without them it needs the picture, at the native size, the cheapest
@@ -331,6 +339,14 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
                 eprintln!("pack2d: vblank {} placed {} (was {})", nds::vblanks(), placed, last_placed as isize);
                 last_placed = placed;
             }
+        }
+        if touch_frames > 0 {
+            touch_frames -= 1;
+            let stem = std::path::PathBuf::from(format!("artifacts/shots/touch_{}", nds::vblanks()));
+            let _ = std::fs::create_dir_all("artifacts/shots");
+            let _ = nds::screenshot(&std::path::PathBuf::from(format!("{}.png", stem.display())));
+            let n = nds::dump_2d(&std::path::PathBuf::from(format!("{}_2d", stem.display())));
+            eprintln!("touch dump: {} ({} 2D images)", stem.display(), n);
         }
         if shared.dump.swap(false, Ordering::Relaxed) {
             let stem = std::path::PathBuf::from(format!("artifacts/shots/v{}", nds::vblanks()));

@@ -39,17 +39,19 @@ const SIGNATURE: [((u32, u32), Class); 12] = [
     ((60, 168), Class::Metal),
 ];
 
-/// The same puzzle drawn over by the 2D pack (stage 8е.7е: the silver case, the green plate; its band at the top is
-/// black, the corners are not the game's): the pack's colours at points that the dial's art has in common.
+/// The same puzzle drawn over by the 2D pack (stage 8е.7е: the silver case, the green plate, both languages): the pack's
+/// colours at points that its art has whatever the digit and the arrow (the knob's black cap round the word, the
+/// plate's corners, the disc). Taken again when the art was moved to the device at rest (K-004, 2026-11-02): the old
+/// points needed the black band the first draft had at the top, and the puzzle went unrecognised (one screen alone).
 const SIGNATURE_REDRAWN: [((u32, u32), Class); 12] = [
-    ((153, 95), Class::Dark),
-    ((60, 12), Class::Dark),
-    ((125, 15), Class::Dark),
+    ((146, 104), Class::Dark),
+    ((160, 104), Class::Dark),
+    ((141, 98), Class::Dark),
     ((15, 100), Class::Green),
     ((15, 150), Class::Green),
-    ((20, 40), Class::Green),
-    ((240, 100), Class::Green),
     ((240, 150), Class::Green),
+    ((125, 15), Class::Green),
+    ((70, 25), Class::Green),
     ((153, 45), Class::Metal),
     ((153, 145), Class::Metal),
     ((100, 95), Class::Metal),
