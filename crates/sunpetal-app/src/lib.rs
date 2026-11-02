@@ -125,6 +125,12 @@ fn next_hold(hold: Option<Hold>, wants: bool, settled: bool) -> Option<Hold> {
     }
 }
 
+/// Whether START is the game's, not the app's short menu: on the title (the "Press START" box is
+/// shown), or before the title has ever been seen (the logos).
+fn start_to_game(prompt_visible: bool, title_seen: bool) -> bool {
+    prompt_visible || !title_seen
+}
+
 /// Frames a button pressed by the app stays down, and the frames the menu may take to show.
 /// Frames Edo's screen may go unseen before its hint patch is dropped (B-05; about 0.5 s at 60 frames a second).
 const EDO_HOLD: u32 = 30;
@@ -215,6 +221,8 @@ struct App {
     portrait_left: bool,
     /// The title's "Press START" box (`layout::prompt_box`).
     prompt: Option<layout::Rect>,
+    /// The title's "Press START" box has been seen at least once (before that, START is the game's, not the app's menu).
+    title_seen: bool,
     /// A page of paper over both screens is shown (`layout::paper_in`, settled), and how far it is scrolled.
     paper: bool,
     scroll: f32,
@@ -511,7 +519,7 @@ impl App {
     }
 
     fn pad_press(&mut self, b: gilrs::Button) {
-        let act = pad::press(b, pad::Ctx { menu_open: self.menu.open, start_to_game: self.prompt.is_some(), game_menu_up: self.auto_lower && self.puzzle_hold == 0 && !self.dial_scene });
+        let act = pad::press(b, pad::Ctx { menu_open: self.menu.open, start_to_game: start_to_game(self.prompt.is_some(), self.title_seen), game_menu_up: self.auto_lower && self.puzzle_hold == 0 && !self.dial_scene });
         if self.pad_log {
             eprintln!("    {:?} -> {:?}", b, act);
         }
@@ -708,6 +716,7 @@ impl App {
                 self.edo_seen = self.edo_off < EDO_HOLD;
             }
             self.prompt = layout::prompt_box(*scale, rgba);
+            self.title_seen |= self.prompt.is_some();
             if let Some(left) = layout::portrait_left(*scale, rgba) {
                 self.portrait_left = left;
             }
@@ -1418,6 +1427,7 @@ fn prepare(o: Options, scripted: bool) -> (App, Arc<Shared>, Option<cpal::Stream
         bar_ask: (None, 0),
         scroll: 0.0,
         prompt: None,
+        title_seen: false,
         wide_now: 0,
         bar_color: None,
         want: (false, 0),
@@ -1816,6 +1826,23 @@ mod hold_tests {
         }
         assert_eq!(h, None);
         assert_eq!(next_hold(None, true, true), None);
+    }
+}
+
+#[cfg(test)]
+mod start_tests {
+    use super::start_to_game;
+
+    #[test]
+    fn start_is_the_games_until_the_title_has_been_and_gone() {
+        // the logos, before the title has been seen: START is the game's
+        assert!(start_to_game(false, false));
+        // on the title (the "Press START" box): the game's
+        assert!(start_to_game(true, false));
+        // after the title, in the game: the app's short menu
+        assert!(!start_to_game(false, true));
+        // the title again: the game's
+        assert!(start_to_game(true, true));
     }
 }
 
