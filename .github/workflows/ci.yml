@@ -29,10 +29,9 @@ jobs:
       - run: cargo build -p sunpetal-runtime --features gpu
       - run: cargo test -p sunpetal-runtime --features gpu --lib
 
-  # Стиль: пока код не отформатирован (1300+ правок fmt, ~100 замечаний clippy), шаг советует и не блокирует.
+  # Стиль: fmt и clippy обязательны (K-114).
   lint:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

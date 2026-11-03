@@ -7,6 +7,15 @@ version = "0.0.1"
 edition = "2021"
 license = "Apache-2.0"
 
+# Style lints that do not fit the code: the emulator's hot loops index on purpose (`needless_range_loop`),
+# tuples stand for small records (`type_complexity`), hardware routines take many registers
+# (`too_many_arguments`); `as_chunks` is not what the byte readers want (`chunks_exact_to_as_chunks`).
+[workspace.lints.clippy]
+needless_range_loop = "allow"
+type_complexity = "allow"
+too_many_arguments = "allow"
+chunks_exact_to_as_chunks = "allow"
+
 # smaller binaries (the apk was 31 MB with symbols)
 [profile.release]
 strip = true

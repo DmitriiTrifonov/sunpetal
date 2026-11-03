@@ -99,7 +99,7 @@ pub fn apply_overlay(rom: &mut Vec<u8>, files: &[(String, Vec<u8>)]) -> Result<u
         let start = if data.len() <= (end - start) as usize {
             start as usize
         } else {
-            while rom.len() % 4 != 0 {
+            while !rom.len().is_multiple_of(4) {
                 rom.push(0xFF);
             }
             let at = rom.len();

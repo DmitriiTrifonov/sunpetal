@@ -77,7 +77,7 @@ fn a_2d_pack_replaces_the_device_and_the_menu_backgrounds() {
     let painted = frame(&mut s);
     assert!(nds::pack_2d_placed() >= 2, "the layers are placed");
     let (mut magenta, mut other) = (0usize, 0usize);
-    for (a, b) in plain.chunks_exact(4).zip(painted.chunks_exact(4)) {
+    for (a, b) in plain.as_chunks::<4>().0.iter().zip(painted.chunks_exact(4)) {
         if b[..3] == [255, 0, 255] {
             magenta += 1;
         } else if a != b {
@@ -90,12 +90,12 @@ fn a_2d_pack_replaces_the_device_and_the_menu_backgrounds() {
     assert!(other < total / 100, "{} pixels changed to something else than the pack's colour", other);
 
     // 2. the sprites on top stay: the icons of the menu are not painted over (some pixels of the lower screen are not magenta)
-    let lower_kept = painted[w * h * 4..].chunks_exact(4).filter(|p| p[..3] != [255, 0, 255]).count();
+    let lower_kept = painted[w * h * 4..].as_chunks::<4>().0.iter().filter(|p| p[..3] != [255, 0, 255]).count();
     assert!(lower_kept > 1000, "the menu's icons are sprites and stay ({} pixels)", lower_kept);
 
     // 3. without the pack the frame is as it was
     nds::set_pack_2d(None).unwrap();
     let again = frame(&mut s);
-    let diff = plain.chunks_exact(4).zip(again.chunks_exact(4)).filter(|(a, b)| a != b).count();
+    let diff = plain.as_chunks::<4>().0.iter().zip(again.chunks_exact(4)).filter(|(a, b)| a != b).count();
     assert!(diff < total / 100, "{} pixels differ after the pack is dropped", diff);
 }

@@ -94,7 +94,7 @@ fn main() -> ExitCode {
     nds::set_pipeline(pipeline);
     nds::set_sound_keep(wav.is_some());
     let mut samples: Vec<i16> = Vec::new();
-    let shot_at = |v: u64| (shot_every != 0 && v % shot_every == 0) || shots.contains(&v);
+    let shot_at = |v: u64| (shot_every != 0 && v.is_multiple_of(shot_every)) || shots.contains(&v);
     let any_shots = !shots.is_empty() || shot_every != 0;
     loop {
         // headless, the 2D engines draw only what a picture shows

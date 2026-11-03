@@ -70,7 +70,7 @@ impl Container {
             if !want(&tag) {
                 continue;
             }
-            if offset.checked_add(len).map_or(true, |end| end > size) {
+            if offset.checked_add(len).is_none_or(|end| end > size) {
                 return Err(bad("a section reaches past the end"));
             }
             f.seek(SeekFrom::Start(offset)).map_err(|e| bad(&e.to_string()))?;
@@ -305,7 +305,7 @@ pub fn verify_file(path: &Path) -> Result<Option<Meta>, String> {
         index.push((<[u8; 4]>::try_from(&s[..4]).unwrap(), u64::from_le_bytes(s[4..12].try_into().unwrap()), u64::from_le_bytes(s[12..20].try_into().unwrap())));
     }
     let size = f.metadata().map_err(|e| bad(e.to_string()))?.len();
-    if index.iter().any(|(_, o, l)| o.checked_add(*l).map_or(true, |e| e > size)) {
+    if index.iter().any(|(_, o, l)| o.checked_add(*l).is_none_or(|e| e > size)) {
         return Err(bad("a section reaches past the end (the file is cut short)".into()));
     }
     let Some(&(_, mo, ml)) = index.iter().find(|(t, _, _)| t == b"META") else {

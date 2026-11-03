@@ -402,11 +402,11 @@ pub fn swi(c: &mut Cpu, num: u32) {
                 return;
             }
         }
-        0x1C => {
+        0x1C
             // GetVolumeTable: 724 bytes, -72.3 dB to 0 in tenths, out of 128, times the divider
             // the SDK pairs with each range; as the channels read 127 as 128, 128 is kept as 127
             // and 127 as 126
-            if cpu == 7 {
+            if cpu == 7 => {
                 let i = (c.r[0] % 724) as i32;
                 let db = i - 723;
                 let mul = if db < -240 {
@@ -428,7 +428,6 @@ pub fn swi(c: &mut Cpu, num: u32) {
                 }) as u32;
                 return;
             }
-        }
         _ => {}
     }
     fatal_msg(&format!("ARM{}: swi {:02X} not done (r0 {:08X} r1 {:08X} r2 {:08X}, lr {:08X})", cpu, num, c.r[0], c.r[1], c.r[2], c.r[14]));

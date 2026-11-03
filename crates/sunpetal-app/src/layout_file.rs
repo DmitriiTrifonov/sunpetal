@@ -76,6 +76,7 @@ pub fn parse(text: &str) -> Result<Layout, String> {
 }
 
 /// The built-in layouts that are files.
+#[allow(dead_code)] // the built-in layouts as files, for the tests
 pub fn builtin() -> Vec<Layout> {
     [include_str!("../layouts/stacked.toml"), include_str!("../layouts/side-by-side.toml"), include_str!("../layouts/upper-only.toml"), include_str!("../layouts/lower-only.toml")]
         .iter()

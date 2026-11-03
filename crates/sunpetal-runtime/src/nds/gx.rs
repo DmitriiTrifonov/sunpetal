@@ -270,14 +270,12 @@ pub(super) struct ModelSwap {
     size: f64,
     e: [f64; 12],
     verts: Vec<[f64; 8]>,
-    done: u64,
-    seen: std::collections::HashSet<u32>,
 }
 
 impl ModelSwap {
     fn from_env() -> Option<ModelSwap> {
         let text = std::fs::read_to_string(std::env::var_os("SUNPETAL_MODEL_SWAP")?).ok()?;
-        let mut sw = ModelSwap { tex: 0, key: None, hide: Vec::new(), at: Vec::new(), size: 128.0, e: [0.0; 12], verts: Vec::new(), done: 0, seen: Default::default() };
+        let mut sw = ModelSwap { tex: 0, key: None, hide: Vec::new(), at: Vec::new(), size: 128.0, e: [0.0; 12], verts: Vec::new() };
         for line in text.lines() {
             let mut w = line.split_whitespace();
             match w.next() {
@@ -314,7 +312,6 @@ pub(super) struct Gx {
     swap_cache: std::collections::HashMap<(u32, u32), u8>,
     swap_gen: u64,
     swap_count: std::collections::HashMap<u32, u32>,
-    swap_last: Vec<(u32, u32)>,
     swap_mtime: Option<std::time::SystemTime>,
     #[cfg(feature = "debug-tools")]
     trace: Option<Trace>,
@@ -404,7 +401,6 @@ impl Gx {
             swap_cache: Default::default(),
             swap_gen: u64::MAX,
             swap_count: Default::default(),
-            swap_last: Vec::new(),
             swap_mtime: None,
             #[cfg(feature = "debug-tools")]
             trace: Trace::from_env(),
@@ -657,12 +653,12 @@ impl Gx {
             sortkey: 0,
         };
         let (vx, vy) = (self.viewport[0] as i64, self.viewport[1] as i64);
-        let vw0 = ((self.viewport[2] as i64 - self.viewport[0] as i64 + 1) & 0x1FF) as i64;
+        let vw0 = (self.viewport[2] as i64 - self.viewport[0] as i64 + 1) & 0x1FF;
         // widened: the viewport as wide again as the frustum; the picture keeps its place, with the
         // new columns each side of it
         let vw = vw0 * big_w / 256;
         let vx = vx + self.wide as i64 - (vw - vw0) / 2;
-        let vh = ((self.viewport[3] as i64 - self.viewport[1] as i64 + 1) & 0xFF) as i64;
+        let vh = (self.viewport[3] as i64 - self.viewport[1] as i64 + 1) & 0xFF;
         let (mut ytop, mut ybot) = (192i32, 0i32);
         for x in &v[..n] {
             let (px, py, pz, w) = (x.p[0], x.p[1], x.p[2], x.p[3]);
@@ -738,7 +734,7 @@ impl Nds {
     fn swap_begin(&mut self) {
         let g = &mut self.gx;
         g.swap_skip = false;
-        if g.swaps % 30 == 0 {
+        if g.swaps.is_multiple_of(30) {
             if let Some(path) = std::env::var_os("SUNPETAL_MODEL_SWAP") {
                 let mt = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
                 if mt.is_some() && mt != g.swap_mtime {
@@ -792,7 +788,7 @@ impl Nds {
         let mut i = 0;
         g.render.polys.retain(|_| {
             i += 1;
-            !hide.iter().any(|&(a, b)| i - 1 >= a && i - 1 < b)
+            !hide.iter().any(|&(a, b)| i > a && i - 1 < b)
         });
         let mut out = Vec::with_capacity(sw.verts.len());
         for v in &sw.verts {
@@ -815,7 +811,7 @@ impl Nds {
         // both faces: the file's model may wind either way; into the frame's list, not the one being built
         (g.attr, g.tex_param, g.pltt_base) = (attr | 0xC0, tex, pal);
         std::mem::swap(&mut g.render, &mut g.build);
-        for t in out.chunks_exact(3) {
+        for t in out.as_chunks::<3>().0 {
             self.gx_submit(t, 3);
         }
         std::mem::swap(&mut self.gx.render, &mut self.gx.build);

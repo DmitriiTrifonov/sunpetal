@@ -206,8 +206,8 @@ fn decode(bytes: &[u8]) -> Option<Img> {
     let (w, h) = (info.width as usize, info.height as usize);
     let rgba = match (info.color_type, info.bit_depth) {
         (png::ColorType::Rgba, png::BitDepth::Eight) => buf[..w * h * 4].to_vec(),
-        (png::ColorType::Rgb, png::BitDepth::Eight) => buf[..w * h * 3].chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect(),
-        (png::ColorType::GrayscaleAlpha, png::BitDepth::Eight) => buf[..w * h * 2].chunks_exact(2).flat_map(|p| [p[0], p[0], p[0], p[1]]).collect(),
+        (png::ColorType::Rgb, png::BitDepth::Eight) => buf[..w * h * 3].as_chunks::<3>().0.iter().flat_map(|p| [p[0], p[1], p[2], 255]).collect(),
+        (png::ColorType::GrayscaleAlpha, png::BitDepth::Eight) => buf[..w * h * 2].as_chunks::<2>().0.iter().flat_map(|p| [p[0], p[0], p[0], p[1]]).collect(),
         (png::ColorType::Grayscale, png::BitDepth::Eight) => buf[..w * h].iter().flat_map(|&g| [g, g, g, 255]).collect(),
         _ => return None,
     };

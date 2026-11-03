@@ -142,9 +142,9 @@ mod tests {
         let d = dir("rom");
         fs::write(d.join("other.nds"), rom(b"ABCD")).unwrap();
         fs::write(d.join("notes.txt"), b"x").unwrap();
-        assert_eq!(find_rom(&[d.clone()]), None);
+        assert_eq!(find_rom(std::slice::from_ref(&d)), None);
         fs::write(d.join("game.nds"), rom(b"YHNP")).unwrap();
-        assert_eq!(find_rom(&[d.clone()]), Some(d.join("game.nds")));
+        assert_eq!(find_rom(std::slice::from_ref(&d)), Some(d.join("game.nds")));
         assert!(check_rom(&d.join("other.nds")).unwrap_err().contains("ABCD"));
         assert!(check_rom(&d.join("notes.txt")).unwrap_err().contains("too short"));
         fs::remove_dir_all(&d).unwrap();

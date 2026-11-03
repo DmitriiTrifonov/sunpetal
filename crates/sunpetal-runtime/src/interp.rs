@@ -434,12 +434,8 @@ impl<'a> Interp<'a> {
                     }
                 }
             }
-            if wb {
-                if rl >> rn & 1 == 0 {
-                    self.c.r[rn] = nb;
-                } else if self.arch >= 5 && !thumb && (rl == 1 << rn || (rl >> (rn + 1)) != 0) {
-                    self.c.r[rn] = nb;
-                }
+            if wb && (rl >> rn & 1 == 0 || (self.arch >= 5 && !thumb && (rl == 1 << rn || (rl >> (rn + 1)) != 0))) {
+                self.c.r[rn] = nb;
             }
             if rl & 0x8000 != 0 {
                 if user {
@@ -737,28 +733,28 @@ impl<'a> Interp<'a> {
             self.undefined();
             return;
         }
-        let op;
-        if ld {
-            op = if sh == 1 {
+
+        let op = if ld {
+            if sh == 1 {
                 2
             } else if sh == 2 {
                 4
             } else {
                 3
-            };
+            }
         } else {
             if sh >= 2 && (self.arch < 5 || r15 == 15) {
                 self.undefined();
                 return;
             }
-            op = if sh == 1 {
+            if sh == 1 {
                 10
             } else if sh == 2 {
                 5
             } else {
                 11
-            };
-        }
+            }
+        };
         let mut off = if i { ((w >> 4) & 0xF0) | (w & 15) } else { self.c.r[rm] };
         if !i && rm == 15 {
             off = self.rv(15, 0);
@@ -1165,15 +1161,15 @@ impl<'a> Interp<'a> {
         loop {
             crate::services::INTERPRETED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             self.flow = Flow::Next;
-            let size;
-            if self.t {
+
+            let size = if self.t {
                 let h = self.ld16(self.pc);
-                size = self.thumb(h);
+                self.thumb(h)
             } else {
                 let w = self.ld32(self.pc);
                 self.arm(w);
-                size = 4;
-            }
+                4
+            };
             match self.flow {
                 Flow::Next => self.pc = self.pc.wrapping_add(size),
                 Flow::Jump => {

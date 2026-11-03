@@ -45,7 +45,7 @@ fn read(path: &Path) -> Result<(usize, Vec<u8>), String> {
         return Err(format!("{}: not both screens ({}x{})", path.display(), info.width, info.height));
     }
     let rgba = match info.color_type {
-        png::ColorType::Rgb => buf[..info.buffer_size()].chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect(),
+        png::ColorType::Rgb => buf[..info.buffer_size()].as_chunks::<3>().0.iter().flat_map(|p| [p[0], p[1], p[2], 255]).collect(),
         png::ColorType::Rgba => buf[..info.buffer_size()].to_vec(),
         c => return Err(format!("{}: colour type {:?}", path.display(), c)),
     };
@@ -86,7 +86,7 @@ mod tests {
 
     fn frame(upper: u8, lower: u8) -> Vec<u8> {
         let mut v = vec![upper; 256 * 192 * 4];
-        v.extend(std::iter::repeat(lower).take(256 * 192 * 4));
+        v.extend(std::iter::repeat_n(lower, 256 * 192 * 4));
         v
     }
 

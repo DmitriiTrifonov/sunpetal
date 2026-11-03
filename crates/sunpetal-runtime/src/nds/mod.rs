@@ -458,7 +458,7 @@ pub fn boot(cfg: Config) -> Result<(), String> {
         Ok(())
     })?;
     crate::services::cp15_boot();
-    let entries = nds(|n| crate::bios::direct_boot_memory(n))?;
+    let entries = nds(crate::bios::direct_boot_memory)?;
     for cpu in [9, 7] {
         let m = find_module(cpu).ok_or_else(|| format!("no module of this build matches the ARM{} program", cpu))?;
         machine(|mm| mm.activate(m));
@@ -1140,7 +1140,7 @@ pub fn screens_rgba() -> (usize, Vec<u8>) {
 pub fn upper_wide_rgba() -> Option<(usize, usize, Vec<u8>)> {
     let (scale, e, rgb) = nds(|n| n.upper_wide_rgb(n.scale).map(|(e, rgb)| (n.scale, e, rgb)))?;
     let mut out = vec![255u8; rgb.len() / 3 * 4];
-    for (o, p) in out.chunks_exact_mut(4).zip(rgb.chunks_exact(3)) {
+    for (o, p) in out.as_chunks_mut::<4>().0.iter_mut().zip(rgb.chunks_exact(3)) {
         o[..3].copy_from_slice(p);
     }
     Some((scale, e, out))

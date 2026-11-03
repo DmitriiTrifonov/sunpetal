@@ -922,10 +922,10 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
                     row_h = 0;
                 }
                 let flags = *scaled
-                    | ((tex & 0x10000 != 0) as u32) * F_REPEAT_S
-                    | ((tex & 0x20000 != 0) as u32) * F_REPEAT_T
-                    | ((tex & 0x40000 != 0) as u32) * F_FLIP_S
-                    | ((tex & 0x80000 != 0) as u32) * F_FLIP_T;
+                    | (((tex & 0x10000 != 0) as u32) * F_REPEAT_S)
+                    | (((tex & 0x20000 != 0) as u32) * F_REPEAT_T)
+                    | (((tex & 0x40000 != 0) as u32) * F_FLIP_S)
+                    | (((tex & 0x80000 != 0) as u32) * F_FLIP_T);
                 regions.insert((*tex, *pal), TexInfo { ux: x, uy: y, w: pw, h: ph, ow: *ow, oh: *oh, flags });
                 x += pw;
                 row_h = row_h.max(ph);
@@ -1159,7 +1159,7 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
             ],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &dsv,
-                depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(clear_depth as f32), store: wgpu::StoreOp::Store }),
+                depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(clear_depth), store: wgpu::StoreOp::Store }),
                 stencil_ops: None,
             }),
             timestamp_writes: None,
@@ -1248,7 +1248,7 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
         }
         // the box of the rasterized triangles (their vertices are in picture pixels), a pixel wider
         let (mut bx0, mut by0, mut bx1, mut by1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
-        for v in verts.chunks_exact(8) {
+        for v in verts.as_chunks::<8>().0 {
             let x = f32::from_le_bytes([v[0], v[1], v[2], v[3]]);
             let y = f32::from_le_bytes([v[4], v[5], v[6], v[7]]);
             bx0 = bx0.min(x);
@@ -2118,7 +2118,7 @@ fn readback_words(device: &wgpu::Device, buf: &wgpu::Buffer, w: usize, h: usize)
     let mut v = Vec::with_capacity(w * h);
     for y in 0..h {
         let base = y * row;
-        v.extend(map[base..base + w * 4].chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])));
+        v.extend(map[base..base + w * 4].as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])));
     }
     drop(map);
     buf.unmap();
@@ -2135,7 +2135,7 @@ fn readback_bytes(device: &wgpu::Device, buf: &wgpu::Buffer, w: usize, h: usize)
     let mut v = Vec::with_capacity(w * h);
     for y in 0..h {
         let base = y * row;
-        v.extend(map[base..base + w * 4].chunks_exact(4).map(|c| c[0]));
+        v.extend(map[base..base + w * 4].as_chunks::<4>().0.iter().map(|c| c[0]));
     }
     drop(map);
     buf.unmap();
@@ -2167,7 +2167,7 @@ fn rear_data(job: &Job) -> Option<Vec<u8>> {
             let word = r | g << 6 | b << 12 | if c & 0x8000 != 0 { 31 } else { 0 } << 18;
             data.extend_from_slice(&word.to_le_bytes());
             data.extend_from_slice(&((d & 0x8000 != 0) as u32).to_le_bytes());
-            data.extend_from_slice(&render3d::clear_depth((d & 0x7FFF) as u16).to_bits().to_le_bytes());
+            data.extend_from_slice(&render3d::clear_depth(d & 0x7FFF).to_bits().to_le_bytes());
             data.extend_from_slice(&0u32.to_le_bytes());
         }
     }
@@ -3467,7 +3467,7 @@ mod tests {
             j.tex[i] = i as u8;
         }
         for i in 0..64 {
-            let c = (i & 31) | ((i * 3 & 31) << 5) | ((i * 5 & 31) << 10);
+            let c = (i & 31) | (((i * 3) & 31) << 5) | (((i * 5) & 31) << 10);
             j.texpal[2 * i..2 * i + 2].copy_from_slice(&(c as u16).to_le_bytes());
         }
         both(&j, 1);
@@ -3515,7 +3515,7 @@ mod tests {
         for t in 0..4 {
             for c in 0..4 {
                 let v = 4 + t * 4 + c;
-                let col = (v & 31) | ((v * 3 & 31) << 5) | ((v * 5 & 31) << 10);
+                let col = (v & 31) | (((v * 3) & 31) << 5) | (((v * 5) & 31) << 10);
                 j.texpal[t * 8 + c * 2..t * 8 + c * 2 + 2].copy_from_slice(&(col as u16).to_le_bytes());
             }
         }
@@ -3543,7 +3543,7 @@ mod tests {
             j.tex[i] = i as u8;
         }
         for i in 0..64 {
-            let c = (i & 31) | ((i * 3 & 31) << 5) | ((i * 5 & 31) << 10);
+            let c = (i & 31) | (((i * 3) & 31) << 5) | (((i * 5) & 31) << 10);
             j.texpal[2 * i..2 * i + 2].copy_from_slice(&(c as u16).to_le_bytes());
         }
         both(&j, 1);
@@ -3609,7 +3609,7 @@ mod tests {
             j.tex[i] = i as u8;
         }
         for i in 0..64 {
-            let c = (i & 31) | ((i * 3 & 31) << 5) | ((i * 5 & 31) << 10);
+            let c = (i & 31) | (((i * 3) & 31) << 5) | (((i * 5) & 31) << 10);
             j.texpal[2 * i..2 * i + 2].copy_from_slice(&(c as u16).to_le_bytes());
         }
         both(&j, 1);

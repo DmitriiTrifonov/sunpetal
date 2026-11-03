@@ -14,6 +14,8 @@
 //! prints the pad's events. The menu is the short one unless `[ui] full_menu` or `--full-menu`. The mouse on the lower screen is the stylus. The
 //! settings are kept in the configuration folder (`config::dir`) and saved when the menu closes
 //! and at exit.
+// egui deprecated `Id::new` for salted ids; the menus keep the plain string ids until the egui upgrade
+#![allow(deprecated)]
 mod audio;
 mod config;
 mod dial;
@@ -544,7 +546,7 @@ impl App {
         if !self.menu.open && self.rstick != (0.0, 0.0) {
             let (speed, dead) = (self.settings.input.stylus_speed, self.settings.input.stylus_dead);
             if let Some(g) = &self.gfx {
-                let size = (g.size().0 as f32, g.size().1 as f32);
+                let size = (g.size().0, g.size().1);
                 if self.stylus.pos.is_none() {
                     self.stylus.pos = Some(self.stylus_home());
                 }
@@ -559,7 +561,7 @@ impl App {
     /// Where the stylus starts: the middle of the lower screen (or of the window).
     fn stylus_home(&self) -> (f32, f32) {
         let Some(g) = &self.gfx else { return (0.0, 0.0) };
-        let size = (g.size().0 as f32, g.size().1 as f32);
+        let size = (g.size().0, g.size().1);
         self.layout().fit(g.size())[1].map_or((size.0 / 2.0, size.1 / 2.0), |r| (r.x + r.w / 2.0, r.y + r.h / 2.0))
     }
 
@@ -1245,22 +1247,22 @@ impl ApplicationHandler for App {
                 });
                 let corner = self.gfx.as_ref().filter(|_| cfg!(target_os = "android") && !self.settings.touch_controls_on()).map(|g| g.window_size());
                 match t.phase {
-                    Started if !self.menu.open && !consumed && corner.map_or(false, |(w, h)| touchpad::on_menu_button(w, h, p)) => {
+                    Started if !self.menu.open && !consumed && corner.is_some_and(|(w, h)| touchpad::on_menu_button(w, h, p)) => {
                         self.toggle_menu();
                     }
-                    Started if !self.menu.open && !consumed && corner.map_or(false, |(w, h)| touchpad::on_swap_button(w, h, p)) => {
+                    Started if !self.menu.open && !consumed && corner.is_some_and(|(w, h)| touchpad::on_swap_button(w, h, p)) => {
                         self.swap_screen();
                     }
-                    Started if !self.menu.open && !consumed && self.settings.emulation.skip_button && corner.map_or(false, |(w, h)| touchpad::on_skip_button(w, h, p)) => {
+                    Started if !self.menu.open && !consumed && self.settings.emulation.skip_button && corner.is_some_and(|(w, h)| touchpad::on_skip_button(w, h, p)) => {
                         // a tap starts a skip, another cancels it
                         self.shared.toggle_skip();
                     }
-                    Started if !self.menu.open && !consumed && self.settings.emulation.fast_button && corner.map_or(false, |(w, h)| touchpad::on_fast_button(w, h, p)) => {
+                    Started if !self.menu.open && !consumed && self.settings.emulation.fast_button && corner.is_some_and(|(w, h)| touchpad::on_fast_button(w, h, p)) => {
                         let on = !self.shared.fast.load(Ordering::Relaxed);
                         self.shared.fast.store(on, Ordering::Relaxed);
                     }
                     Started if !self.menu.open && !consumed => {
-                        let on_screen = self.gfx.as_ref().map_or(false, |g| self.layout().touch(g.size(), p, false).is_some());
+                        let on_screen = self.gfx.as_ref().is_some_and(|g| self.layout().touch(g.size(), p, false).is_some());
                         if on_screen && self.touch.is_none() {
                             self.touch = Some(t.id);
                             self.pen_down = true;
@@ -1311,10 +1313,8 @@ impl ApplicationHandler for App {
                 self.send_keys();
                 self.update_pen();
             }
-            WindowEvent::RedrawRequested => {
-                if !self.redraw() {
-                    el.exit();
-                }
+            WindowEvent::RedrawRequested if !self.redraw() => {
+                el.exit();
             }
             _ => {}
         }

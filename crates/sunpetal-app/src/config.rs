@@ -266,16 +266,11 @@ impl Lang {
 /// Which menu START (and F1, Esc, the menu button) opens.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 #[serde(default)]
+#[derive(Default)]
 pub struct Ui {
     /// The full settings menu instead of the short one (sound, screen, picture, saves). On by default
     /// where there are no buttons to reach the game's own menu (a phone).
     pub full_menu: bool,
-}
-
-impl Default for Ui {
-    fn default() -> Ui {
-        Ui { full_menu: cfg!(any(target_os = "android", target_os = "ios")) }
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Default, Debug)]
@@ -426,7 +421,7 @@ impl Settings {
         self.input.stick_threshold = self.input.stick_threshold.clamp(0.1, 0.9);
         let defaults = Input::default().keys;
         for (button, key) in defaults {
-            let ok = self.input.keys.get(&button).map_or(false, |k| parse_key(k).is_some());
+            let ok = self.input.keys.get(&button).is_some_and(|k| parse_key(k).is_some());
             if !ok {
                 self.input.keys.insert(button, key);
             }
@@ -494,7 +489,7 @@ pub fn profiles() -> Vec<String> {
     if let Ok(rd) = fs::read_dir(dir().join("profiles")) {
         for e in rd.flatten() {
             let p = e.path();
-            if p.extension().map_or(false, |x| x == "toml") {
+            if p.extension().is_some_and(|x| x == "toml") {
                 if let Some(n) = p.file_stem() {
                     v.push(n.to_string_lossy().into_owned());
                 }
@@ -542,6 +537,7 @@ pub fn window_of_shape(cur: [u32; 2], ratio: f32) -> [u32; 2] {
 
 /// The size one screen is drawn at inside: the DS's 256 x 192 times `res` (1-8), whatever the
 /// window is. The window only scales it.
+#[allow(dead_code)] // kept for the tests and the sizes the overlay layouts ask
 pub fn internal_size(res: usize) -> (usize, usize) {
     let k = res.clamp(1, 8);
     (256 * k, 192 * k)

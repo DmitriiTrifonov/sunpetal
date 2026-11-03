@@ -16,10 +16,10 @@ fn main() {
     println!("cargo:rerun-if-changed={}", dir.display());
 
     let mut sources: Vec<PathBuf> = match fs::read_dir(&dir) {
-        Ok(rd) => rd.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().map_or(false, |x| x == "c")).collect(),
+        Ok(rd) => rd.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|x| x == "c")).collect(),
         Err(_) => Vec::new(),
     };
-    if !sources.iter().any(|p| p.file_name().map_or(false, |n| n == "modules.c")) {
+    if !sources.iter().any(|p| p.file_name().is_some_and(|n| n == "modules.c")) {
         println!("cargo:warning=no generated C in {} (run the recompiler, docs/ABI.md): building without modules", dir.display());
         return;
     }

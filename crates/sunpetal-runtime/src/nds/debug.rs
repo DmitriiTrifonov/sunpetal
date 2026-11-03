@@ -127,14 +127,14 @@ pub(crate) fn note_clip_read() {
 /// The functions entered last at the clip matrix's reads, most reads first.
 pub fn clip_report() -> Vec<((u32, u32), u64)> {
     let mut v: Vec<((u32, u32), u64)> = CLIP_READS.with(|h| h.borrow().iter().map(|(k, n)| (*k, *n)).collect());
-    v.sort_by(|a, b| b.1.cmp(&a.1));
+    v.sort_by_key(|a| std::cmp::Reverse(a.1));
     v
 }
 
 /// The return addresses of the calls of the SDK's clip matrix getter (`02004EAC`), most calls first.
 pub fn clip_callers() -> Vec<(u32, u64)> {
     let mut v: Vec<(u32, u64)> = CLIP_CALLERS.with(|h| h.borrow().iter().map(|(k, n)| (*k, *n)).collect());
-    v.sort_by(|a, b| b.1.cmp(&a.1));
+    v.sort_by_key(|a| std::cmp::Reverse(a.1));
     v
 }
 
@@ -148,7 +148,7 @@ pub(crate) fn on_enter(c: &mut Cpu, key: u32) {
     }
     let watchers = OBSERVERS.with(|o| {
         let mut o = o.borrow_mut();
-        if o.log.as_ref().map_or(false, |l| l.len() < o.log_cap) {
+        if o.log.as_ref().is_some_and(|l| l.len() < o.log_cap) {
             let call = Call { vblank: super::vblanks(), cpu: c.cpu, key, lr: c.r[14], args: [c.r[0], c.r[1], c.r[2], c.r[3]] };
             o.log.as_mut().unwrap().push(call);
         }

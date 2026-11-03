@@ -244,7 +244,7 @@ impl Drop for Recorder {
 
 /// Swaps B and R in place.
 fn bgra_to_rgba(rgba: &mut [u8]) {
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         px.swap(0, 2);
     }
 }
@@ -386,7 +386,7 @@ mod tests {
     #[test]
     fn shrink_box_averages_blocks() {
         let mut px = vec![0u8; 4 * 4 * 4];
-        for p in px.chunks_exact_mut(4).take(2) {
+        for p in px.as_chunks_mut::<4>().0.iter_mut().take(2) {
             p.copy_from_slice(&[200, 100, 0, 255]);
         }
         let (out, w, h) = shrink_box(&px, 4, 4, 2);

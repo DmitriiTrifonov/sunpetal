@@ -615,7 +615,7 @@ impl Gfx {
         if rgba.len() < (w * h * 4) as usize {
             return;
         }
-        if self.wide_screen.as_ref().map_or(true, |(_, s, ee)| (*s, *ee) != (scale, e)) {
+        if self.wide_screen.as_ref().is_none_or(|(_, s, ee)| (*s, *ee) != (scale, e)) {
             let s = make_texture(&self.device, &self.bgl, &self.nearest, &self.linear_sampler, w, h, "upper wide");
             self.wide_screen = Some((s, scale, e));
         }
@@ -663,7 +663,7 @@ impl Gfx {
             }
         }
         let mut bytes = Vec::with_capacity(GLOW_W * GLOW_H * 4);
-        for p in self.glow_grid.chunks_exact(3) {
+        for p in self.glow_grid.as_chunks::<3>().0 {
             bytes.extend_from_slice(&[p[0] as u8, p[1] as u8, p[2] as u8, 255]);
         }
         self.queue.write_texture(
@@ -798,7 +798,7 @@ impl Gfx {
         let use_post = fx.bloom > 0.0 || fx.fxaa;
         if !use_post {
             self.post = None;
-        } else if self.post.as_ref().map_or(true, |p| p.size != (self.config.width, self.config.height)) {
+        } else if self.post.as_ref().is_none_or(|p| p.size != (self.config.width, self.config.height)) {
             self.post = Some(post::Targets::new(&self.device, &self.post_kit, self.config.format, self.config.width, self.config.height));
         }
         let target = match &self.post {
@@ -945,7 +945,7 @@ impl Gfx {
             let rgb = slice.get_mapped_range().ok().map(|data| {
                 let mut rgb = Vec::with_capacity((w * h * 3) as usize);
                 for y in 0..h as usize {
-                    for px in data[y * row as usize..y * row as usize + w as usize * 4].chunks_exact(4) {
+                    for px in data[y * row as usize..y * row as usize + w as usize * 4].as_chunks::<4>().0 {
                         rgb.extend(if swap { [px[2], px[1], px[0]] } else { [px[0], px[1], px[2]] });
                     }
                 }

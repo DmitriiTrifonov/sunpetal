@@ -103,7 +103,7 @@ pub fn lz10(d: &[u8]) -> Option<Vec<u8>> {
 
 /// The text of a UTF-16LE file (with or without the byte order mark).
 pub fn utf16le(d: &[u8]) -> String {
-    let units: Vec<u16> = d.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+    let units: Vec<u16> = d.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
     String::from_utf16_lossy(&units).trim_start_matches('\u{feff}').to_string()
 }
 

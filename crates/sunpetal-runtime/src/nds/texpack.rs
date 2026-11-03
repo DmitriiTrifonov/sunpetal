@@ -204,7 +204,7 @@ pub(super) fn texture_key(m: &Mem, tex: u32, pal: u32) -> TexKey {
     let fmt = (tex >> 26) & 7;
     let (w, h) = dims(tex);
     let base = ((tex & 0xFFFF) as usize) * 8;
-    let c0 = fmt >= 2 && fmt <= 4 && tex & 0x2000_0000 != 0;
+    let c0 = (2..=4).contains(&fmt) && tex & 0x2000_0000 != 0;
     let seed = fnv([fmt as u8, c0 as u8, (w >> 3) as u8, (h >> 3) as u8], FNV_BASIS);
     let n = w * h * bits_per_texel(fmt) / 8;
     let mut data = fnv((0..n).map(|i| tex_byte(m, base + i)), seed);
@@ -306,8 +306,8 @@ fn decode_png(bytes: &[u8]) -> Result<Image, String> {
     let px = &buf[..info.buffer_size()];
     let rgba: Vec<u8> = match info.color_type {
         png::ColorType::Rgba => px.to_vec(),
-        png::ColorType::Rgb => px.chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect(),
-        png::ColorType::GrayscaleAlpha => px.chunks_exact(2).flat_map(|p| [p[0], p[0], p[0], p[1]]).collect(),
+        png::ColorType::Rgb => px.as_chunks::<3>().0.iter().flat_map(|p| [p[0], p[1], p[2], 255]).collect(),
+        png::ColorType::GrayscaleAlpha => px.as_chunks::<2>().0.iter().flat_map(|p| [p[0], p[0], p[0], p[1]]).collect(),
         png::ColorType::Grayscale => px.iter().flat_map(|&g| [g, g, g, 255]).collect(),
         png::ColorType::Indexed => return Err("indexed picture not expanded".into()),
     };
@@ -469,7 +469,7 @@ mod tests {
         // a newer version: the last magic byte
         let mut newer = whole.clone();
         newer[7] = 2;
-        fs::write(&dir.join("newer.spdata"), &newer).unwrap();
+        fs::write(dir.join("newer.spdata"), &newer).unwrap();
         assert!(Pack::from_file(&dir.join("newer.spdata")).is_err());
         let _ = fs::remove_dir_all(&dir);
     }

@@ -430,7 +430,7 @@ fn raster(job: &Job, verts: &[GxVertex], s: usize, ya: usize, yb: usize) -> Targ
     for p in &job.polys {
         let vs = &verts[p.first as usize..(p.first + p.n) as usize];
         let attr = p.attr;
-        let polyalpha = ((attr >> 16) & 31) as u32;
+        let polyalpha = (attr >> 16) & 31;
         let pid = ((attr >> 24) & 63) as u8;
         let mode = (attr >> 4) & 3;
         let fmt = (p.tex >> 26) & 7;
@@ -465,16 +465,14 @@ fn raster(job: &Job, verts: &[GxVertex], s: usize, ya: usize, yb: usize) -> Targ
             }
             let to6 = |c: f32| -> u32 { (c * 63.0 / 31.0).round().clamp(0.0, 63.0) as u32 };
             let (mut r, mut g, mut b) = (to6(vr), to6(vg), to6(vb));
-            let mut va = if wire { 31 } else { polyalpha };
+            let va = if wire { 31 } else { polyalpha };
             if mode == 2 {
                 // toon (and highlight): the vertex colour's red picks the table's colour
                 let tc = job.toon[(r >> 1).min(31) as usize];
                 let (tr, tg, tb) = rgb555(tc);
                 if highlight {
-                    let gray = r;
-                    r = gray;
-                    g = gray;
-                    b = gray;
+                    g = r;
+                    b = r;
                 } else {
                     r = tr;
                     g = tg;
@@ -515,7 +513,6 @@ fn raster(job: &Job, verts: &[GxVertex], s: usize, ya: usize, yb: usize) -> Targ
                     ob = ((tb + 1) * (b + 1) - 1) / 64;
                     oa = ((ta + 1) * (va + 1) - 1) / 32;
                 }
-                va = oa;
             }
             if mode == 2 && highlight {
                 let (tr, tg, tb) = rgb555(job.toon[(r >> 1).min(31) as usize]);
@@ -738,7 +735,7 @@ fn shade_pass(strength: f32, radius: f32, t: &Target, w: usize, h: usize, s: usi
     let (wi, hi) = (w as isize, h as isize);
     let mut out = vec![0u8; w * h];
     let bands = threads().min(h / 64).max(1);
-    let per = (h + bands - 1) / bands;
+    let per = h.div_ceil(bands);
     let rays = &rays;
     std::thread::scope(|sc| {
         for (k, chunk) in out.chunks_mut(per * w).enumerate() {
@@ -872,7 +869,7 @@ pub(super) fn render_maps(job: &Job, scale: usize) -> (Vec<u32>, Aux, u32) {
 pub(super) fn resolve(big: &[u32], w: usize, h: usize, k: usize) -> Vec<u32> {
     let mut out = vec![0u32; w * h];
     let bands = threads().min(h / 32).max(1);
-    let per = (h + bands - 1) / bands;
+    let per = h.div_ceil(bands);
     std::thread::scope(|sc| {
         for (b, chunk) in out.chunks_mut(per * w).enumerate() {
             sc.spawn(move || {
@@ -927,7 +924,7 @@ fn render_at(job: &Job, s: usize) -> (Vec<u32>, Aux, u32) {
     // horizontal bands, one thread each: every band draws all the polygons in order but only its own
     // rows, so the picture is the same as from one pass
     let bands = if s < 2 { 1 } else { threads().min(h / 64) };
-    let per = (h + bands - 1) / bands;
+    let per = h.div_ceil(bands);
     let ranges: Vec<(usize, usize)> = (0..bands).map(|k| (k * per, ((k + 1) * per).min(h))).filter(|r| r.0 < r.1).collect();
     let parts: Vec<Target> = if ranges.len() == 1 {
         vec![raster(job, &verts, s, 0, h)]

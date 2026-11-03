@@ -280,8 +280,8 @@ impl Nds {
             0x05 if cpu == 9 => return le(&self.palette[(a & 0x7FF) as usize..], size),
             0x06 => return self.vram_read(cpu, a, size),
             0x07 if cpu == 9 => return le(&self.oam[(a & 0x7FF) as usize..], size),
-            0x08 | 0x09 | 0x0A => return ones(size), // no GBA cartridge
-            0x03 if cpu == 9 => return 0,            // the shared WRAM is all the ARM7's
+            0x08..=0x0A => return ones(size), // no GBA cartridge
+            0x03 if cpu == 9 => return 0,     // the shared WRAM is all the ARM7's
             _ => {}
         }
         if cpu == 9 && a >= 0xFFFF_0000 {
@@ -317,7 +317,7 @@ impl Nds {
                 }
                 return;
             }
-            0x08 | 0x09 | 0x0A => return,
+            0x08..=0x0A => return,
             _ => {}
         }
         self.once("unmapped write", a, || format!("ARM{}: {}-byte write of {:08X} to {:08X} (unmapped)", cpu, size, v, a));

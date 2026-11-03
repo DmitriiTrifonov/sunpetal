@@ -170,7 +170,7 @@ pub fn dialogue_panel_middle(scale: usize, rgba: &[u8]) -> Option<f32> {
         let (mut n, mut red) = (0, 0);
         for x in (20..236usize).step_by(4) {
             let o = (y * scale * w + x * scale) * 4;
-            let Some(p) = rgba.get(o..o + 3) else { return None };
+            let p = rgba.get(o..o + 3)?;
             n += 1;
             red += (p[0] > 200 && p[1] < 60 && p[2] < 60) as usize;
         }
@@ -625,6 +625,7 @@ fn pick(layouts: &[Layout], v: &crate::config::Video, live: &Live) -> Layout {
 
 /// Parts of the window the system takes (a notch, rounded corners, gesture bars), in pixels.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
+#[allow(dead_code)] // safe-area layouts (notches) are not wired to the platforms yet; the tests cover them
 pub struct Insets {
     pub left: f32,
     pub top: f32,
@@ -632,6 +633,7 @@ pub struct Insets {
     pub bottom: f32,
 }
 
+#[allow(dead_code)]
 impl Insets {
     /// The safe area of a window: its corner and size (never below one pixel).
     pub fn area(&self, win: (f32, f32)) -> ((f32, f32), (f32, f32)) {
@@ -641,6 +643,7 @@ impl Insets {
     }
 }
 
+#[allow(dead_code)]
 impl Layout {
     /// As `fit`, inside the window's safe area.
     pub fn fit_safe(&self, win: (f32, f32), ins: Insets) -> [Option<Rect>; 2] {
@@ -710,7 +713,7 @@ impl Layout {
         }
         // a patch on the upper screen lies on the middle 256
         for p in self.patches.iter_mut().filter(|p| !p.pinned) {
-            if p.dst.x >= up.x && p.dst.x < up.x + up.w && p.dst.y >= up.y && p.dst.y < up.y + up.h && self.screens[1].map_or(true, |lo| p.dst.y < lo.y || p.dst.x < lo.x) {
+            if p.dst.x >= up.x && p.dst.x < up.x + up.w && p.dst.y >= up.y && p.dst.y < up.y + up.h && self.screens[1].is_none_or(|lo| p.dst.y < lo.y || p.dst.x < lo.x) {
                 p.dst.x += e;
             }
         }
@@ -1408,7 +1411,7 @@ mod tests {
     fn a_page_of_paper_is_scrolled_over_both_screens() {
         let mut rgba = vec![0u8; 256 * 192 * 2 * 4];
         assert!(!paper_in(1, &rgba));
-        for px in rgba[256 * 192 * 4..].chunks_exact_mut(4) {
+        for px in rgba[256 * 192 * 4..].as_chunks_mut::<4>().0 {
             px.copy_from_slice(&[226, 193, 135, 255]);
         }
         assert!(paper_in(1, &rgba));

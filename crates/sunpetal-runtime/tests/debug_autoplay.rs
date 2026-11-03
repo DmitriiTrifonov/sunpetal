@@ -15,7 +15,7 @@ fn autoplay_logs_the_opening_lines_in_order() {
     std::fs::copy(&save, &copy).expect("the save's copy");
     let mut s = Session::open(rom, Some(copy)).expect("open");
     s.goto("C18_01", None).expect("goto");
-    let stop = s.autoplay(&Autoplay { max_lines: 5, delay: 10, out: None }).expect("autoplay");
+    let stop = s.autoplay(&Autoplay { max_lines: 5, delay: 10, out: None, screens: None }).expect("autoplay");
     assert_eq!(stop, Stop::MaxLines);
     let ids: Vec<_> = s.events().iter().map(|e| e.id.clone().unwrap_or_default()).collect();
     assert_eq!(&ids[..5], ["01001", "01002", "01003", "01004", "01005"]);

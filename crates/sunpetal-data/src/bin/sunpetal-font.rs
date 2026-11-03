@@ -58,7 +58,7 @@ fn run() -> Result<(), String> {
     let (dsize, dweight) = if p.pixel { (13.0, 1.5) } else { (12.0, 1.0) };
     (p.size, p.weight) = (size.unwrap_or(dsize), weight.unwrap_or(dweight));
     let read = |p: &PathBuf| std::fs::read(p).map_err(|e| format!("{}: {}", p.display(), e));
-    let rom_bytes = rom.as_ref().map(|r| read(r)).transpose()?;
+    let rom_bytes = rom.as_ref().map(read).transpose()?;
     let from_rom = |path: &str| -> Result<Vec<u8>, String> {
         let rom = rom_bytes.as_ref().ok_or("--rom GAME.nds (or --base-font FILE.nftr) is needed")?;
         Ok(NitroFs::parse(rom)?.file(rom, path).ok_or_else(|| format!("{} is not in the ROM", path))?.to_vec())

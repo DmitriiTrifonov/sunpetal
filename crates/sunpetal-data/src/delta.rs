@@ -135,7 +135,7 @@ pub fn diff(orig: &[u8], new: &[u8]) -> Vec<u8> {
             if let Some(cands) = index.get(&key_at(new, pos)) {
                 for &c in cands {
                     let l = match_len(&orig[c as usize..], &new[pos..]);
-                    if l >= MIN_FAR && best.map_or(true, |(_, bl)| l > bl) {
+                    if l >= MIN_FAR && best.is_none_or(|(_, bl)| l > bl) {
                         best = Some((c as usize, l));
                     }
                 }

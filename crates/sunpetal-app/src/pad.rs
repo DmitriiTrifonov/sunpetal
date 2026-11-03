@@ -130,7 +130,7 @@ impl Repeat {
     pub fn tick(&mut self) -> Option<Dir> {
         let d = self.dir?;
         self.frames += 1;
-        (self.frames >= FIRST && (self.frames - FIRST) % EVERY == 0).then_some(d)
+        (self.frames >= FIRST && (self.frames - FIRST).is_multiple_of(EVERY)).then_some(d)
     }
 }
 

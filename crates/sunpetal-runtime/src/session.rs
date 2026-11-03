@@ -153,7 +153,7 @@ impl Session {
             }
             self.watch()?;
             self.frames += 1;
-            if self.texts.is_some() && self.frames % 30 == 0 {
+            if self.texts.is_some() && self.frames.is_multiple_of(30) {
                 self.apply_texts()?;
             }
         }
@@ -366,7 +366,7 @@ const NEXT_PAGE: (i32, i32) = (55, 75);
 impl Session {
     /// From the title to the list of requests (the save must have the requests open), blind by
     /// frames: the menu is the same every run, so is the time it takes.
-    fn to_request_list(&mut self) -> Result<(), String> {
+    fn go_to_request_list(&mut self) -> Result<(), String> {
         self.run(2400)?;
         for (key, wait) in [("START", 200), ("START", 200), ("START", 150), ("A", 300), ("A", 400), ("A", 300), ("A", 400)] {
             self.press(key, 9)?;
@@ -382,7 +382,7 @@ impl Session {
     /// Plays request `n` from its start, through the menu of a save that has played it: the first
     /// scene `Cnn_01` is being read when this returns.
     pub fn goto_request(&mut self, n: u32) -> Result<(), String> {
-        self.to_request_list()?;
+        self.go_to_request_list()?;
         // the first touch on "Next" is taken as the list's focus, the rest turn the pages
         let page = n / 3;
         for _ in 0..if page > 0 { page + 1 } else { 0 } {
@@ -425,7 +425,7 @@ impl Session {
         nds::set_draw(false);
         r?;
         let (w, from, to) = (256 * scale, 136 * scale, 192 * scale);
-        let rgb: Vec<u8> = rgba[from * w * 4..to * w * 4].chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+        let rgb: Vec<u8> = rgba[from * w * 4..to * w * 4].as_chunks::<4>().0.iter().flat_map(|p| [p[0], p[1], p[2]]).collect();
         if let Some(d) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
             std::fs::create_dir_all(d).map_err(|e| format!("{}: {}", d.display(), e))?;
         }
@@ -528,7 +528,7 @@ fn find_scripts(dir: &Path) -> HashMap<String, PathBuf> {
             let p = e.path();
             if p.is_dir() {
                 walk(&p, out);
-            } else if p.extension().map_or(false, |x| x == "s") {
+            } else if p.extension().is_some_and(|x| x == "s") {
                 out.push(p);
             }
         }
@@ -598,7 +598,7 @@ impl Session {
         let Some(scene) = self.scene.clone() else { return Ok(()) };
         let Some(path) = t.files.get(&scene).cloned() else { return Ok(()) };
         let stamp = std::fs::metadata(&path).and_then(|m| m.modified()).map_err(|e| format!("{}: {}", path.display(), e))?;
-        if t.read.get(&scene).map_or(true, |(s, _)| t.watch && *s != stamp) {
+        if t.read.get(&scene).is_none_or(|(s, _)| t.watch && *s != stamp) {
             let bytes = std::fs::read(&path).map_err(|e| format!("{}: {}", path.display(), e))?;
             let map = crate::script::lines(&crate::script::utf16le(&bytes)).into_iter().map(|l| (l.id, l.text)).collect();
             t.read.insert(scene.clone(), (stamp, map));
@@ -692,7 +692,7 @@ impl Session {
     /// Puts the hero at `pos` (1/4096 units) of the map he is on; false if the map has no hero yet.
     pub fn teleport(&mut self, pos: [i32; 3]) -> bool {
         let word = |a: u32| debug::peek(a, 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
-        let Some(hero) = word(WORLD).and_then(|w| word(w)).filter(|h| *h != 0) else { return false };
+        let Some(hero) = word(WORLD).and_then(word).filter(|h| *h != 0) else { return false };
         let bytes: Vec<u8> = pos.iter().flat_map(|p| p.to_le_bytes()).collect();
         debug::poke(hero + 0x18, &bytes)
     }
@@ -720,7 +720,7 @@ impl Session {
 
     pub fn map(&self) -> Option<i32> {
         let word = |a: u32| debug::peek(a, 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
-        let hero = word(WORLD).and_then(|w| word(w)).filter(|h| *h != 0)?;
+        let hero = word(WORLD).and_then(word).filter(|h| *h != 0)?;
         word(hero + 0xC).map(|m| m as i32)
     }
 
@@ -894,13 +894,19 @@ pub fn route(doors: &[Door], from: i32, to: i32) -> Option<Vec<Door>> {
             return Some(path);
         }
         for (i, d) in doors.iter().enumerate().filter(|(_, d)| d.event.map == map) {
-            if !came.contains_key(&d.target) {
-                came.insert(d.target, Some(i));
+            if let std::collections::hash_map::Entry::Vacant(e) = came.entry(d.target) {
+                e.insert(Some(i));
                 queue.push_back(d.target);
             }
         }
     }
     None
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        nds::finish();
+    }
 }
 
 #[cfg(test)]
@@ -931,11 +937,5 @@ mod tests {
         assert_eq!(r, ["A03", "A04"]);
         assert!(route(&doors, 1, 1).unwrap().is_empty());
         assert!(route(&doors, 4, 1).is_none());
-    }
-}
-
-impl Drop for Session {
-    fn drop(&mut self) {
-        nds::finish();
     }
 }

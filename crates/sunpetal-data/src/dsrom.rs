@@ -46,7 +46,7 @@ pub fn read(path: &Path) -> Result<Option<Vec<u8>>, String> {
 
 /// Whether the data file keeps a ROM image (only its section table is read).
 pub fn has_rom(path: &Path) -> bool {
-    Container::tags(path).map_or(false, |t| t.contains(TAG))
+    Container::tags(path).is_ok_and(|t| t.contains(TAG))
 }
 
 #[cfg(test)]

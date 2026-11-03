@@ -8,7 +8,7 @@ use sunpetal_runtime::services::{arm_context_saved, arm_exception_return, arm_po
 use sunpetal_runtime::{machine, Cpu, Hardware};
 
 thread_local! {
-    static LOG: RefCell<Vec<String>> = RefCell::new(Vec::new());
+    static LOG: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
 fn log(s: &str) {

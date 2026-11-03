@@ -130,7 +130,7 @@ fn a_pack_made_of_the_dump_changes_nothing() {
     cfg.dump_textures = Some(dump.clone());
     let plain = picture_at(cfg, 2400, tmp.join("a.png"));
     std::thread::sleep(std::time::Duration::from_millis(500)); // the dump's writer threads
-    let n = std::fs::read_dir(&dump).map(|d| d.flatten().filter(|e| e.path().extension().map_or(false, |x| x == "png")).count()).unwrap_or(0);
+    let n = std::fs::read_dir(&dump).map(|d| d.flatten().filter(|e| e.path().extension().is_some_and(|x| x == "png")).count()).unwrap_or(0);
     assert!(n >= 5, "the 3D scene at VBlank 2400 uses textures ({} dumped)", n);
     let mut cfg = Config::new(&rom);
     cfg.out = tmp.join("b");
@@ -160,7 +160,7 @@ fn the_2d_dump_is_the_same_on_every_run() {
                 cfg.input = (400..1600).step_by(100).map(|v| format!("{}:START", v)).collect::<Vec<_>>().join(",");
                 nds::boot(cfg).expect("boot");
                 while nds::run_frame() {
-                    if nds::vblanks() % 100 == 0 {
+                    if nds::vblanks().is_multiple_of(100) {
                         nds::dump_2d(&d2);
                     }
                 }
@@ -218,7 +218,7 @@ fn run_2d(rom: &std::path::Path, frames: u64, pack: Option<PathBuf>, dump: Optio
     let info = r.next_frame(&mut buf).expect("png frame");
     let rgba: Vec<u8> = match info.color_type {
         png::ColorType::Rgba => buf[..info.buffer_size()].to_vec(),
-        _ => buf[..info.buffer_size()].chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect(),
+        _ => buf[..info.buffer_size()].as_chunks::<3>().0.iter().flat_map(|p| [p[0], p[1], p[2], 255]).collect(),
     };
     (info.width as usize, info.height as usize, rgba, placed)
 }
@@ -260,7 +260,7 @@ fn a_2d_pack_replaces_the_sprites_it_names_and_nothing_else() {
     assert!(plain == none, "a pack of nothing must not change the picture");
     // the pack of the dump: sprites are drawn over the engine's own, the picture is the same
     let (_, _, same, placed) = run_2d(&rom, frames, Some(dump.clone()), None, tmp.join("same.png"));
-    let bad = plain.chunks_exact(4).zip(same.chunks_exact(4)).filter(|(a, b)| a != b).count();
+    let bad = plain.as_chunks::<4>().0.iter().zip(same.chunks_exact(4)).filter(|(a, b)| a != b).count();
     assert!(placed > 0);
     assert_eq!(bad, 0, "a pack of the dump changes {} pixels", bad);
     // the same pictures as a part of a data file draw the same picture
@@ -292,7 +292,7 @@ fn a_2d_pack_replaces_the_sprites_it_names_and_nothing_else() {
     // both screens' rows: whichever engine is on top, a changed pixel lies in a sprite's rectangle of one of them
     let screen_h = h / 2;
     let mut changed = 0;
-    for (i, (a, b)) in plain.chunks_exact(4).zip(painted.chunks_exact(4)).enumerate() {
+    for (i, (a, b)) in plain.as_chunks::<4>().0.iter().zip(painted.chunks_exact(4)).enumerate() {
         if a == b {
             continue;
         }
@@ -342,7 +342,7 @@ fn a_2d_pack_replaces_background_layers() {
         }
     }
     let (frames, plain, same, layers) = found.expect("some frame shows a layer the pack can replace");
-    let bad = plain.chunks_exact(4).zip(same.chunks_exact(4)).filter(|(a, b)| a != b).count();
+    let bad = plain.as_chunks::<4>().0.iter().zip(same.chunks_exact(4)).filter(|(a, b)| a != b).count();
     assert_eq!(bad, 0, "a pack of the layers of frame {} changes {} pixels", frames, bad);
     for n in &layers {
         let px: Vec<u8> = (0..256 * 192).flat_map(|_| [255u8, 0, 255, 255]).collect();
@@ -354,7 +354,7 @@ fn a_2d_pack_replaces_background_layers() {
     }
     let (_, _, painted, placed) = run_2d(&rom, frames, Some(checker), None, tmp.join("checker.png"));
     assert!(placed > 0 && plain != painted, "the one-colour layers change the picture");
-    for (i, (a, b)) in plain.chunks_exact(4).zip(painted.chunks_exact(4)).enumerate() {
+    for (i, (a, b)) in plain.as_chunks::<4>().0.iter().zip(painted.chunks_exact(4)).enumerate() {
         assert!(a == b || b[..3] == [255, 0, 255], "pixel {} changed to something else than the pack's colour", i);
     }
 }

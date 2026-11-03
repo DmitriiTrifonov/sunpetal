@@ -419,7 +419,7 @@ impl Machine {
     /// A return that went to a landing: a saved context was loaded.
     pub fn is_landing(&mut self, cpu: i32, key: u32) -> bool {
         let has = |m: &ArmModule| m.landings().binary_search(&key).is_ok();
-        if self.active[ci(cpu)].map_or(false, has) {
+        if self.active[ci(cpu)].is_some_and(has) {
             return true;
         }
         if !self.ovl_made {

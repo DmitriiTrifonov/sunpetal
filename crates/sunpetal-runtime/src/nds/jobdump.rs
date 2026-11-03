@@ -6,7 +6,7 @@ use super::render3d::{GxPoly, GxVertex, Job, TexKey};
 use super::texpack::Pack;
 use super::{Extras, TexFilter};
 use std::collections::HashMap;
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
@@ -146,7 +146,7 @@ pub(super) fn write(job: &Job, scale: usize, vblank: u64, px: &[u32], notes: u32
     o.blob(&job.texpal);
     // the keys sorted, so the file is stable for the same frame
     let mut keys: Vec<_> = job.keys.iter().collect();
-    keys.sort_by_key(|(k, _)| (*k).clone());
+    keys.sort_by_key(|(k, _)| *(*k));
     o.u32(keys.len() as u32);
     for ((tex, pal), k) in keys {
         o.u32(*tex);
@@ -164,7 +164,7 @@ pub(super) fn write(job: &Job, scale: usize, vblank: u64, px: &[u32], notes: u32
     }
     let tmp = path.with_extension("tmp");
     std::fs::File::create(&tmp)?.write_all(&o.0)?;
-    std::fs::rename(&tmp, &path)?;
+    std::fs::rename(&tmp, path)?;
     Ok(path.to_path_buf())
 }
 

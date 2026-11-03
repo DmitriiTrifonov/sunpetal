@@ -1240,7 +1240,7 @@
   {
    "id": "K-114",
    "t": "Форматирование и clippy: cargo fmt, clippy --fix, затем STRICT=1 в tools/verify.sh и CI без continue-on-error",
-   "col": "backlog",
+   "col": "check",
    "r": 3.0,
    "i": 1.0,
    "c": 0.8,

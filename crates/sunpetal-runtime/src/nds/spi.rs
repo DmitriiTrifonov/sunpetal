@@ -390,10 +390,8 @@ impl Nds {
                     s.alarm2[i] = b;
                 }
             }
-            7 => {
-                if i == 0 {
-                    s.free = b;
-                }
+            7 if i == 0 => {
+                s.free = b;
             }
             _ => {} // the date is fixed: writes to it are dropped
         }

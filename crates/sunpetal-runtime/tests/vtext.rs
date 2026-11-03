@@ -49,7 +49,7 @@ fn a_line_is_drawn_when_the_game_draws_its_first_letter() {
     let (mut ptr, mut changed, mut lines) = (0u32, 0u64, Vec::new());
     for _ in 0..1500 {
         // A at a steady pace to move the lines on
-        if nds::vblanks() % 90 == 0 {
+        if nds::vblanks().is_multiple_of(90) {
             s.press("A", 3).unwrap();
         } else {
             s.run(1).unwrap();
@@ -59,7 +59,7 @@ fn a_line_is_drawn_when_the_game_draws_its_first_letter() {
         if p != ptr {
             (ptr, changed) = (p, now);
         }
-        if nds::dialogue().is_some_and(|d| d.drawn) && lines.last().map_or(true, |l: &(u32, u64, u64)| l.0 != p) {
+        if nds::dialogue().is_some_and(|d| d.drawn) && lines.last().is_none_or(|l: &(u32, u64, u64)| l.0 != p) {
             lines.push((p, changed, now));
         }
     }
@@ -125,7 +125,7 @@ fn hiding_the_raster_text_changes_only_the_dialogue_band() {
     assert_eq!(plain.len(), hidden.len());
     let row = 256 * scale * 4;
     let (mut inside, mut outside) = (0usize, 0usize);
-    for (i, (a, b)) in plain.chunks_exact(4).zip(hidden.chunks_exact(4)).enumerate() {
+    for (i, (a, b)) in plain.as_chunks::<4>().0.iter().zip(hidden.chunks_exact(4)).enumerate() {
         if a != b {
             let y = i * 4 / row;
             if (144 * scale..192 * scale).contains(&y) {

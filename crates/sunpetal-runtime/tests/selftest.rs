@@ -63,7 +63,7 @@ fn interp_game_arm9() {
 fn overlay_vectors() -> Vec<PathBuf> {
     let dir = gen_dir().join("selftest");
     let mut v: Vec<PathBuf> = std::fs::read_dir(dir).map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).collect()).unwrap_or_default();
-    v.retain(|p| p.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.starts_with("arm9_ov") && n.ends_with("_vectors.txt")));
+    v.retain(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("arm9_ov") && n.ends_with("_vectors.txt")));
     v.sort();
     v
 }

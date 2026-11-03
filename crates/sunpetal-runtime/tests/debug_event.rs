@@ -15,7 +15,7 @@ fn goto_a_scene_in_free_walk_plays_its_lines() {
     std::fs::copy(&save, &copy).expect("the save's copy");
     let mut s = Session::open(rom, Some(copy)).expect("open");
     s.goto("C04_16", None).expect("goto");
-    let stop = s.autoplay(&Autoplay { max_lines: 3, delay: 0, out: None }).expect("autoplay");
+    let stop = s.autoplay(&Autoplay { max_lines: 3, delay: 0, out: None, screens: None }).expect("autoplay");
     assert_eq!(stop, Stop::MaxLines);
     let ids: Vec<_> = s.events().iter().rev().take(3).map(|e| e.id.clone().unwrap_or_default()).collect();
     assert_eq!(ids, ["16003", "16002", "16001"]);

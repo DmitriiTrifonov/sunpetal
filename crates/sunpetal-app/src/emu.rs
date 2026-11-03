@@ -25,7 +25,7 @@ const NO_STEP_FRAMES: u32 = 300;
 fn fingerprint(rgba: &[u8]) -> u64 {
     let step = (rgba.len() / 4 / 3000).max(1) * 4;
     let mut h = 0xcbf2_9ce4_8422_2325u64;
-    for px in rgba.chunks_exact(4).step_by(step / 4) {
+    for px in rgba.as_chunks::<4>().0.iter().step_by(step / 4) {
         for &b in &px[..3] {
             h = (h ^ b as u64).wrapping_mul(0x100_0000_01b3);
         }
@@ -243,7 +243,6 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     let mut last_placed = usize::MAX;
     let (mut dry, mut partial) = (0u32, 0u32);
     // the side of the dialogue portrait and the panel's middle, last seen (the window draws the text with them)
-    let mut portrait_left = true;
     let mut middle: Option<f32> = None;
     // the raster text was hidden for the frame being drawn (the decision of the frame before)
     let mut hide_now = false;
@@ -407,9 +406,6 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             let picture = nds::screens_rgba();
             t_scr += t_a.elapsed();
             shared.dialogue.store(dialogue_shown(picture.0, &picture.1), Ordering::Relaxed);
-            if let Some(left) = crate::layout::portrait_left(picture.0, &picture.1) {
-                portrait_left = left;
-            }
             // the panel's middle is kept while the red line is out of sight for a frame (the box opens and closes)
             if let Some(m) = crate::layout::dialogue_panel_middle(picture.0, &picture.1) {
                 middle = Some(m);
@@ -585,7 +581,7 @@ mod tests {
     #[test]
     fn a_dialogue_box_is_a_red_rule_over_a_grey_panel() {
         let mut p = vec![255u8; 2 * 256 * 192 * 4];
-        for px in p.chunks_exact_mut(4) {
+        for px in p.as_chunks_mut::<4>().0 {
             px[..3].copy_from_slice(&[40, 90, 30]);
         }
         assert!(!dialogue_shown(1, &p));
@@ -640,7 +636,7 @@ mod skip_tests {
         assert!(!shared.skip.load(Ordering::Relaxed), "a skip started with nothing to skip");
         std::thread::sleep(Duration::from_millis(500));
         let (_, rgba) = shared.frame.lock().unwrap().clone().expect("a picture");
-        let bright = rgba.chunks_exact(4).map(|p| p[0] as u64 + p[1] as u64 + p[2] as u64).sum::<u64>() / (rgba.len() as u64 / 4);
+        let bright = rgba.as_chunks::<4>().0.iter().map(|p| p[0] as u64 + p[1] as u64 + p[2] as u64).sum::<u64>() / (rgba.len() as u64 / 4);
         assert!(bright > 30, "the picture is black");
         shared.quit.store(true, Ordering::Relaxed);
     }

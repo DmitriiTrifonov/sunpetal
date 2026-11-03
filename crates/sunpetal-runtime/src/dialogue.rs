@@ -199,6 +199,6 @@ impl Tracker {
 /// The text of the game's UTF-16 string at `ptr`, up to its end (a bounded read).
 pub fn utf16_at(ptr: u32) -> Option<String> {
     let bytes = debug::peek(ptr, 1024)?;
-    let units: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).take_while(|u| *u != 0).collect();
+    let units: Vec<u16> = bytes.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes([c[0], c[1]])).take_while(|u| *u != 0).collect();
     Some(String::from_utf16_lossy(&units).replace("\r\n", "\n").replace('\r', "\n"))
 }

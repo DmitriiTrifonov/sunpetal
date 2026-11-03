@@ -164,7 +164,7 @@ fn brighter(a: u32, evy: u32) -> u32 {
     let mut out = 0;
     for s in [0, 6, 12] {
         let c = a >> s & 63;
-        out |= (c + ((63 - c) * evy >> 4)) << s;
+        out |= (c + (((63 - c) * evy) >> 4)) << s;
     }
     out
 }
@@ -524,8 +524,8 @@ impl Nds {
                     ty = if a1 & 0x2000 != 0 { h - 1 - dy } else { dy };
                 }
                 let (txu, tyu, wu) = (tx as u32, ty as u32, w as u32);
-                let px;
-                if mode == 3 {
+
+                let px = if mode == 3 {
                     let addr = if d & 0x40 != 0 {
                         tile * (128u32 << ((d >> 22) & 1)) + (tyu * wu + txu) * 2
                     } else {
@@ -537,7 +537,7 @@ impl Nds {
                     if c & 0x8000 == 0 {
                         continue;
                     }
-                    px = c666(c) | PX_OPAQUE | PX_BMPA | alpha << 24;
+                    c666(c) | PX_OPAQUE | PX_BMPA | alpha << 24
                 } else {
                     let tbytes = if c256 { 64 } else { 32 };
                     let addr = if d & 0x10 != 0 {
@@ -563,8 +563,8 @@ impl Nds {
                     } else {
                         self.pal16(l.e, 0x100 + (a2 >> 12) * 16 + idx)
                     };
-                    px = c666(c) | PX_OPAQUE | if mode == 1 { PX_SEMI } else { 0 };
-                }
+                    c666(c) | PX_OPAQUE | if mode == 1 { PX_SEMI } else { 0 }
+                };
                 let xu = xs as usize;
                 if mode == 2 {
                     l.objwin[xu] = 1;
@@ -737,7 +737,7 @@ impl Nds {
                         }
                     }
                 }
-                if rgba.chunks_exact(4).all(|p| p[3] == 0) {
+                if rgba.as_chunks::<4>().0.iter().all(|p| p[3] == 0) {
                     continue;
                 }
                 let mut h = 0xcbf2_9ce4_8422_2325u64;
@@ -796,8 +796,8 @@ impl Nds {
         for ty in 0..h as u32 {
             for tx in 0..w as u32 {
                 let (wu, o) = (w as u32, ((ty * w as u32 + tx) * 4) as usize);
-                let c;
-                if bitmap {
+
+                let c = if bitmap {
                     let addr = if d & 0x40 != 0 {
                         tile * (128u32 << ((d >> 22) & 1)) + (ty * wu + tx) * 2
                     } else {
@@ -809,7 +809,7 @@ impl Nds {
                     if v & 0x8000 == 0 {
                         continue;
                     }
-                    c = v;
+                    v
                 } else {
                     let tbytes = if c256 { 64 } else { 32 };
                     let addr = if d & 0x10 != 0 {
@@ -828,7 +828,7 @@ impl Nds {
                         continue;
                     }
                     used[idx as usize] = true;
-                    c = if c256 {
+                    if c256 {
                         if ext {
                             self.vram_r16(l.aobjext, (a2 >> 12) * 512 + idx * 2)
                         } else {
@@ -836,8 +836,8 @@ impl Nds {
                         }
                     } else {
                         self.pal16(e, 0x100 + (a2 >> 12) * 16 + idx)
-                    };
-                }
+                    }
+                };
                 let c = c666(c);
                 let ch = |sh: u32| {
                     let v = (c >> sh & 63) as u8;
@@ -862,7 +862,7 @@ impl Nds {
                 eat(&mut hp, c as u32);
             }
         }
-        if rgba.chunks_exact(4).all(|p| p[3] == 0) {
+        if rgba.as_chunks::<4>().0.iter().all(|p| p[3] == 0) {
             return None;
         }
         let mut mat = [0x100, 0, 0, 0x100];
@@ -1041,7 +1041,7 @@ impl Nds {
                 let c = *v >> 2;
                 *v = if m != 0 && *v == (c << 2 | c >> 4) {
                     let c = if m == 1 {
-                        c + ((63 - c) * f >> 4)
+                        c + (((63 - c) * f) >> 4)
                     } else if m == 2 {
                         c - ((c * f + 7) >> 4)
                     } else {
@@ -1050,7 +1050,7 @@ impl Nds {
                     c << 2 | c >> 4
                 } else {
                     match m {
-                        1 => *v + ((255 - *v) * f >> 4),
+                        1 => *v + (((255 - *v) * f) >> 4),
                         2 => *v - ((*v * f + 7) >> 4),
                         _ => *v,
                     }
@@ -1254,7 +1254,7 @@ impl Nds {
                     }
                     continue;
                 }
-                let cached = mosaic && y as usize % mbv != 0;
+                let cached = mosaic && !(y as usize).is_multiple_of(mbv);
                 if cached {
                     buf = self.gpu.mosaic[e * 4 + bg];
                 } else {

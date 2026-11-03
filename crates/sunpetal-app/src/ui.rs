@@ -628,7 +628,7 @@ impl Menu {
                 if ui.button(tx("Reset all", "Сбросить всё")).clicked() {
                     *s = Settings::default();
                     self.rebinding = None;
-                    self.message = tx("settings reset", "настройки сброшены").into();
+                    self.message = tx("settings reset", "настройки сброшены");
                 }
                 if ui.button(tx("Close", "Закрыть")).clicked() {
                     self.open = false;
@@ -734,7 +734,7 @@ fn has_textures(path: &std::path::Path) -> bool {
     }
     let n = u32::from_le_bytes([head[8], head[9], head[10], head[11]]).min(64) as usize;
     let mut table = vec![0u8; n * 20];
-    f.read_exact(&mut table).is_ok() && table.chunks_exact(20).any(|t| &t[..4] == b"TEXS")
+    f.read_exact(&mut table).is_ok() && table.as_chunks::<20>().0.iter().any(|t| &t[..4] == b"TEXS")
 }
 
 #[cfg(test)]
