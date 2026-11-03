@@ -2150,10 +2150,7 @@ fn readback_words(device: &wgpu::Device, buf: &wgpu::Buffer, w: usize, h: usize)
     let mut v = Vec::with_capacity(w * h);
     for y in 0..h {
         let base = y * row;
-        for x in 0..w {
-            let p = base + x * 4;
-            v.push(u32::from_le_bytes([map[p], map[p + 1], map[p + 2], map[p + 3]]));
-        }
+        v.extend(map[base..base + w * 4].chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])));
     }
     drop(map);
     buf.unmap();
@@ -2170,9 +2167,7 @@ fn readback_bytes(device: &wgpu::Device, buf: &wgpu::Buffer, w: usize, h: usize)
     let mut v = Vec::with_capacity(w * h);
     for y in 0..h {
         let base = y * row;
-        for x in 0..w {
-            v.push(map[base + x * 4]);
-        }
+        v.extend(map[base..base + w * 4].chunks_exact(4).map(|c| c[0]));
     }
     drop(map);
     buf.unmap();

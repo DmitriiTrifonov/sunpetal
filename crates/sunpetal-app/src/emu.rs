@@ -250,6 +250,8 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     let (mut counted, mut since) = (0u32, Instant::now());
     let (mut shown, mut shown_since) = (0u32, Instant::now());
     let (mut t_run, mut t_grab) = (Duration::ZERO, Duration::ZERO);
+    // of the grab: the plain screens and the widened upper screen (SUNPETAL_STATS)
+    let (mut t_scr, mut t_wid) = (Duration::ZERO, Duration::ZERO);
     let mut prev = sunpetal_runtime::services::counters();
     let mut prev_t = nds::timing();
     let mut last_flush = Instant::now();
@@ -401,7 +403,9 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         let waits = nds::script_waits() == Some(true);
         shared.waiting.store(waits, Ordering::Relaxed);
         if draw {
+            let t_a = Instant::now();
             let picture = nds::screens_rgba();
+            t_scr += t_a.elapsed();
             shared.dialogue.store(dialogue_shown(picture.0, &picture.1), Ordering::Relaxed);
             if let Some(left) = crate::layout::portrait_left(picture.0, &picture.1) {
                 portrait_left = left;
@@ -427,7 +431,9 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
                 last_print = print;
             }
             // the widened picture first: the window takes the plain one and then looks for its wide partner
+            let t_b = Instant::now();
             let mut wide = if want_e > 0 { nds::upper_wide_rgba() } else { None };
+            t_wid += t_b.elapsed();
             no_wide = if wide.is_some() { 0 } else { no_wide.saturating_add(1) };
             wide_streak = if wide.is_some() { wide_streak + 1 } else if no_wide > WIDE_KEEP_FRAMES { 0 } else { wide_streak };
             // no 3D for a moment: the plain upper screen, its edge columns run on, so the view does not
@@ -467,11 +473,13 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             let tm = nds::timing();
             let per = |a: u64, b: u64| (a - b) as f64 / shown as f64;
             *shared.status.lock().unwrap() = format!(
-                "DS frame {}, {:.0} fps\nrun {:.0} ms/frame, picture {:.1} ms\nper frame: polls {:.0}, calls {:.0}\nquanta {:.0}: guest {:.1} ms, hardware {:.1} ms, sound {:.1} ms\nskip {} (marks {}, idle {}, waiting {}, loaded {}, dialogue {}), script mark {:08X}",
+                "DS frame {}, {:.0} fps\nrun {:.0} ms/frame, picture {:.1} ms (screens {:.1}, wide {:.1})\nper frame: polls {:.0}, calls {:.0}\nquanta {:.0}: guest {:.1} ms, hardware {:.1} ms, sound {:.1} ms\nskip {} (marks {}, idle {}, waiting {}, loaded {}, dialogue {}), script mark {:08X}",
                 nds::vblanks(),
                 fps,
                 t_run.as_secs_f64() * 1000.0 / shown as f64,
                 t_grab.as_secs_f64() * 1000.0 / shown as f64,
+                t_scr.as_secs_f64() * 1000.0 / shown as f64,
+                t_wid.as_secs_f64() * 1000.0 / shown as f64,
                 per(c.0, prev.0),
                 per(c.1, prev.1),
                 (tm.0 - prev_t.0) as f64 / shown as f64,
@@ -493,6 +501,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             prev_t = tm;
             t_run = Duration::ZERO;
             t_grab = Duration::ZERO;
+            (t_scr, t_wid) = (Duration::ZERO, Duration::ZERO);
             shown = 0;
             shown_since = Instant::now();
         }

@@ -1161,9 +1161,9 @@ pub fn screens_rgba() -> (usize, Vec<u8>) {
 /// side) x scale wide, 192 x scale high; `None` unless the 3D is on the upper screen.
 pub fn upper_wide_rgba() -> Option<(usize, usize, Vec<u8>)> {
     let (scale, e, rgb) = nds(|n| n.upper_wide_rgb(n.scale).map(|(e, rgb)| (n.scale, e, rgb)))?;
-    let mut out = Vec::with_capacity(rgb.len() / 3 * 4);
-    for p in rgb.chunks_exact(3) {
-        out.extend_from_slice(&[p[0], p[1], p[2], 255]);
+    let mut out = vec![255u8; rgb.len() / 3 * 4];
+    for (o, p) in out.chunks_exact_mut(4).zip(rgb.chunks_exact(3)) {
+        o[..3].copy_from_slice(p);
     }
     Some((scale, e, out))
 }
