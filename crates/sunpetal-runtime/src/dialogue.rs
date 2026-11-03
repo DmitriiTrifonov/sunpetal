@@ -183,9 +183,7 @@ impl Tracker {
         let ptr = word(SHOWN).filter(|p| *p != 0)?;
         let text = utf16_at(ptr)?;
         let count = word(SLOT_COUNT)?;
-        let slot = (0..count).rev().find(|i| {
-            word(SLOTS + 4 * i).and_then(|s| word(s + 8)) == Some(ptr)
-        });
+        let slot = (0..count).rev().find(|i| word(SLOTS + 4 * i).and_then(|s| word(s + 8)) == Some(ptr));
         let id = slot.and_then(|s| self.ids.borrow().get(&s).copied());
         let face = slot.and_then(|s| {
             (0..s).rev().find_map(|j| {

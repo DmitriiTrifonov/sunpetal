@@ -222,7 +222,11 @@ impl Nds {
             return self.r16(cpu, a) as u32 | (self.r16(cpu, a + 2) as u32) << 16;
         }
         let h = self.r16(cpu, a & !1);
-        if size == 2 { h as u32 } else { (h as u32 >> ((a & 1) * 8)) & 0xFF }
+        if size == 2 {
+            h as u32
+        } else {
+            (h as u32 >> ((a & 1) * 8)) & 0xFF
+        }
     }
 
     fn io_write(&mut self, cpu: i32, a: u32, v: u32, size: usize) {
@@ -233,9 +237,7 @@ impl Nds {
             return;
         }
         if off >= 0x2000 {
-            self.once("io write", a, || {
-                format!("ARM{}: {}-byte write of {:08X} to {:08X}, outside the I/O registers", cpu, size, v, a)
-            });
+            self.once("io write", a, || format!("ARM{}: {}-byte write of {:08X} to {:08X}, outside the I/O registers", cpu, size, v, a));
             return;
         }
         if off == 0x188 {

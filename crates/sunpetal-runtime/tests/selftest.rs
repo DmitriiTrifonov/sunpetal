@@ -6,9 +6,7 @@ use std::path::PathBuf;
 use sunpetal_runtime::selftest::run_vectors;
 
 fn gen_dir() -> PathBuf {
-    std::env::var_os("SUNPETAL_GEN_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../generated/recomp"))
+    std::env::var_os("SUNPETAL_GEN_DIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../generated/recomp"))
 }
 
 fn replay(vectors: PathBuf, required: bool, interp: bool) {
@@ -38,9 +36,7 @@ fn optest_arm7() {
 
 #[test]
 fn game_arm9() {
-    let v = std::env::var_os("SUNPETAL_ARM9_VECTORS")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| gen_dir().join("selftest/arm9_vectors.txt"));
+    let v = std::env::var_os("SUNPETAL_ARM9_VECTORS").map(PathBuf::from).unwrap_or_else(|| gen_dir().join("selftest/arm9_vectors.txt"));
     replay(v, false, false);
 }
 
@@ -58,9 +54,7 @@ fn interp_optest_arm7() {
 
 #[test]
 fn interp_game_arm9() {
-    let v = std::env::var_os("SUNPETAL_ARM9_VECTORS")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| gen_dir().join("selftest/arm9_vectors.txt"));
+    let v = std::env::var_os("SUNPETAL_ARM9_VECTORS").map(PathBuf::from).unwrap_or_else(|| gen_dir().join("selftest/arm9_vectors.txt"));
     replay(v, false, true);
 }
 
@@ -68,12 +62,8 @@ fn interp_game_arm9() {
 // choice among the overlay modules (the crc of each function's bytes in memory).
 fn overlay_vectors() -> Vec<PathBuf> {
     let dir = gen_dir().join("selftest");
-    let mut v: Vec<PathBuf> = std::fs::read_dir(dir)
-        .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).collect())
-        .unwrap_or_default();
-    v.retain(|p| {
-        p.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.starts_with("arm9_ov") && n.ends_with("_vectors.txt"))
-    });
+    let mut v: Vec<PathBuf> = std::fs::read_dir(dir).map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).collect()).unwrap_or_default();
+    v.retain(|p| p.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.starts_with("arm9_ov") && n.ends_with("_vectors.txt")));
     v.sort();
     v
 }

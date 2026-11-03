@@ -39,7 +39,7 @@ pub fn charset<'a>(texts: impl IntoIterator<Item = &'a str>) -> BTreeSet<char> {
     let mut set: BTreeSet<char> = (0x20u8..0x7F).map(char::from).collect();
     for t in texts {
         set.extend(t.chars().filter(|c| !c.is_control()));
-    set.extend(EMPTY);
+        set.extend(EMPTY);
     }
     set
 }
@@ -89,7 +89,13 @@ pub fn build(base: &Nftr, ttf: &[u8], chars: &BTreeSet<char>, p: &Params) -> Res
                 }
                 let c = (cov * p.weight).clamp(0.0, 1.0);
                 let v = if p.pixel {
-                    if c >= PIXEL_CUT { levels } else if c >= PIXEL_CUT / 2.0 { (levels / 2.0).round() } else { 0.0 }
+                    if c >= PIXEL_CUT {
+                        levels
+                    } else if c >= PIXEL_CUT / 2.0 {
+                        (levels / 2.0).round()
+                    } else {
+                        0.0
+                    }
                 } else {
                     c * levels
                 };

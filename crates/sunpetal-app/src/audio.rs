@@ -79,7 +79,14 @@ pub fn open() -> Result<(Arc<Ring>, cpal::Stream), String> {
                         last
                     };
                     for (i, s) in frame.iter_mut().enumerate() {
-                        *s = vol * if i == 0 { l / 32768.0 } else if i == 1 { rr / 32768.0 } else { 0.0 };
+                        *s = vol
+                            * if i == 0 {
+                                l / 32768.0
+                            } else if i == 1 {
+                                rr / 32768.0
+                            } else {
+                                0.0
+                            };
                     }
                 }
             },

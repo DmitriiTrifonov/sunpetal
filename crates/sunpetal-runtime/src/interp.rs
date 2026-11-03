@@ -27,7 +27,11 @@ fn ror(v: u32, n: u32) -> u32 {
 }
 
 fn iw(x: u32) -> u32 {
-    if x & 1 != 0 { x } else { x & !3 }
+    if x & 1 != 0 {
+        x
+    } else {
+        x & !3
+    }
 }
 
 /// The barrel shifter: the result and the carry out into `cy`. `n` as encoded (lsr/asr #32 as
@@ -202,7 +206,11 @@ impl<'a> Interp<'a> {
     }
 
     fn key(&self) -> u32 {
-        if self.t { self.pc | 1 } else { self.pc }
+        if self.t {
+            self.pc | 1
+        } else {
+            self.pc
+        }
     }
 
     /// Register n as an operand: pc reads +8 (ARM; +12 for a register-specified shift and a
@@ -244,24 +252,74 @@ impl<'a> Interp<'a> {
         let (mut write, mut full, mut x, mut y) = (true, 0u64, 0u32, 0u32);
         let (r, logic);
         match op {
-            0 => { r = a & b; logic = true; }
-            1 => { r = a ^ b; logic = true; }
-            8 => { r = a & b; logic = true; write = false; }
-            9 => { r = a ^ b; logic = true; write = false; }
-            12 => { r = a | b; logic = true; }
-            13 => { r = b; logic = true; }
-            14 => { r = a & !b; logic = true; }
-            15 => { r = !b; logic = true; }
+            0 => {
+                r = a & b;
+                logic = true;
+            }
+            1 => {
+                r = a ^ b;
+                logic = true;
+            }
+            8 => {
+                r = a & b;
+                logic = true;
+                write = false;
+            }
+            9 => {
+                r = a ^ b;
+                logic = true;
+                write = false;
+            }
+            12 => {
+                r = a | b;
+                logic = true;
+            }
+            13 => {
+                r = b;
+                logic = true;
+            }
+            14 => {
+                r = a & !b;
+                logic = true;
+            }
+            15 => {
+                r = !b;
+                logic = true;
+            }
             _ => {
                 logic = false;
                 let ci;
                 match op {
-                    2 | 10 => { x = a; y = !b; ci = 1; }
-                    3 => { x = b; y = !a; ci = 1; }
-                    4 | 11 => { x = a; y = b; ci = 0; }
-                    5 => { x = a; y = b; ci = self.c.c; }
-                    6 => { x = a; y = !b; ci = self.c.c; }
-                    _ => { x = b; y = !a; ci = self.c.c; }
+                    2 | 10 => {
+                        x = a;
+                        y = !b;
+                        ci = 1;
+                    }
+                    3 => {
+                        x = b;
+                        y = !a;
+                        ci = 1;
+                    }
+                    4 | 11 => {
+                        x = a;
+                        y = b;
+                        ci = 0;
+                    }
+                    5 => {
+                        x = a;
+                        y = b;
+                        ci = self.c.c;
+                    }
+                    6 => {
+                        x = a;
+                        y = !b;
+                        ci = self.c.c;
+                    }
+                    _ => {
+                        x = b;
+                        y = !a;
+                        ci = self.c.c;
+                    }
                 }
                 full = x as u64 + y as u64 + ci as u64;
                 r = full as u32;
@@ -500,7 +558,17 @@ impl<'a> Interp<'a> {
                 } else {
                     w & 0xFFF
                 };
-                let op = if ld { if b { 1 } else { 0 } } else if b { 9 } else { 8 };
+                let op = if ld {
+                    if b {
+                        1
+                    } else {
+                        0
+                    }
+                } else if b {
+                    9
+                } else {
+                    8
+                };
                 let base = self.rv(rn, 0);
                 self.ldst(op, rd, rn, base, off, p, u, wb || !p);
             }
@@ -671,13 +739,25 @@ impl<'a> Interp<'a> {
         }
         let op;
         if ld {
-            op = if sh == 1 { 2 } else if sh == 2 { 4 } else { 3 };
+            op = if sh == 1 {
+                2
+            } else if sh == 2 {
+                4
+            } else {
+                3
+            };
         } else {
             if sh >= 2 && (self.arch < 5 || r15 == 15) {
                 self.undefined();
                 return;
             }
-            op = if sh == 1 { 10 } else if sh == 2 { 5 } else { 11 };
+            op = if sh == 1 {
+                10
+            } else if sh == 2 {
+                5
+            } else {
+                11
+            };
         }
         let mut off = if i { ((w >> 4) & 0xF0) | (w & 15) } else { self.c.r[rm] };
         if !i && rm == 15 {
@@ -816,7 +896,11 @@ impl<'a> Interp<'a> {
             let mut cy = self.c.c;
             let v = self.c.r[mid3];
             let r = if top == 0 {
-                if n != 0 { shift_c(0, v, n, &mut cy, false) } else { v }
+                if n != 0 {
+                    shift_c(0, v, n, &mut cy, false)
+                } else {
+                    v
+                }
             } else {
                 shift_c(top as i32, v, if n != 0 { n } else { 32 }, &mut cy, false)
             };
@@ -851,7 +935,12 @@ impl<'a> Interp<'a> {
                     0 => self.dp(0, true, lo3, d, s, cy),
                     1 => self.dp(1, true, lo3, d, s, cy),
                     2 | 3 | 4 | 7 => {
-                        let kind = match alu { 2 => 0, 3 => 1, 4 => 2, _ => 3 };
+                        let kind = match alu {
+                            2 => 0,
+                            3 => 1,
+                            4 => 2,
+                            _ => 3,
+                        };
                         let r = shift_c(kind, d, s & 0xFF, &mut cy, true);
                         self.dp(13, true, lo3, 0, r, cy);
                     }
@@ -1025,11 +1114,7 @@ impl<'a> Interp<'a> {
 
     // ---- the run -----------------------------------------------------------------------
     fn in_program(&self, k: u32) -> bool {
-        modules().into_iter().any(|m| {
-            m.cpu == self.cpu
-                && m.overlay < 0
-                && m.segs().iter().any(|s| s.kind == SEG_PROGRAM && (k & !1).wrapping_sub(s.base) < s.size)
-        })
+        modules().into_iter().any(|m| m.cpu == self.cpu && m.overlay < 0 && m.segs().iter().any(|s| s.kind == SEG_PROGRAM && (k & !1).wrapping_sub(s.base) < s.size))
     }
 
     /// Control goes to `k` (bit 0 the state); `link`: lr was set for a return here. False when
@@ -1116,18 +1201,6 @@ impl<'a> Interp<'a> {
 pub fn interpret(c: &mut Cpu, key: u32) {
     let (cpu, exit) = (c.cpu, c.r[14]);
     let interp_only = machine(|m| m.interp_only);
-    let mut it = Interp {
-        c,
-        cpu,
-        arch: if cpu == 9 { 5 } else { 4 },
-        exit,
-        from_program: false,
-        interp_only,
-        pc: 0,
-        t: false,
-        flow: Flow::Next,
-        to: 0,
-        reg: false,
-    };
+    let mut it = Interp { c, cpu, arch: if cpu == 9 { 5 } else { 4 }, exit, from_program: false, interp_only, pc: 0, t: false, flow: Flow::Next, to: 0, reg: false };
     it.run(key);
 }

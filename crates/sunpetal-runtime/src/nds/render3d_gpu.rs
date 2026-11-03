@@ -113,61 +113,38 @@ struct AtlasEntry {
 static CTX: OnceLock<Option<Ctx>> = OnceLock::new();
 
 fn ctx() -> Result<&'static Ctx, String> {
-    CTX.get_or_init(|| make_ctx().ok())
-        .as_ref()
-        .ok_or_else(|| "no GPU device for the 3D renderer".to_string())
+    CTX.get_or_init(|| make_ctx().ok()).as_ref().ok_or_else(|| "no GPU device for the 3D renderer".to_string())
 }
 
 fn make_ctx() -> Result<Ctx, String> {
     let instance = wgpu::Instance::default();
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
-        .map_err(|_| "no GPU adapter")?;
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
-        .map_err(|e| e.to_string())?;
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("render3d_gpu"),
-        source: wgpu::ShaderSource::Wgsl(SHADER.into()),
-    });
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).map_err(|_| "no GPU adapter")?;
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).map_err(|e| e.to_string())?;
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("render3d_gpu"), source: wgpu::ShaderSource::Wgsl(SHADER.into()) });
     let uniform = |binding: u32| wgpu::BindGroupLayoutEntry {
         binding,
         visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-        ty: wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Uniform,
-            has_dynamic_offset: false,
-            min_binding_size: None,
-        },
+        ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
         count: None,
     };
     let storage = |binding: u32| wgpu::BindGroupLayoutEntry {
         binding,
         visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-        ty: wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Storage { read_only: true },
-            has_dynamic_offset: false,
-            min_binding_size: None,
-        },
+        ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None },
         count: None,
     };
     let tex = |binding: u32, sample: wgpu::TextureSampleType| wgpu::BindGroupLayoutEntry {
         binding,
         visibility: wgpu::ShaderStages::FRAGMENT,
-        ty: wgpu::BindingType::Texture {
-            sample_type: sample,
-            view_dimension: wgpu::TextureViewDimension::D2,
-            multisampled: false,
-        },
+        ty: wgpu::BindingType::Texture { sample_type: sample, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false },
         count: None,
     };
     // the geometry pass: uniforms, the triangles, the texture atlas
-    let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("render3d_gpu"),
-        entries: &[uniform(0), storage(1), tex(2, wgpu::TextureSampleType::Uint)],
-    });
+    let bgl = device
+        .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("render3d_gpu"), entries: &[uniform(0), storage(1), tex(2, wgpu::TextureSampleType::Uint)] });
     // the rear plane's bitmap: uniforms and its 256x256 texture
-    let bgl_rear = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("render3d_gpu rear"),
-        entries: &[uniform(0), tex(3, wgpu::TextureSampleType::Uint)],
-    });
+    let bgl_rear =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("render3d_gpu rear"), entries: &[uniform(0), tex(3, wgpu::TextureSampleType::Uint)] });
     // the fog pass: uniforms, the finished picture's word, fog flag, depth, the outline level, the
     // shade level and the polygon ID (the edge marking reads it)
     let bgl_fog = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -211,10 +188,8 @@ fn make_ctx() -> Result<Ctx, String> {
         entries: &[uniform(0), tex(6, wgpu::TextureSampleType::Float { filterable: false })],
     });
     // the nearest sky row (этап 7.4): uniforms and the row sources
-    let bgl_skyrow = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("render3d_gpu sky row"),
-        entries: &[uniform(0), tex(16, wgpu::TextureSampleType::Uint)],
-    });
+    let bgl_skyrow =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("render3d_gpu sky row"), entries: &[uniform(0), tex(16, wgpu::TextureSampleType::Uint)] });
     // the widened view's fill (этап 7.4): uniforms and every field of the accumulated picture
     // (the fog flag through a copy — it is not ping-ponged), plus the row sources
     let bgl_extend = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -255,11 +230,7 @@ fn make_ctx() -> Result<Ctx, String> {
     let vbuf = wgpu::VertexBufferLayout {
         array_stride: 8,
         step_mode: wgpu::VertexStepMode::Vertex,
-        attributes: &[wgpu::VertexAttribute {
-            format: wgpu::VertexFormat::Float32x2,
-            offset: 0,
-            shader_location: 0,
-        }],
+        attributes: &[wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x2, offset: 0, shader_location: 0 }],
     };
     let color_targets: [Option<wgpu::ColorTargetState>; 8] = [
         Some(wgpu::TextureFormat::R32Uint.into()),  // 0 word
@@ -271,26 +242,12 @@ fn make_ctx() -> Result<Ctx, String> {
         Some(wgpu::TextureFormat::R32Uint.into()),  // 6 cover
         Some(wgpu::TextureFormat::R32Uint.into()),  // 7 trans
     ];
-    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("render3d_gpu"),
-        bind_group_layouts: &[Some(&bgl)],
-        immediate_size: 0,
-    });
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("render3d_gpu"), bind_group_layouts: &[Some(&bgl)], immediate_size: 0 });
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("render3d_gpu"),
         layout: Some(&layout),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: Some("vs"),
-            compilation_options: Default::default(),
-            buffers: &[Some(vbuf.clone())],
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: Some("fs"),
-            compilation_options: Default::default(),
-            targets: &color_targets,
-        }),
+        vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[Some(vbuf.clone())] },
+        fragment: Some(wgpu::FragmentState { module: &shader, entry_point: Some("fs"), compilation_options: Default::default(), targets: &color_targets }),
         primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: wgpu::TextureFormat::Depth32Float,
@@ -303,26 +260,13 @@ fn make_ctx() -> Result<Ctx, String> {
         multiview_mask: None,
         cache: None,
     });
-    let layout_rear = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("render3d_gpu rear"),
-        bind_group_layouts: &[Some(&bgl_rear)],
-        immediate_size: 0,
-    });
+    let layout_rear =
+        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("render3d_gpu rear"), bind_group_layouts: &[Some(&bgl_rear)], immediate_size: 0 });
     let rear_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("render3d_gpu rear"),
         layout: Some(&layout_rear),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: Some("vs_full"),
-            compilation_options: Default::default(),
-            buffers: &[Some(vbuf.clone())],
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: Some("fs_rear"),
-            compilation_options: Default::default(),
-            targets: &color_targets,
-        }),
+        vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs_full"), compilation_options: Default::default(), buffers: &[Some(vbuf.clone())] },
+        fragment: Some(wgpu::FragmentState { module: &shader, entry_point: Some("fs_rear"), compilation_options: Default::default(), targets: &color_targets }),
         primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: wgpu::TextureFormat::Depth32Float,
@@ -335,20 +279,11 @@ fn make_ctx() -> Result<Ctx, String> {
         multiview_mask: None,
         cache: None,
     });
-    let layout_fog = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("render3d_gpu fog"),
-        bind_group_layouts: &[Some(&bgl_fog)],
-        immediate_size: 0,
-    });
+    let layout_fog = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("render3d_gpu fog"), bind_group_layouts: &[Some(&bgl_fog)], immediate_size: 0 });
     let fog_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("render3d_gpu fog"),
         layout: Some(&layout_fog),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: Some("vs_full"),
-            compilation_options: Default::default(),
-            buffers: &[Some(vbuf.clone())],
-        },
+        vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs_full"), compilation_options: Default::default(), buffers: &[Some(vbuf.clone())] },
         fragment: Some(wgpu::FragmentState {
             module: &shader,
             entry_point: Some("fs_fog"),
@@ -363,20 +298,12 @@ fn make_ctx() -> Result<Ctx, String> {
     });
     // the outline (этап 7.1): a full-screen pass computing the line level (0-15) per pixel, one
     // R32Uint target the fog pass packs into the word's bits 24-27
-    let layout_outline = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("render3d_gpu outline"),
-        bind_group_layouts: &[Some(&bgl_outline)],
-        immediate_size: 0,
-    });
+    let layout_outline =
+        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("render3d_gpu outline"), bind_group_layouts: &[Some(&bgl_outline)], immediate_size: 0 });
     let outline_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("render3d_gpu outline"),
         layout: Some(&layout_outline),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: Some("vs_full"),
-            compilation_options: Default::default(),
-            buffers: &[Some(vbuf.clone())],
-        },
+        vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs_full"), compilation_options: Default::default(), buffers: &[Some(vbuf.clone())] },
         fragment: Some(wgpu::FragmentState {
             module: &shader,
             entry_point: Some("fs_outline"),
@@ -391,20 +318,12 @@ fn make_ctx() -> Result<Ctx, String> {
     });
     // the shading (этап 7.2): a full-screen pass computing the shade level (0-15) per pixel, one
     // R32Uint target the fog pass packs into the word's bits 28-31
-    let layout_shade = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("render3d_gpu shade"),
-        bind_group_layouts: &[Some(&bgl_shade)],
-        immediate_size: 0,
-    });
+    let layout_shade =
+        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("render3d_gpu shade"), bind_group_layouts: &[Some(&bgl_shade)], immediate_size: 0 });
     let shade_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("render3d_gpu shade"),
         layout: Some(&layout_shade),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: Some("vs_full"),
-            compilation_options: Default::default(),
-            buffers: &[Some(vbuf.clone())],
-        },
+        vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs_full"), compilation_options: Default::default(), buffers: &[Some(vbuf.clone())] },
         fragment: Some(wgpu::FragmentState {
             module: &shader,
             entry_point: Some("fs_shade"),
@@ -419,20 +338,12 @@ fn make_ctx() -> Result<Ctx, String> {
     });
     // the widened view (этап 7.4), three passes: the source column per row and side (a 2-texel-wide
     // picture), the nearest sky row, then the fill over the whole picture
-    let layout_rows = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("render3d_gpu rows"),
-        bind_group_layouts: &[Some(&bgl_rows)],
-        immediate_size: 0,
-    });
+    let layout_rows =
+        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("render3d_gpu rows"), bind_group_layouts: &[Some(&bgl_rows)], immediate_size: 0 });
     let rows_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("render3d_gpu rows"),
         layout: Some(&layout_rows),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: Some("vs_rows"),
-            compilation_options: Default::default(),
-            buffers: &[Some(vbuf.clone())],
-        },
+        vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs_rows"), compilation_options: Default::default(), buffers: &[Some(vbuf.clone())] },
         fragment: Some(wgpu::FragmentState {
             module: &shader,
             entry_point: Some("fs_rows"),
@@ -445,20 +356,12 @@ fn make_ctx() -> Result<Ctx, String> {
         multiview_mask: None,
         cache: None,
     });
-    let layout_skyrow = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("render3d_gpu sky row"),
-        bind_group_layouts: &[Some(&bgl_skyrow)],
-        immediate_size: 0,
-    });
+    let layout_skyrow =
+        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("render3d_gpu sky row"), bind_group_layouts: &[Some(&bgl_skyrow)], immediate_size: 0 });
     let skyrow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("render3d_gpu sky row"),
         layout: Some(&layout_skyrow),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: Some("vs_rows"),
-            compilation_options: Default::default(),
-            buffers: &[Some(vbuf.clone())],
-        },
+        vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs_rows"), compilation_options: Default::default(), buffers: &[Some(vbuf.clone())] },
         fragment: Some(wgpu::FragmentState {
             module: &shader,
             entry_point: Some("fs_skyrow"),
@@ -482,52 +385,26 @@ fn make_ctx() -> Result<Ctx, String> {
         Some(wgpu::TextureFormat::R32Uint.into()),  // 5 cover
         Some(wgpu::TextureFormat::R32Uint.into()),  // 6 trans
     ];
-    let layout_extend = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("render3d_gpu wide"),
-        bind_group_layouts: &[Some(&bgl_extend)],
-        immediate_size: 0,
-    });
+    let layout_extend =
+        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("render3d_gpu wide"), bind_group_layouts: &[Some(&bgl_extend)], immediate_size: 0 });
     let extend_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("render3d_gpu wide"),
         layout: Some(&layout_extend),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: Some("vs_full"),
-            compilation_options: Default::default(),
-            buffers: &[Some(vbuf.clone())],
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: Some("fs_extend"),
-            compilation_options: Default::default(),
-            targets: &extend_targets,
-        }),
+        vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs_full"), compilation_options: Default::default(), buffers: &[Some(vbuf.clone())] },
+        fragment: Some(wgpu::FragmentState { module: &shader, entry_point: Some("fs_extend"), compilation_options: Default::default(), targets: &extend_targets }),
         primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
         depth_stencil: None,
         multisample: wgpu::MultisampleState::default(),
         multiview_mask: None,
         cache: None,
     });
-    let layout_blend = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("render3d_gpu blend"),
-        bind_group_layouts: &[Some(&bgl_blend)],
-        immediate_size: 0,
-    });
+    let layout_blend =
+        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("render3d_gpu blend"), bind_group_layouts: &[Some(&bgl_blend)], immediate_size: 0 });
     let blend_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("render3d_gpu blend"),
         layout: Some(&layout_blend),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: Some("vs"),
-            compilation_options: Default::default(),
-            buffers: &[Some(vbuf.clone())],
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: Some("fs_trans"),
-            compilation_options: Default::default(),
-            targets: &color_targets,
-        }),
+        vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[Some(vbuf.clone())] },
+        fragment: Some(wgpu::FragmentState { module: &shader, entry_point: Some("fs_trans"), compilation_options: Default::default(), targets: &color_targets }),
         primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
         depth_stencil: None,
         multisample: wgpu::MultisampleState::default(),
@@ -554,46 +431,25 @@ fn make_ctx() -> Result<Ctx, String> {
             tex(20, wgpu::TextureSampleType::Uint),
         ],
     });
-    let layout_tiled = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("render3d_gpu tiled"),
-        bind_group_layouts: &[Some(&bgl_tiled)],
-        immediate_size: 0,
-    });
+    let layout_tiled =
+        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("render3d_gpu tiled"), bind_group_layouts: &[Some(&bgl_tiled)], immediate_size: 0 });
     let tiled_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("render3d_gpu tiled"),
         layout: Some(&layout_tiled),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: Some("vs_full"),
-            compilation_options: Default::default(),
-            buffers: &[Some(vbuf.clone())],
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: Some("fs_tiled"),
-            compilation_options: Default::default(),
-            targets: &color_targets,
-        }),
+        vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs_full"), compilation_options: Default::default(), buffers: &[Some(vbuf.clone())] },
+        fragment: Some(wgpu::FragmentState { module: &shader, entry_point: Some("fs_tiled"), compilation_options: Default::default(), targets: &color_targets }),
         primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
         depth_stencil: None,
         multisample: wgpu::MultisampleState::default(),
         multiview_mask: None,
         cache: None,
     });
-    let layout_mask = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("render3d_gpu mask"),
-        bind_group_layouts: &[Some(&bgl_mask)],
-        immediate_size: 0,
-    });
+    let layout_mask =
+        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("render3d_gpu mask"), bind_group_layouts: &[Some(&bgl_mask)], immediate_size: 0 });
     let mask_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("render3d_gpu mask"),
         layout: Some(&layout_mask),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: Some("vs"),
-            compilation_options: Default::default(),
-            buffers: &[Some(vbuf.clone())],
-        },
+        vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[Some(vbuf.clone())] },
         fragment: Some(wgpu::FragmentState {
             module: &shader,
             entry_point: Some("fs_mask"),
@@ -612,20 +468,12 @@ fn make_ctx() -> Result<Ctx, String> {
         label: Some("render3d_gpu resolve"),
         entries: &[uniform(0), tex(4, wgpu::TextureSampleType::Uint), uniform(16)],
     });
-    let layout_resolve = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("render3d_gpu resolve"),
-        bind_group_layouts: &[Some(&bgl_resolve)],
-        immediate_size: 0,
-    });
+    let layout_resolve =
+        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("render3d_gpu resolve"), bind_group_layouts: &[Some(&bgl_resolve)], immediate_size: 0 });
     let resolve_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("render3d_gpu resolve"),
         layout: Some(&layout_resolve),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: Some("vs_full"),
-            compilation_options: Default::default(),
-            buffers: &[Some(vbuf.clone())],
-        },
+        vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs_full"), compilation_options: Default::default(), buffers: &[Some(vbuf.clone())] },
         fragment: Some(wgpu::FragmentState {
             module: &shader,
             entry_point: Some("fs_resolve"),
@@ -638,7 +486,37 @@ fn make_ctx() -> Result<Ctx, String> {
         multiview_mask: None,
         cache: None,
     });
-    Ok(Ctx { device, queue, pipeline, bgl, rear_pipeline, bgl_rear, fog_pipeline, bgl_fog, outline_pipeline, bgl_outline, shade_pipeline, bgl_shade, rows_pipeline, bgl_rows, skyrow_pipeline, bgl_skyrow, extend_pipeline, bgl_extend, blend_pipeline, bgl_blend, mask_pipeline, bgl_mask, resolve_pipeline, bgl_resolve, tiled_pipeline, bgl_tiled, pool: Mutex::new(Vec::new()), buf_pool: Mutex::new(Vec::new()), atlas_cache: Mutex::new(None) })
+    Ok(Ctx {
+        device,
+        queue,
+        pipeline,
+        bgl,
+        rear_pipeline,
+        bgl_rear,
+        fog_pipeline,
+        bgl_fog,
+        outline_pipeline,
+        bgl_outline,
+        shade_pipeline,
+        bgl_shade,
+        rows_pipeline,
+        bgl_rows,
+        skyrow_pipeline,
+        bgl_skyrow,
+        extend_pipeline,
+        bgl_extend,
+        blend_pipeline,
+        bgl_blend,
+        mask_pipeline,
+        bgl_mask,
+        resolve_pipeline,
+        bgl_resolve,
+        tiled_pipeline,
+        bgl_tiled,
+        pool: Mutex::new(Vec::new()),
+        buf_pool: Mutex::new(Vec::new()),
+        atlas_cache: Mutex::new(None),
+    })
 }
 
 /// Where a texture's picture sits in the frame's atlas, and how its coordinates map onto it.
@@ -684,15 +562,8 @@ static TEXCACHE: OnceLock<Mutex<TexCache>> = OnceLock::new();
 /// The picture of a DS texture, decoded once and kept (the packs' keys are worked out the same
 /// way; the job's own map of keys is used when it has one).
 fn decoded(job: &Job, tex: u32, pal: u32) -> Arc<Image> {
-    let key = job
-        .keys
-        .get(&(tex, pal))
-        .copied()
-        .unwrap_or_else(|| super::texpack::texture_key(&Mem { tex: &job.tex, pal: &job.texpal }, tex, pal));
-    let cache = &mut *TEXCACHE
-        .get_or_init(|| Mutex::new(TexCache { map: HashMap::new(), stamp: 0, bytes: 0 }))
-        .lock()
-        .unwrap();
+    let key = job.keys.get(&(tex, pal)).copied().unwrap_or_else(|| super::texpack::texture_key(&Mem { tex: &job.tex, pal: &job.texpal }, tex, pal));
+    let cache = &mut *TEXCACHE.get_or_init(|| Mutex::new(TexCache { map: HashMap::new(), stamp: 0, bytes: 0 })).lock().unwrap();
     if let Some((img, stamp)) = cache.map.get_mut(&key) {
         cache.stamp += 1;
         *stamp = cache.stamp;
@@ -813,7 +684,11 @@ fn build(job: &Job, s: usize, regions: &HashMap<(u32, u32), TexInfo>) -> Built {
         // the depth and the interpolation of a vertex, exactly as the software renderer has them
         let depth_of = |v: &GxVertex| -> f32 {
             let w = v.w.max(1) as f32;
-            if job.wbuffer { w / 16_777_215.0 } else { ((v.z as f32 / w) * 16384.0 + 16383.0) * 512.0 / 16_777_215.0 }
+            if job.wbuffer {
+                w / 16_777_215.0
+            } else {
+                ((v.z as f32 / w) * 16384.0 + 16383.0) * 512.0 / 16_777_215.0
+            }
         };
         for k in 1..vs.len() - 1 {
             let (a, mut b, mut c) = (&vs[0], &vs[k], &vs[k + 1]);
@@ -870,14 +745,8 @@ fn build(job: &Job, s: usize, regions: &HashMap<(u32, u32), TexInfo>) -> Built {
             tris.extend_from_slice(&((p.attr & 0x800 != 0) as u32).to_le_bytes());
             // the rasterized triangle: each edge pushed 0.5 px outward (an exact superset of the
             // pixels the software engine keeps; the fragment shader tests the exact edges)
-            let (ia, ib, ic) = (
-                (pa.0 as f64, pa.1 as f64),
-                (pb.0 as f64, pb.1 as f64),
-                (pc.0 as f64, pc.1 as f64),
-            );
-            let line = |p: (f64, f64), q: (f64, f64)| -> (f64, f64, f64) {
-                (-(q.1 - p.1), q.0 - p.0, (q.1 - p.1) * p.0 - (q.0 - p.0) * p.1)
-            };
+            let (ia, ib, ic) = ((pa.0 as f64, pa.1 as f64), (pb.0 as f64, pb.1 as f64), (pc.0 as f64, pc.1 as f64));
+            let line = |p: (f64, f64), q: (f64, f64)| -> (f64, f64, f64) { (-(q.1 - p.1), q.0 - p.0, (q.1 - p.1) * p.0 - (q.0 - p.0) * p.1) };
             let shift = |l: (f64, f64, f64)| {
                 let len = (l.0 * l.0 + l.1 * l.1).sqrt();
                 (l.0, l.1, l.2 + 0.5 * len)
@@ -1033,7 +902,8 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
     take_made(); // this frame's counts only
     let device = &c.device;
     // the same pictures in the same order make the same atlas as the last frame's: it is kept (этап 9.1.6)
-    let atlas_key: Vec<(u32, u32, usize, u32, u32, u32)> = pics.iter().map(|((tex, pal), img, ow, oh, scaled)| (*tex, *pal, Arc::as_ptr(img) as usize, ow.to_bits(), oh.to_bits(), *scaled)).collect();
+    let atlas_key: Vec<(u32, u32, usize, u32, u32, u32)> =
+        pics.iter().map(|((tex, pal), img, ow, oh, scaled)| (*tex, *pal, Arc::as_ptr(img) as usize, ow.to_bits(), oh.to_bits(), *scaled)).collect();
     let cached = c.atlas_cache.lock().unwrap().as_ref().filter(|e| e.key == atlas_key).cloned();
     let atlas: Arc<AtlasEntry> = match cached {
         Some(e) => {
@@ -1041,56 +911,54 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
             e
         }
         None => {
-        let atlas_w = pics.iter().map(|p| p.1.w as u32).max().unwrap_or(1).max(1);
-        let mut regions: HashMap<(u32, u32), TexInfo> = HashMap::new();
-        let (mut x, mut y, mut row_h) = (0u32, 0u32, 0u32);
-        for ((tex, pal), img, ow, oh, scaled) in &pics {
-            let (pw, ph) = (img.w as u32, img.h as u32);
-            if x + pw > atlas_w {
-                y += row_h;
-                x = 0;
-                row_h = 0;
+            let atlas_w = pics.iter().map(|p| p.1.w as u32).max().unwrap_or(1).max(1);
+            let mut regions: HashMap<(u32, u32), TexInfo> = HashMap::new();
+            let (mut x, mut y, mut row_h) = (0u32, 0u32, 0u32);
+            for ((tex, pal), img, ow, oh, scaled) in &pics {
+                let (pw, ph) = (img.w as u32, img.h as u32);
+                if x + pw > atlas_w {
+                    y += row_h;
+                    x = 0;
+                    row_h = 0;
+                }
+                let flags = *scaled
+                    | ((tex & 0x10000 != 0) as u32) * F_REPEAT_S
+                    | ((tex & 0x20000 != 0) as u32) * F_REPEAT_T
+                    | ((tex & 0x40000 != 0) as u32) * F_FLIP_S
+                    | ((tex & 0x80000 != 0) as u32) * F_FLIP_T;
+                regions.insert((*tex, *pal), TexInfo { ux: x, uy: y, w: pw, h: ph, ow: *ow, oh: *oh, flags });
+                x += pw;
+                row_h = row_h.max(ph);
             }
-            let flags = *scaled
-                | ((tex & 0x10000 != 0) as u32) * F_REPEAT_S
-                | ((tex & 0x20000 != 0) as u32) * F_REPEAT_T
-                | ((tex & 0x40000 != 0) as u32) * F_FLIP_S
-                | ((tex & 0x80000 != 0) as u32) * F_FLIP_T;
-            regions.insert((*tex, *pal), TexInfo { ux: x, uy: y, w: pw, h: ph, ow: *ow, oh: *oh, flags });
-            x += pw;
-            row_h = row_h.max(ph);
-        }
-        let atlas_h = (y + row_h).max(1);
+            let atlas_h = (y + row_h).max(1);
 
-        let max_dim = device.limits().max_texture_dimension_2d;
-        if atlas_w > max_dim || atlas_h > max_dim {
-            return Err(format!("the frame's textures make a {atlas_w}x{atlas_h} atlas, over the device's {max_dim}"));
-        }
-        let atlas = made_texture(device, &wgpu::TextureDescriptor {
-            label: Some("3d texture atlas"),
-            size: wgpu::Extent3d { width: atlas_w, height: atlas_h, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Uint,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        for ((tex, pal), img, _, _, _) in &pics {
-            let r = regions[&(*tex, *pal)];
-            made(5, img.rgba.len() as u64);
-            c.queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &atlas,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d { x: r.ux, y: r.uy, z: 0 },
-                    aspect: wgpu::TextureAspect::All,
+            let max_dim = device.limits().max_texture_dimension_2d;
+            if atlas_w > max_dim || atlas_h > max_dim {
+                return Err(format!("the frame's textures make a {atlas_w}x{atlas_h} atlas, over the device's {max_dim}"));
+            }
+            let atlas = made_texture(
+                device,
+                &wgpu::TextureDescriptor {
+                    label: Some("3d texture atlas"),
+                    size: wgpu::Extent3d { width: atlas_w, height: atlas_h, depth_or_array_layers: 1 },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8Uint,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
                 },
-                &img.rgba,
-                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(r.w * 4), rows_per_image: None },
-                wgpu::Extent3d { width: r.w, height: r.h, depth_or_array_layers: 1 },
             );
-        }
+            for ((tex, pal), img, _, _, _) in &pics {
+                let r = regions[&(*tex, *pal)];
+                made(5, img.rgba.len() as u64);
+                c.queue.write_texture(
+                    wgpu::TexelCopyTextureInfo { texture: &atlas, mip_level: 0, origin: wgpu::Origin3d { x: r.ux, y: r.uy, z: 0 }, aspect: wgpu::TextureAspect::All },
+                    &img.rgba,
+                    wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(r.w * 4), rows_per_image: None },
+                    wgpu::Extent3d { width: r.w, height: r.h, depth_or_array_layers: 1 },
+                );
+            }
 
             let e = Arc::new(AtlasEntry { key: atlas_key, tex: atlas, regions, _pics: pics.iter().map(|p| p.1.clone()).collect() });
             *c.atlas_cache.lock().unwrap() = Some(e.clone());
@@ -1167,13 +1035,8 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
     let quad = frame_buffer(c, "3d fullscreen", &qp, wgpu::BufferUsages::VERTEX);
     // the accumulated picture, ping-ponged between the translucent polygons: the word (colour and
     // alpha), the polygon ID, the shadow mask and the depth; the fog flag is written straight
-    let ping = wgpu::TextureUsages::RENDER_ATTACHMENT
-        | wgpu::TextureUsages::TEXTURE_BINDING
-        | wgpu::TextureUsages::COPY_SRC
-        | wgpu::TextureUsages::COPY_DST;
-    let pair = |fmt: wgpu::TextureFormat| {
-        [attach(c, w, h, fmt, ping), attach(c, w, h, fmt, ping)]
-    };
+    let ping = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST;
+    let pair = |fmt: wgpu::TextureFormat| [attach(c, w, h, fmt, ping), attach(c, w, h, fmt, ping)];
     let word = pair(wgpu::TextureFormat::R32Uint);
     let id = pair(wgpu::TextureFormat::R32Uint);
     let stencil = pair(wgpu::TextureFormat::R32Uint);
@@ -1188,16 +1051,19 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
     let t_res = t0.elapsed();
     let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     let rear_bind = rear.as_ref().map(|data| {
-        let rt = made_texture(device, &wgpu::TextureDescriptor {
-            label: Some("3d rear bitmap"),
-            size: wgpu::Extent3d { width: 256, height: 256, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba32Uint,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        let rt = made_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("3d rear bitmap"),
+                size: wgpu::Extent3d { width: 256, height: 256, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba32Uint,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+        );
         made(5, data.len() as u64);
         c.queue.write_texture(
             wgpu::TexelCopyTextureInfo { texture: &rt, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
@@ -1206,14 +1072,17 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
             wgpu::Extent3d { width: 256, height: 256, depth_or_array_layers: 1 },
         );
         let rv = rt.create_view(&Default::default());
-        made_bind_group(device, &wgpu::BindGroupDescriptor {
-            label: Some("3d rear"),
-            layout: &c.bgl_rear,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&rv) },
-            ],
-        })
+        made_bind_group(
+            device,
+            &wgpu::BindGroupDescriptor {
+                label: Some("3d rear"),
+                layout: &c.bgl_rear,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&rv) },
+                ],
+            },
+        )
     });
     let atlas_view = atlas.tex.create_view(&Default::default());
     // the clear plane and the opaque polygons, one pass with the hardware depth test
@@ -1240,7 +1109,10 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
                     view: &fv,
                     depth_slice: None,
                     resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: (job.clear_color & 0x8000 != 0) as u32 as f64, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store },
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color { r: (job.clear_color & 0x8000 != 0) as u32 as f64, g: 0.0, b: 0.0, a: 0.0 }),
+                        store: wgpu::StoreOp::Store,
+                    },
                 }),
                 Some(wgpu::RenderPassColorAttachment {
                     view: &dv,
@@ -1252,7 +1124,10 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
                     view: &iv,
                     depth_slice: None,
                     resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: ((job.clear_color >> 24) & 63) as f64, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store },
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color { r: ((job.clear_color >> 24) & 63) as f64, g: 0.0, b: 0.0, a: 0.0 }),
+                        store: wgpu::StoreOp::Store,
+                    },
                 }),
                 Some(wgpu::RenderPassColorAttachment {
                     view: &sv,
@@ -1264,7 +1139,10 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
                     view: &ov,
                     depth_slice: None,
                     resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: ((job.clear_color >> 24) & 63) as f64, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store },
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color { r: ((job.clear_color >> 24) & 63) as f64, g: 0.0, b: 0.0, a: 0.0 }),
+                        store: wgpu::StoreOp::Store,
+                    },
                 }),
                 Some(wgpu::RenderPassColorAttachment {
                     view: &cov,
@@ -1297,25 +1175,26 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
         }
         let nvert = (built.opaque_verts.len() / 8) as u32;
         if nvert > 0 {
-            let vb = made_buffer_init(device, &wgpu::util::BufferInitDescriptor {
-                label: Some("3d verts"),
-                contents: &built.opaque_verts,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            });
-            let tb = made_buffer_init(device, &wgpu::util::BufferInitDescriptor {
-                label: Some("3d tris"),
-                contents: &built.opaque_tris,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            });
-            let bind = made_bind_group(device, &wgpu::BindGroupDescriptor {
-                label: Some("3d"),
-                layout: &c.bgl,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: tb.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&atlas_view) },
-                ],
-            });
+            let vb = made_buffer_init(
+                device,
+                &wgpu::util::BufferInitDescriptor { label: Some("3d verts"), contents: &built.opaque_verts, usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST },
+            );
+            let tb = made_buffer_init(
+                device,
+                &wgpu::util::BufferInitDescriptor { label: Some("3d tris"), contents: &built.opaque_tris, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST },
+            );
+            let bind = made_bind_group(
+                device,
+                &wgpu::BindGroupDescriptor {
+                    label: Some("3d"),
+                    layout: &c.bgl,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 1, resource: tb.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&atlas_view) },
+                    ],
+                },
+            );
             rp.set_pipeline(&c.pipeline);
             rp.set_bind_group(0, &bind, &[]);
             rp.set_vertex_buffer(0, vb.slice(..));
@@ -1323,12 +1202,7 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
         }
     }
     // the translucent (and shadow) polygons, each in its own pass, in the job's order
-    let serial_masks: Vec<bool> = job
-        .polys
-        .iter()
-        .filter(|p| p.translucent || (p.attr >> 4) & 3 == 3)
-        .map(|p| (p.attr >> 4) & 3 == 3 && (p.attr >> 24) & 63 == 0)
-        .collect();
+    let serial_masks: Vec<bool> = job.polys.iter().filter(|p| p.translucent || (p.attr >> 4) & 3 == 3).map(|p| (p.attr >> 4) & 3 == 3 && (p.attr >> 24) & 63 == 0).collect();
     // the two buffers hold the same picture before each polygon; a polygon reads one and draws
     // into the other inside its bounding box only, then the box is copied back (этап 8.2.4: a
     // whole-picture copy of seven textures per polygon cost most of a busy frame)
@@ -1391,16 +1265,14 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
             continue; // off the picture: it changes nothing
         }
         px_copied += ((x1 - x0) * (y1 - y0)) as u64;
-        let vb = made_buffer_init(device, &wgpu::util::BufferInitDescriptor {
-            label: Some("3d trans verts"),
-            contents: verts,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        });
-        let tb = made_buffer_init(device, &wgpu::util::BufferInitDescriptor {
-            label: Some("3d trans tris"),
-            contents: tris,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        });
+        let vb = made_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor { label: Some("3d trans verts"), contents: verts, usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST },
+        );
+        let tb = made_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor { label: Some("3d trans tris"), contents: tris, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST },
+        );
         items.push(Item { x0, y0, bw: x1 - x0, bh: y1 - y0, nvert, mask: serial_masks[i], src: i, vb, tb });
     }
     if std::env::var_os("SUNPETAL_GPU_TIMING").is_some() && !items.is_empty() {
@@ -1476,7 +1348,8 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
             off.extend_from_slice(&n_idx.to_le_bytes());
         }
         let buf = |label: &str, contents: &[u8]| made_buffer_init(device, &wgpu::util::BufferInitDescriptor { label: Some(label), contents, usage: wgpu::BufferUsages::STORAGE });
-        let (tris_b, polys_b, off_b, idx_b) = (buf("3d tiled tris", &all_tris), buf("3d tiled polys", &table), buf("3d tiled tile offsets", &off), buf("3d tiled tile indices", &idx));
+        let (tris_b, polys_b, off_b, idx_b) =
+            (buf("3d tiled tris", &all_tris), buf("3d tiled polys", &table), buf("3d tiled tile offsets", &off), buf("3d tiled tile indices", &idx));
         let fog_old = attach(c, w, h, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING);
         enc.copy_texture_to_texture(
             wgpu::TexelCopyTextureInfo { texture: &fog, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
@@ -1484,29 +1357,41 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
             wgpu::Extent3d { width: w as u32, height: h as u32, depth_or_array_layers: 1 },
         );
         let view = |t: &wgpu::Texture| t.create_view(&Default::default());
-        let (wv, iv, sv, dv, ov, cov, trv, fv) = (view(&word[next]), view(&id[next]), view(&stencil[next]), view(&depth[next]), view(&oid[next]), view(&cover[next]), view(&trans[next]), view(&fog));
-        let (wc, ic, sc, dc, oc, coc, trc, fo) = (view(&word[cur]), view(&id[cur]), view(&stencil[cur]), view(&depth[cur]), view(&oid[cur]), view(&cover[cur]), view(&trans[cur]), view(&fog_old));
-        let bind = made_bind_group(device, &wgpu::BindGroupDescriptor {
-            label: Some("3d tiled"),
-            layout: &c.bgl_tiled,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: tris_b.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&atlas_view) },
-                wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureView(&wc) },
-                wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(&ic) },
-                wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&sc) },
-                wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&dc) },
-                wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&oc) },
-                wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(&coc) },
-                wgpu::BindGroupEntry { binding: 13, resource: wgpu::BindingResource::TextureView(&trc) },
-                wgpu::BindGroupEntry { binding: 17, resource: polys_b.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 18, resource: off_b.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 19, resource: idx_b.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 20, resource: wgpu::BindingResource::TextureView(&fo) },
-            ],
-        });
-        let load = |v| Some(wgpu::RenderPassColorAttachment { view: v, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } });
+        let (wv, iv, sv, dv, ov, cov, trv, fv) =
+            (view(&word[next]), view(&id[next]), view(&stencil[next]), view(&depth[next]), view(&oid[next]), view(&cover[next]), view(&trans[next]), view(&fog));
+        let (wc, ic, sc, dc, oc, coc, trc, fo) =
+            (view(&word[cur]), view(&id[cur]), view(&stencil[cur]), view(&depth[cur]), view(&oid[cur]), view(&cover[cur]), view(&trans[cur]), view(&fog_old));
+        let bind = made_bind_group(
+            device,
+            &wgpu::BindGroupDescriptor {
+                label: Some("3d tiled"),
+                layout: &c.bgl_tiled,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: tris_b.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&atlas_view) },
+                    wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureView(&wc) },
+                    wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(&ic) },
+                    wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&sc) },
+                    wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&dc) },
+                    wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&oc) },
+                    wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(&coc) },
+                    wgpu::BindGroupEntry { binding: 13, resource: wgpu::BindingResource::TextureView(&trc) },
+                    wgpu::BindGroupEntry { binding: 17, resource: polys_b.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 18, resource: off_b.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 19, resource: idx_b.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 20, resource: wgpu::BindingResource::TextureView(&fo) },
+                ],
+            },
+        );
+        let load = |v| {
+            Some(wgpu::RenderPassColorAttachment {
+                view: v,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+            })
+        };
         {
             let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("3d tiled translucent"),
@@ -1551,15 +1436,18 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
             let binds: Vec<wgpu::BindGroup> = batch
                 .iter()
                 .map(|it| {
-                    made_bind_group(device, &wgpu::BindGroupDescriptor {
-                        label: Some("3d mask"),
-                        layout: &c.bgl_mask,
-                        entries: &[
-                            wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
-                            wgpu::BindGroupEntry { binding: 1, resource: it.tb.as_entire_binding() },
-                            wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&dc) },
-                        ],
-                    })
+                    made_bind_group(
+                        device,
+                        &wgpu::BindGroupDescriptor {
+                            label: Some("3d mask"),
+                            layout: &c.bgl_mask,
+                            entries: &[
+                                wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                                wgpu::BindGroupEntry { binding: 1, resource: it.tb.as_entire_binding() },
+                                wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&dc) },
+                            ],
+                        },
+                    )
                 })
                 .collect();
             let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1603,25 +1491,35 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
             let binds: Vec<wgpu::BindGroup> = batch
                 .iter()
                 .map(|it| {
-                    made_bind_group(device, &wgpu::BindGroupDescriptor {
-                        label: Some("3d blend"),
-                        layout: &c.bgl_blend,
-                        entries: &[
-                            wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
-                            wgpu::BindGroupEntry { binding: 1, resource: it.tb.as_entire_binding() },
-                            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&atlas_view) },
-                            wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureView(&wc) },
-                            wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(&ic) },
-                            wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&sc) },
-                            wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&dc) },
-                            wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&oc) },
-                            wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(&coc) },
-                            wgpu::BindGroupEntry { binding: 13, resource: wgpu::BindingResource::TextureView(&trc) },
-                        ],
-                    })
+                    made_bind_group(
+                        device,
+                        &wgpu::BindGroupDescriptor {
+                            label: Some("3d blend"),
+                            layout: &c.bgl_blend,
+                            entries: &[
+                                wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                                wgpu::BindGroupEntry { binding: 1, resource: it.tb.as_entire_binding() },
+                                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&atlas_view) },
+                                wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureView(&wc) },
+                                wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(&ic) },
+                                wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&sc) },
+                                wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&dc) },
+                                wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&oc) },
+                                wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(&coc) },
+                                wgpu::BindGroupEntry { binding: 13, resource: wgpu::BindingResource::TextureView(&trc) },
+                            ],
+                        },
+                    )
                 })
                 .collect();
-            let load = |v| Some(wgpu::RenderPassColorAttachment { view: v, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } });
+            let load = |v| {
+                Some(wgpu::RenderPassColorAttachment {
+                    view: v,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                })
+            };
             let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("3d translucent"),
                 color_attachments: &[load(&wv), load(&fv), load(&dv), load(&iv), load(&sv), load(&ov), load(&cov), load(&trv)],
@@ -1674,14 +1572,17 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
         {
             let dv = depth[cur].create_view(&Default::default());
             let s0v = src0.create_view(&Default::default());
-            let bind = made_bind_group(device, &wgpu::BindGroupDescriptor {
-                label: Some("3d wide rows"),
-                layout: &c.bgl_rows,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&dv) },
-                ],
-            });
+            let bind = made_bind_group(
+                device,
+                &wgpu::BindGroupDescriptor {
+                    label: Some("3d wide rows"),
+                    layout: &c.bgl_rows,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&dv) },
+                    ],
+                },
+            );
             let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("3d wide rows"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1705,14 +1606,17 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
         {
             let s0v = src0.create_view(&Default::default());
             let s1v = src1.create_view(&Default::default());
-            let bind = made_bind_group(device, &wgpu::BindGroupDescriptor {
-                label: Some("3d wide sky rows"),
-                layout: &c.bgl_skyrow,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 16, resource: wgpu::BindingResource::TextureView(&s0v) },
-                ],
-            });
+            let bind = made_bind_group(
+                device,
+                &wgpu::BindGroupDescriptor {
+                    label: Some("3d wide sky rows"),
+                    layout: &c.bgl_skyrow,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 16, resource: wgpu::BindingResource::TextureView(&s0v) },
+                    ],
+                },
+            );
             let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("3d wide sky rows"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1756,31 +1660,69 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
             let oc = oid[cur].create_view(&Default::default());
             let coc = cover[cur].create_view(&Default::default());
             let trc = trans[cur].create_view(&Default::default());
-            let bind = made_bind_group(device, &wgpu::BindGroupDescriptor {
-                label: Some("3d wide"),
-                layout: &c.bgl_extend,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&wc) },
-                    wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&fsc) },
-                    wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&dc) },
-                    wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(&ic) },
-                    wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&oc) },
-                    wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(&coc) },
-                    wgpu::BindGroupEntry { binding: 13, resource: wgpu::BindingResource::TextureView(&trc) },
-                    wgpu::BindGroupEntry { binding: 16, resource: wgpu::BindingResource::TextureView(&s1v) },
-                ],
-            });
+            let bind = made_bind_group(
+                device,
+                &wgpu::BindGroupDescriptor {
+                    label: Some("3d wide"),
+                    layout: &c.bgl_extend,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&wc) },
+                        wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&fsc) },
+                        wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&dc) },
+                        wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(&ic) },
+                        wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&oc) },
+                        wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(&coc) },
+                        wgpu::BindGroupEntry { binding: 13, resource: wgpu::BindingResource::TextureView(&trc) },
+                        wgpu::BindGroupEntry { binding: 16, resource: wgpu::BindingResource::TextureView(&s1v) },
+                    ],
+                },
+            );
             let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("3d wide"),
                 color_attachments: &[
-                    Some(wgpu::RenderPassColorAttachment { view: &wv, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store } }),
-                    Some(wgpu::RenderPassColorAttachment { view: &fv, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store } }),
-                    Some(wgpu::RenderPassColorAttachment { view: &dv, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store } }),
-                    Some(wgpu::RenderPassColorAttachment { view: &iv, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store } }),
-                    Some(wgpu::RenderPassColorAttachment { view: &ov, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store } }),
-                    Some(wgpu::RenderPassColorAttachment { view: &cov, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store } }),
-                    Some(wgpu::RenderPassColorAttachment { view: &trv, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store } }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &wv,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store },
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &fv,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store },
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &dv,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store },
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &iv,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store },
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &ov,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store },
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &cov,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store },
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &trv,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store },
+                    }),
                 ],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
@@ -1805,18 +1747,21 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
         let oiv = oid[cur].create_view(&Default::default());
         let cov = cover[cur].create_view(&Default::default());
         let trv = trans[cur].create_view(&Default::default());
-        let bind = made_bind_group(device, &wgpu::BindGroupDescriptor {
-            label: Some("3d outline"),
-            layout: &c.bgl_outline,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&wv) },
-                wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&dv) },
-                wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&oiv) },
-                wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(&cov) },
-                wgpu::BindGroupEntry { binding: 13, resource: wgpu::BindingResource::TextureView(&trv) },
-            ],
-        });
+        let bind = made_bind_group(
+            device,
+            &wgpu::BindGroupDescriptor {
+                label: Some("3d outline"),
+                layout: &c.bgl_outline,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&wv) },
+                    wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&dv) },
+                    wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&oiv) },
+                    wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(&cov) },
+                    wgpu::BindGroupEntry { binding: 13, resource: wgpu::BindingResource::TextureView(&trv) },
+                ],
+            },
+        );
         let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("3d outline"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1844,17 +1789,20 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
         let dv = depth[cur].create_view(&Default::default());
         let cov = cover[cur].create_view(&Default::default());
         let trv = trans[cur].create_view(&Default::default());
-        let bind = made_bind_group(device, &wgpu::BindGroupDescriptor {
-            label: Some("3d shade"),
-            layout: &c.bgl_shade,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&wv) },
-                wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&dv) },
-                wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(&cov) },
-                wgpu::BindGroupEntry { binding: 13, resource: wgpu::BindingResource::TextureView(&trv) },
-            ],
-        });
+        let bind = made_bind_group(
+            device,
+            &wgpu::BindGroupDescriptor {
+                label: Some("3d shade"),
+                layout: &c.bgl_shade,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&wv) },
+                    wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&dv) },
+                    wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(&cov) },
+                    wgpu::BindGroupEntry { binding: 13, resource: wgpu::BindingResource::TextureView(&trv) },
+                ],
+            },
+        );
         let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("3d shade"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1883,19 +1831,22 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
         let iv = id[cur].create_view(&Default::default());
         let ov = outline_tex.create_view(&Default::default());
         let sv = shade_tex.create_view(&Default::default());
-        let fog_bind = made_bind_group(device, &wgpu::BindGroupDescriptor {
-            label: Some("3d fog"),
-            layout: &c.bgl_fog,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&wv) },
-                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&fgv) },
-                wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&dv) },
-                wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(&iv) },
-                wgpu::BindGroupEntry { binding: 14, resource: wgpu::BindingResource::TextureView(&ov) },
-                wgpu::BindGroupEntry { binding: 15, resource: wgpu::BindingResource::TextureView(&sv) },
-            ],
-        });
+        let fog_bind = made_bind_group(
+            device,
+            &wgpu::BindGroupDescriptor {
+                label: Some("3d fog"),
+                layout: &c.bgl_fog,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&wv) },
+                    wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&fgv) },
+                    wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&dv) },
+                    wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(&iv) },
+                    wgpu::BindGroupEntry { binding: 14, resource: wgpu::BindingResource::TextureView(&ov) },
+                    wgpu::BindGroupEntry { binding: 15, resource: wgpu::BindingResource::TextureView(&sv) },
+                ],
+            },
+        );
         let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("3d fog"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1921,15 +1872,18 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
         let res = attach(c, ow, oh, wgpu::TextureFormat::R32Uint, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC);
         let kb = frame_buffer(c, "3d resolve k", &[k as u32, 0, 0, 0].iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>(), wgpu::BufferUsages::UNIFORM);
         let fiv = fin.create_view(&Default::default());
-        let bind = made_bind_group(device, &wgpu::BindGroupDescriptor {
-            label: Some("3d resolve"),
-            layout: &c.bgl_resolve,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&fiv) },
-                wgpu::BindGroupEntry { binding: 16, resource: kb.as_entire_binding() },
-            ],
-        });
+        let bind = made_bind_group(
+            device,
+            &wgpu::BindGroupDescriptor {
+                label: Some("3d resolve"),
+                layout: &c.bgl_resolve,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&fiv) },
+                    wgpu::BindGroupEntry { binding: 16, resource: kb.as_entire_binding() },
+                ],
+            },
+        );
         let rv = res.create_view(&Default::default());
         let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("3d resolve"),
@@ -1977,8 +1931,22 @@ fn submit(job: &Job, scale: usize, maps: bool, k: usize) -> Result<Pending, Stri
         let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0;
         let m = take_made();
         let mut r = format!("gpu frame {w}x{h}: atlas {:.2}, build {:.2}, resources {:.2}, encode {:.2}, gpu {:.2}", ms(t_atlas), ms(t_build), ms(t_res), ms(t_enc), ms(t_gpu));
-        r += &format!("|  serial passes: {n_blend} blend, {n_mask} mask (of {} polygons), {n_skipped} off-picture; {:.1}% of the picture copied per polygon on average", built.serial.len(), if n_blend + n_mask > 0 { px_copied as f64 / (built.serial.len() as f64 * (w * h) as f64) * 100.0 } else { 0.0 });
-        r += &format!("|  made: {} textures ({:.1} MB; {} from the pool), {} buffers ({:.1} MB), {} bind groups; {:.2} MB written by the queue; atlas {}", m[0], m[1] as f64 / 1e6, m[6], m[2], m[3] as f64 / 1e6, m[4], m[5] as f64 / 1e6, if m[7] > 0 { "kept" } else { "made" });
+        r += &format!(
+            "|  serial passes: {n_blend} blend, {n_mask} mask (of {} polygons), {n_skipped} off-picture; {:.1}% of the picture copied per polygon on average",
+            built.serial.len(),
+            if n_blend + n_mask > 0 { px_copied as f64 / (built.serial.len() as f64 * (w * h) as f64) * 100.0 } else { 0.0 }
+        );
+        r += &format!(
+            "|  made: {} textures ({:.1} MB; {} from the pool), {} buffers ({:.1} MB), {} bind groups; {:.2} MB written by the queue; atlas {}",
+            m[0],
+            m[1] as f64 / 1e6,
+            m[6],
+            m[2],
+            m[3] as f64 / 1e6,
+            m[4],
+            m[5] as f64 / 1e6,
+            if m[7] > 0 { "kept" } else { "made" }
+        );
         (r, t0)
     });
     Ok(Pending { c, buf_word, aux, size: (w, h), out: (ow, oh), notes, report })
@@ -2099,16 +2067,19 @@ fn attach(c: &'static Ctx, w: usize, h: usize, format: wgpu::TextureFormat, usag
         return Pooled { tex: Some(tex), key, ctx: c };
     }
     drop(pool);
-    let tex = made_texture(&c.device, &wgpu::TextureDescriptor {
-        label: Some("3d attachment"),
-        size: wgpu::Extent3d { width: w as u32, height: h as u32, depth_or_array_layers: 1 },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format,
-        usage,
-        view_formats: &[],
-    });
+    let tex = made_texture(
+        &c.device,
+        &wgpu::TextureDescriptor {
+            label: Some("3d attachment"),
+            size: wgpu::Extent3d { width: w as u32, height: h as u32, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage,
+            view_formats: &[],
+        },
+    );
     Pooled { tex: Some(tex), key, ctx: c }
 }
 
@@ -2131,10 +2102,7 @@ fn readback_buf(c: &'static Ctx, enc: &mut wgpu::CommandEncoder, tex: &wgpu::Tex
     let buf = taken.unwrap_or_else(|| made_buffer(&c.device, &wgpu::BufferDescriptor { label: Some("3d readback"), size: key.0, usage, mapped_at_creation: false }));
     enc.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo { texture: tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-        wgpu::TexelCopyBufferInfo {
-            buffer: &buf,
-            layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row as u32), rows_per_image: Some(h) },
-        },
+        wgpu::TexelCopyBufferInfo { buffer: &buf, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row as u32), rows_per_image: Some(h) } },
         wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
     );
     PooledBuf { buf: Some(buf), key, ctx: c }
@@ -3316,8 +3284,8 @@ fn fs_fog(in: VFull) -> FFog {
 #[cfg(test)]
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::render3d::{GxPoly, Job};
+    use super::*;
 
     fn empty_job() -> Job {
         Job {
@@ -3369,12 +3337,7 @@ mod tests {
     fn textured_job(tex: u32, pal: u32, attr: u32, st: [(f32, f32); 4]) -> Job {
         let mut j = empty_job();
         j.disp3dcnt |= 1;
-        j.verts = vec![
-            texvert(0.0, 0.0, st[0].0, st[0].1),
-            texvert(255.0, 0.0, st[1].0, st[1].1),
-            texvert(255.0, 191.0, st[2].0, st[2].1),
-            texvert(0.0, 191.0, st[3].0, st[3].1),
-        ];
+        j.verts = vec![texvert(0.0, 0.0, st[0].0, st[0].1), texvert(255.0, 0.0, st[1].0, st[1].1), texvert(255.0, 191.0, st[2].0, st[2].1), texvert(0.0, 191.0, st[3].0, st[3].1)];
         j.polys = vec![GxPoly { first: 0, n: 4, attr, tex, pal, translucent: false, sortkey: 0 }];
         j
     }
@@ -3392,25 +3355,11 @@ mod tests {
                 return None;
             }
         };
-        let diffs: Vec<(usize, &u32, &u32)> = gpu
-            .iter()
-            .zip(&want)
-            .enumerate()
-            .filter(|(_, (a, b))| a != b)
-            .take(8)
-            .map(|(i, (a, b))| (i, a, b))
-            .collect();
+        let diffs: Vec<(usize, &u32, &u32)> = gpu.iter().zip(&want).enumerate().filter(|(_, (a, b))| a != b).take(8).map(|(i, (a, b))| (i, a, b)).collect();
         if !diffs.is_empty() {
             let mut msg = format!("the GPU picture differs from the software one at {} pixels, e.g.", gpu.iter().zip(&want).filter(|(a, b)| a != b).count());
             for (i, a, b) in diffs {
-                msg.push_str(&format!(
-                    "\n  pixel {} (x {}, y {}): {:#010x} vs {:#010x}",
-                    i,
-                    i % (job.width * scale),
-                    i / (job.width * scale),
-                    a,
-                    b
-                ));
+                msg.push_str(&format!("\n  pixel {} (x {}, y {}): {:#010x} vs {:#010x}", i, i % (job.width * scale), i / (job.width * scale), a, b));
             }
             panic!("{msg}");
         }
@@ -3428,14 +3377,7 @@ mod tests {
             }
         };
         assert_eq!(notes, wnotes, "notes differ");
-        let diffs: Vec<(usize, &u32, &u32)> = got
-            .iter()
-            .zip(&want)
-            .enumerate()
-            .filter(|(_, (a, b))| a != b)
-            .take(8)
-            .map(|(i, (a, b))| (i, a, b))
-            .collect();
+        let diffs: Vec<(usize, &u32, &u32)> = got.iter().zip(&want).enumerate().filter(|(_, (a, b))| a != b).take(8).map(|(i, (a, b))| (i, a, b)).collect();
         if !diffs.is_empty() {
             let mut msg = format!("words differ at {} pixels, e.g.", got.iter().zip(&want).filter(|(a, b)| a != b).count());
             for (i, a, b) in diffs {
@@ -3452,15 +3394,7 @@ mod tests {
 
     #[test]
     fn a_triangle_with_fractional_edges_lands_on_the_exact_pixels() {
-        let j = job_with(
-            vec![
-                vert(10.3, 20.7, 0, 0x1000, 31.0, 0.0, 0.0),
-                vert(90.1, 30.4, 0, 0x1000, 0.0, 31.0, 0.0),
-                vert(40.9, 160.8, 0, 0x1000, 0.0, 0.0, 31.0),
-            ],
-            3,
-            31 << 16,
-        );
+        let j = job_with(vec![vert(10.3, 20.7, 0, 0x1000, 31.0, 0.0, 0.0), vert(90.1, 30.4, 0, 0x1000, 0.0, 31.0, 0.0), vert(40.9, 160.8, 0, 0x1000, 0.0, 0.0, 31.0)], 3, 31 << 16);
         both(&j, 1);
         both(&j, 2);
     }
@@ -3505,11 +3439,7 @@ mod tests {
     #[test]
     fn the_w_buffer_and_the_toon_table_match() {
         let mut j = job_with(
-            vec![
-                vert(10.0, 10.0, 0, 0x2000, 31.0, 0.0, 0.0),
-                vert(200.0, 10.0, 0, 0x1000, 0.0, 31.0, 0.0),
-                vert(100.0, 170.0, 0, 0x3000, 0.0, 0.0, 31.0),
-            ],
+            vec![vert(10.0, 10.0, 0, 0x2000, 31.0, 0.0, 0.0), vert(200.0, 10.0, 0, 0x1000, 0.0, 31.0, 0.0), vert(100.0, 170.0, 0, 0x3000, 0.0, 0.0, 31.0)],
             3,
             31 << 16 | 2 << 4,
         );
@@ -3524,15 +3454,8 @@ mod tests {
     fn a_clockwise_fan_triangle_turns_and_draws_the_same_pixels() {
         // wound the wrong way: the engines swap two vertices (the negative area must not leak
         // into the interpolation)
-        let j = job_with(
-            vec![
-                vert(20.0, 20.0, 0, 0x1000, 31.0, 0.0, 0.0),
-                vert(20.0, 100.0, 0, 0x1000, 0.0, 31.0, 0.0),
-                vert(100.0, 100.0, 0, 0x1000, 0.0, 0.0, 31.0),
-            ],
-            3,
-            31 << 16,
-        );
+        let j =
+            job_with(vec![vert(20.0, 20.0, 0, 0x1000, 31.0, 0.0, 0.0), vert(20.0, 100.0, 0, 0x1000, 0.0, 31.0, 0.0), vert(100.0, 100.0, 0, 0x1000, 0.0, 0.0, 31.0)], 3, 31 << 16);
         both(&j, 1);
     }
 
@@ -3769,11 +3692,7 @@ mod tests {
         const RED: u32 = 0x001F;
         // a triangle whose depth varies across it (so the density steps the table), fog on
         let mut j = job_with(
-            vec![
-                vert(10.0, 10.0, 0x0000, 0x1000, 31.0, 0.0, 0.0),
-                vert(200.0, 10.0, 0x1000, 0x1000, 0.0, 31.0, 0.0),
-                vert(100.0, 170.0, 0x0800, 0x1000, 0.0, 0.0, 31.0),
-            ],
+            vec![vert(10.0, 10.0, 0x0000, 0x1000, 31.0, 0.0, 0.0), vert(200.0, 10.0, 0x1000, 0x1000, 0.0, 31.0, 0.0), vert(100.0, 170.0, 0x0800, 0x1000, 0.0, 0.0, 31.0)],
             3,
             31 << 16 | 0x8000,
         );
@@ -3819,7 +3738,8 @@ mod tests {
         // the whole bitmap: an opaque green pixel (the far depth) everywhere via slot 2
         for x in 0..(256 * 256) {
             j.tex[0x40000 + 2 * x..0x40000 + 2 * x + 2].copy_from_slice(&(GREEN | 0x8000).to_le_bytes());
-            j.tex[0x60000 + 2 * x..0x60000 + 2 * x + 2].copy_from_slice(&0x7FFFu16.to_le_bytes()); // far depth
+            j.tex[0x60000 + 2 * x..0x60000 + 2 * x + 2].copy_from_slice(&0x7FFFu16.to_le_bytes());
+            // far depth
         }
         // a nearer red square drawn over part of it
         j.verts = vec![
@@ -4218,11 +4138,8 @@ mod tests {
     #[test]
     fn supersampling_matches_the_software_engine() {
         let tri = |msaa: u8| {
-            let mut j = job_with(
-                vec![vert(0.0, 0.0, 0, 0x1000, 31.0, 31.0, 31.0), vert(8.6, 0.0, 0, 0x1000, 31.0, 31.0, 31.0), vert(0.0, 8.6, 0, 0x1000, 31.0, 31.0, 31.0)],
-                3,
-                31 << 16,
-            );
+            let mut j =
+                job_with(vec![vert(0.0, 0.0, 0, 0x1000, 31.0, 31.0, 31.0), vert(8.6, 0.0, 0, 0x1000, 31.0, 31.0, 31.0), vert(0.0, 8.6, 0, 0x1000, 31.0, 31.0, 31.0)], 3, 31 << 16);
             j.clear_color = 0;
             j.extras.msaa = msaa;
             j
@@ -4315,5 +4232,4 @@ mod tests {
             }
         }
     }
-
 }

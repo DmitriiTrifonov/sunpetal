@@ -324,7 +324,10 @@ mod tests {
     #[test]
     fn the_three_corner_buttons_are_apart_and_the_skip_one_is_found() {
         let (w, h) = (1080.0, 2400.0);
-        let c = |s: Shape| match s { Shape::Circle { x, y, r } => (x, y, r), _ => unreachable!() };
+        let c = |s: Shape| match s {
+            Shape::Circle { x, y, r } => (x, y, r),
+            _ => unreachable!(),
+        };
         let (m, f, s) = (c(menu_button(w, h)), c(fast_button(w, h)), c(skip_button(w, h)));
         assert!(m.0 - f.0 > 2.0 * m.2 && f.0 - s.0 > 2.0 * f.2, "the buttons must not touch");
         assert!(s.0 - s.2 > 0.0, "all on the screen");

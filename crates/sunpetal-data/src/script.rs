@@ -46,11 +46,7 @@ pub fn parse(text: &str) -> (String, Vec<(String, String)>) {
         }
     }
     let head = text[..heads.first().map_or(text.len(), |h| h.0)].to_string();
-    let entries = heads
-        .iter()
-        .enumerate()
-        .map(|(i, (_, id, body))| (id.clone(), text[*body..heads.get(i + 1).map_or(text.len(), |h| h.0)].to_string()))
-        .collect();
+    let entries = heads.iter().enumerate().map(|(i, (_, id, body))| (id.clone(), text[*body..heads.get(i + 1).map_or(text.len(), |h| h.0)].to_string())).collect();
     (head, entries)
 }
 

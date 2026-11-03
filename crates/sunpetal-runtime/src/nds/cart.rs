@@ -229,10 +229,7 @@ impl Nds {
         } else {
             let cmd = c.cmd;
             self.once("card cmd", op as u32, || {
-                format!(
-                    "card: command {:02X} {:02X}{:02X}{:02X}{:02X} {:02X}{:02X}{:02X} not done (0xFF)",
-                    op, cmd[1], cmd[2], cmd[3], cmd[4], cmd[5], cmd[6], cmd[7]
-                )
+                format!("card: command {:02X} {:02X}{:02X}{:02X}{:02X} {:02X}{:02X}{:02X} not done (0xFF)", op, cmd[1], cmd[2], cmd[3], cmd[4], cmd[5], cmd[6], cmd[7])
             });
         }
         if self.cart.data.is_empty() {
@@ -289,7 +286,7 @@ impl Nds {
         let mut out = 0xFF;
         let cmd = if ab == 1 { c.bk_cmd & 0xF7 } else { c.bk_cmd };
         match cmd {
-            0x06 => c.bk_status |= 2, // WREN
+            0x06 => c.bk_status |= 2,  // WREN
             0x04 => c.bk_status &= !2, // WRDI
             0x05 => {
                 if c.bk_n != 0 {

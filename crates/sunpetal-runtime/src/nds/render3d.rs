@@ -117,7 +117,11 @@ fn sample_image(img: &Image, tex: u32, s: f32, t: f32) -> (u32, u32, u32, u32) {
     let wrap = |v: i32, size: i32, repeat: bool, flip: bool| -> usize {
         let r = if repeat {
             let m = v.rem_euclid(size);
-            if flip && v.div_euclid(size) & 1 != 0 { size - 1 - m } else { m }
+            if flip && v.div_euclid(size) & 1 != 0 {
+                size - 1 - m
+            } else {
+                m
+            }
         } else {
             v.clamp(0, size - 1)
         };
@@ -155,13 +159,14 @@ fn bilinear(s: f32, t: f32, get: impl Fn(i32, i32) -> (u32, u32, u32, u32)) -> (
 }
 
 /// What `render` leaves out, by bit of the mask it returns.
-pub(super) const NOTE: [&str; 2] = [
-    "",
-    "3D: anti-aliasing is not drawn (at 2x and more the picture is smoother anyway)",
-];
+pub(super) const NOTE: [&str; 2] = ["", "3D: anti-aliasing is not drawn (at 2x and more the picture is smoother anyway)"];
 
 pub(super) fn c5to6(c: u32) -> u32 {
-    if c != 0 { c * 2 + 1 } else { 0 }
+    if c != 0 {
+        c * 2 + 1
+    } else {
+        0
+    }
 }
 
 /// A 15-bit palette colour as RGB666.
@@ -177,7 +182,11 @@ pub(super) struct Mem<'a> {
 }
 
 fn pal_color(m: &Mem, off: usize) -> u16 {
-    if off + 1 < m.pal.len() { u16::from_le_bytes([m.pal[off], m.pal[off + 1]]) } else { 0 }
+    if off + 1 < m.pal.len() {
+        u16::from_le_bytes([m.pal[off], m.pal[off + 1]])
+    } else {
+        0
+    }
 }
 
 fn tex8(m: &Mem, off: usize) -> u8 {
@@ -192,7 +201,11 @@ pub(super) fn sample(job: &Mem, tex: u32, pal: u32, s: f32, t: f32) -> (u32, u32
     let wrap = |v: i32, size: i32, repeat: bool, flip: bool| -> i32 {
         if repeat {
             let m = v.rem_euclid(size);
-            if flip && v.div_euclid(size) & 1 != 0 { size - 1 - m } else { m }
+            if flip && v.div_euclid(size) & 1 != 0 {
+                size - 1 - m
+            } else {
+                m
+            }
         } else {
             v.clamp(0, size - 1)
         }
@@ -354,7 +367,11 @@ fn fog_density(job: &Job, depth24: u32) -> u32 {
         }
     };
     let d = (d / 256) as u32 & 127;
-    if d >= 127 { 128 } else { d }
+    if d >= 127 {
+        128
+    } else {
+        d
+    }
 }
 
 /// Fog over the finished picture: pixels that take it move towards the fog colour (unless the mode
@@ -380,11 +397,7 @@ fn apply_fog(job: &Job, t: &mut Target) {
 /// How many threads draw the picture: the cores (at most 8); `SUNPETAL_3D_THREADS` sets it (1 draws
 /// in one pass, to compare).
 fn threads() -> usize {
-    std::env::var("SUNPETAL_3D_THREADS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |p| p.get()))
-        .clamp(1, 8)
+    std::env::var("SUNPETAL_3D_THREADS").ok().and_then(|v| v.parse().ok()).unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |p| p.get())).clamp(1, 8)
 }
 
 /// The polygons drawn on the rows `ya..yb` of the picture (`s` times the DS's size).
@@ -553,7 +566,11 @@ fn raster(job: &Job, verts: &[GxVertex], s: usize, ya: usize, yb: usize) -> Targ
             let w = v.w.max(1) as f32;
             // the DS's 24-bit depth: ((z * 0x4000 / w) + 0x3FFF) * 0x200 (a polygon on the far plane
             // is nearer than the cleared buffer)
-            if job.wbuffer { w / 16_777_215.0 } else { ((v.z as f32 / w) * 16384.0 + 16383.0) * 512.0 / 16_777_215.0 }
+            if job.wbuffer {
+                w / 16_777_215.0
+            } else {
+                ((v.z as f32 / w) * 16384.0 + 16383.0) * 512.0 / 16_777_215.0
+            }
         };
         if wire {
             // wireframe: the polygon's edges in its vertex colours
@@ -598,7 +615,11 @@ fn raster(job: &Job, verts: &[GxVertex], s: usize, ya: usize, yb: usize) -> Targ
             let (ia, ib, ic) = (iw(a), iw(b), iw(c));
             let (da, db, dc) = (depth_of(a), depth_of(b), depth_of(c));
             // top-left rule: a pixel on an edge belongs to the polygon on one side only
-            let owns = |p: (f32, f32), q: (f32, f32)| -> bool { let dy = q.1 - p.1; let dx = q.0 - p.0; dy < 0.0 || (dy == 0.0 && dx > 0.0) };
+            let owns = |p: (f32, f32), q: (f32, f32)| -> bool {
+                let dy = q.1 - p.1;
+                let dx = q.0 - p.0;
+                dy < 0.0 || (dy == 0.0 && dx > 0.0)
+            };
             let (oa_, ob_, oc_) = (owns(pb, pc), owns(pc, pa), owns(pa, pb));
             for y in y0..=y1 {
                 for x in x0..=x1 {
@@ -677,10 +698,7 @@ fn outline_pass(strength: f32, width: f32, t: &Target, w: usize, h: usize, s: us
                 }
                 if alpha[a] == 0 || alpha[b] == 0 {
                     silhouette = true;
-                } else if depth[a] + depth[b] - 2.0 * depth[i] > OUTLINE_STEP * 2.0
-                    || (id[a] != id[i] && depth[a] > depth[i])
-                    || (id[b] != id[i] && depth[b] > depth[i])
-                {
+                } else if depth[a] + depth[b] - 2.0 * depth[i] > OUTLINE_STEP * 2.0 || (id[a] != id[i] && depth[a] > depth[i]) || (id[b] != id[i] && depth[b] > depth[i]) {
                     edge = true;
                 }
             }
@@ -787,9 +805,7 @@ fn extend_sides(t: &mut Target, job: &Job, w: usize, h: usize, e: usize) {
     // a row without sky (the hills' plane ends here): what is behind it is the sky, which the game drew
     // only so far; the nearest row above (else below) with sky gives it, the horizon's
     let sky_of = |side: usize, y: usize| -> Option<usize> {
-        (0..h)
-            .map(|d| [y.checked_sub(d), Some(y + d).filter(|&r| r < h)])
-            .find_map(|rs| rs.into_iter().flatten().find_map(|r| srcs[r][side].filter(|s| s.1 .1).map(|s| s.1 .0)))
+        (0..h).map(|d| [y.checked_sub(d), Some(y + d).filter(|&r| r < h)]).find_map(|rs| rs.into_iter().flatten().find_map(|r| srcs[r][side].filter(|s| s.1 .1).map(|s| s.1 .0)))
     };
     let skies: Vec<[Option<usize>; 2]> = (0..h).map(|y| [sky_of(0, y), sky_of(1, y)]).collect();
     for y in 0..h {
@@ -821,7 +837,11 @@ pub(super) fn msaa_factor(job: &Job, s: usize) -> usize {
     while k > 1 && (s * k > 16 || job.width * s * k > 8192) {
         k /= 2;
     }
-    if k < 2 { 1 } else { k }
+    if k < 2 {
+        1
+    } else {
+        k
+    }
 }
 
 /// Draws a frame. Returns the picture and the mask of what it left out (`NOTE`). With
@@ -913,11 +933,27 @@ fn render_at(job: &Job, s: usize) -> (Vec<u32>, Aux, u32) {
         vec![raster(job, &verts, s, 0, h)]
     } else {
         std::thread::scope(|sc| {
-            let hs: Vec<_> = ranges.iter().map(|&(ya, yb)| { let v = &verts; sc.spawn(move || raster(job, v, s, ya, yb)) }).collect();
+            let hs: Vec<_> = ranges
+                .iter()
+                .map(|&(ya, yb)| {
+                    let v = &verts;
+                    sc.spawn(move || raster(job, v, s, ya, yb))
+                })
+                .collect();
             hs.into_iter().map(|h| h.join().expect("a band of the 3D picture")).collect()
         })
     };
-    let mut t = Target { color: Vec::with_capacity(n), alpha: Vec::with_capacity(n), depth: Vec::with_capacity(n), id: Vec::with_capacity(n), stencil: Vec::new(), fog: Vec::with_capacity(n), trans: Vec::with_capacity(n), oid: Vec::with_capacity(n), cover: Vec::with_capacity(n) };
+    let mut t = Target {
+        color: Vec::with_capacity(n),
+        alpha: Vec::with_capacity(n),
+        depth: Vec::with_capacity(n),
+        id: Vec::with_capacity(n),
+        stencil: Vec::new(),
+        fog: Vec::with_capacity(n),
+        trans: Vec::with_capacity(n),
+        oid: Vec::with_capacity(n),
+        cover: Vec::with_capacity(n),
+    };
     for p in parts {
         t.color.extend(p.color);
         t.alpha.extend(p.alpha);
@@ -935,12 +971,7 @@ fn render_at(job: &Job, s: usize) -> (Vec<u32>, Aux, u32) {
     }
     // the auxiliary maps are final here: the edge marking, the outline, the shading and the fog
     // below leave them alone (этапы 7.0 и 5.1 of the GPU backend compare the GPU's copies with these)
-    let aux = Aux {
-        oid: t.oid.clone(),
-        cover: t.cover.clone(),
-        trans: t.trans.iter().map(|&b| b as u8).collect(),
-        depth: t.depth.clone(),
-    };
+    let aux = Aux { oid: t.oid.clone(), cover: t.cover.clone(), trans: t.trans.iter().map(|&b| b as u8).collect(), depth: t.depth.clone() };
     if job.disp3dcnt & 0x20 != 0 {
         // edge marking: a pixel with a nearer-or-equal... no: a pixel beside a farther pixel of another
         // polygon ID (the clear plane's included) takes its ID's edge colour
@@ -951,12 +982,7 @@ fn render_at(job: &Job, s: usize) -> (Vec<u32>, Aux, u32) {
                 if alpha[i] < 31 {
                     continue;
                 }
-                let nb = [
-                    (x >= s).then(|| i - s),
-                    (x + s < w).then(|| i + s),
-                    (y >= s).then(|| i - s * w),
-                    (y + s < h).then(|| i + s * w),
-                ];
+                let nb = [(x >= s).then(|| i - s), (x + s < w).then(|| i + s), (y >= s).then(|| i - s * w), (y + s < h).then(|| i + s * w)];
                 if nb.iter().flatten().any(|&j| id[j] != id[i] && depth[j] >= depth[i]) {
                     let (r, g, b) = rgb555(job.edge[(id[i] >> 3) as usize & 7]);
                     t.color[i] = r | g << 6 | b << 12;
@@ -1047,7 +1073,17 @@ pub(crate) mod tests {
     #[test]
     fn the_outline_marks_the_near_side_of_a_depth_jump_and_leaves_a_slope_alone() {
         let (w, h) = (8, 8);
-        let mut t = Target { color: vec![0x3FFFF; w * h], alpha: vec![31; w * h], depth: vec![0.0; w * h], id: vec![0; w * h], stencil: vec![], fog: vec![false; w * h], trans: vec![false; w * h], oid: vec![0; w * h], cover: vec![0; w * h] };
+        let mut t = Target {
+            color: vec![0x3FFFF; w * h],
+            alpha: vec![31; w * h],
+            depth: vec![0.0; w * h],
+            id: vec![0; w * h],
+            stencil: vec![],
+            fog: vec![false; w * h],
+            trans: vec![false; w * h],
+            oid: vec![0; w * h],
+            cover: vec![0; w * h],
+        };
         for y in 0..h {
             for x in 0..w {
                 // a slope on the left, then a jump to something farther
@@ -1064,7 +1100,17 @@ pub(crate) mod tests {
     #[test]
     fn the_outline_leaves_the_interface_at_the_near_plane_alone() {
         let (w, h) = (8, 8);
-        let mut t = Target { color: vec![0x3FFFF; w * h], alpha: vec![31; w * h], depth: vec![0.5; w * h], id: vec![0; w * h], stencil: vec![], fog: vec![false; w * h], trans: vec![false; w * h], oid: vec![0; w * h], cover: vec![0; w * h] };
+        let mut t = Target {
+            color: vec![0x3FFFF; w * h],
+            alpha: vec![31; w * h],
+            depth: vec![0.5; w * h],
+            id: vec![0; w * h],
+            stencil: vec![],
+            fog: vec![false; w * h],
+            trans: vec![false; w * h],
+            oid: vec![0; w * h],
+            cover: vec![0; w * h],
+        };
         for y in 0..h {
             for x in 4..w {
                 t.depth[y * w + x] = 0.0006;
@@ -1076,7 +1122,17 @@ pub(crate) mod tests {
     #[test]
     fn a_translucent_panel_over_the_scene_dims_the_line_under_it() {
         let (w, h) = (8, 8);
-        let mut t = Target { color: vec![0x3FFFF; w * h], alpha: vec![31; w * h], depth: vec![0.0; w * h], id: vec![0; w * h], stencil: vec![], fog: vec![false; w * h], trans: vec![false; w * h], oid: vec![0; w * h], cover: vec![0; w * h] };
+        let mut t = Target {
+            color: vec![0x3FFFF; w * h],
+            alpha: vec![31; w * h],
+            depth: vec![0.0; w * h],
+            id: vec![0; w * h],
+            stencil: vec![],
+            fog: vec![false; w * h],
+            trans: vec![false; w * h],
+            oid: vec![0; w * h],
+            cover: vec![0; w * h],
+        };
         for y in 0..h {
             for x in 0..w {
                 t.depth[y * w + x] = if x < 4 { 0.9 } else { 0.99 };
@@ -1093,7 +1149,17 @@ pub(crate) mod tests {
     #[test]
     fn a_shadow_falls_behind_an_object_away_from_the_light_and_never_on_it() {
         let (w, h) = (64, 64);
-        let fresh = || Target { color: vec![0x3FFFF; w * h], alpha: vec![31; w * h], depth: vec![0.0; w * h], id: vec![0; w * h], stencil: vec![], fog: vec![false; w * h], trans: vec![false; w * h], oid: vec![0; w * h], cover: vec![0; w * h] };
+        let fresh = || Target {
+            color: vec![0x3FFFF; w * h],
+            alpha: vec![31; w * h],
+            depth: vec![0.0; w * h],
+            id: vec![0; w * h],
+            stencil: vec![],
+            fog: vec![false; w * h],
+            trans: vec![false; w * h],
+            oid: vec![0; w * h],
+            cover: vec![0; w * h],
+        };
         // a wall nearer by 0.05 over the top half, the floor under it: the shadow falls below the wall
         let mut t = fresh();
         for y in 0..h {
@@ -1128,7 +1194,17 @@ pub(crate) mod tests {
     #[test]
     fn the_outline_skips_translucent_pixels_and_draws_the_silhouette_lighter() {
         let (w, h) = (8, 8);
-        let fresh = || Target { color: vec![0x3FFFF; w * h], alpha: vec![31; w * h], depth: vec![0.1; w * h], id: vec![0; w * h], stencil: vec![], fog: vec![false; w * h], trans: vec![false; w * h], oid: vec![0; w * h], cover: vec![0; w * h] };
+        let fresh = || Target {
+            color: vec![0x3FFFF; w * h],
+            alpha: vec![31; w * h],
+            depth: vec![0.1; w * h],
+            id: vec![0; w * h],
+            stencil: vec![],
+            fog: vec![false; w * h],
+            trans: vec![false; w * h],
+            oid: vec![0; w * h],
+            cover: vec![0; w * h],
+        };
         // a translucent strip of another ID over the picture: no line at its edge
         let mut t = fresh();
         for y in 0..h {
@@ -1144,7 +1220,8 @@ pub(crate) mod tests {
             t.alpha[y * w + 4] = 0;
         }
         let l = outline_pass(1.0, 0.5, &t, w, h, 1)[3 * w + 3];
-        assert!(l > 0 && l < 15, "lighter than a line between objects");    }
+        assert!(l > 0 && l < 15, "lighter than a line between objects");
+    }
 
     #[test]
     fn fog_takes_the_clear_plane_to_the_fog_colour_when_the_plane_asks_for_it() {

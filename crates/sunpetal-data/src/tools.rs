@@ -48,7 +48,12 @@ pub fn entries(rom: &[u8], base: &str) -> Result<Vec<Entry>, String> {
             }
             [dir, lang, file] if RAW_DIRS.contains(dir) && *lang == base && file.ends_with(".txt") => {
                 let text = script::decode_utf16(fs.file(rom, path).ok_or("a file listed is not there")?)?;
-                out.push(Entry { chapter: dir.to_string(), scene: file.trim_end_matches(".txt").to_string(), id: "-".into(), text: text.trim_matches(['\r', '\n']).replace("\r\n", "\n") });
+                out.push(Entry {
+                    chapter: dir.to_string(),
+                    scene: file.trim_end_matches(".txt").to_string(),
+                    id: "-".into(),
+                    text: text.trim_matches(['\r', '\n']).replace("\r\n", "\n"),
+                });
             }
             _ => {}
         }

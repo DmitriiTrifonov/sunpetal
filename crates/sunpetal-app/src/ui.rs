@@ -55,7 +55,20 @@ pub const SHORT: [Block; 5] = [Block::Sound, Block::Screen, Block::Graphics, Blo
 
 impl Menu {
     pub fn new() -> Menu {
-        Menu { open: false, rebinding: None, profile_name: String::new(), profiles: config::profiles(), message: String::new(), restart_ask: false, import_ask: false, font_set: None, short: false, main_ask: false, focus_style: false, pack_groups: Default::default() }
+        Menu {
+            open: false,
+            rebinding: None,
+            profile_name: String::new(),
+            profiles: config::profiles(),
+            message: String::new(),
+            restart_ask: false,
+            import_ask: false,
+            font_set: None,
+            short: false,
+            main_ask: false,
+            focus_style: false,
+            pack_groups: Default::default(),
+        }
     }
 
     /// A line under the settings (what a save export or import did).
@@ -83,7 +96,10 @@ impl Menu {
             }
             let ask = self.import_ask;
             let label = if ask {
-                tx("The save is replaced (the old one is kept) and the game restarts. Press again to choose the file", "Импорт заменит сохранение (старое останется копией), игра перезапустится. Нажмите ещё раз и выберите файл")
+                tx(
+                    "The save is replaced (the old one is kept) and the game restarts. Press again to choose the file",
+                    "Импорт заменит сохранение (старое останется копией), игра перезапустится. Нажмите ещё раз и выберите файл",
+                )
             } else {
                 tx("Import a save…", "Импорт сохранения…")
             };
@@ -123,7 +139,15 @@ impl Menu {
     fn save_row(&mut self, _: &mut egui::Ui, _: &dyn Fn(&'static str, &'static str) -> String, _: &mut Option<Action>) {}
 
     /// The short menu: sound, screen and window, picture, saves and restart, leaving.
-    fn short_body(&mut self, ui: &mut egui::Ui, s: &mut Settings, layouts: &[&str], internal: (u32, u32), tx: &dyn Fn(&'static str, &'static str) -> String, action: &mut Option<Action>) {
+    fn short_body(
+        &mut self,
+        ui: &mut egui::Ui,
+        s: &mut Settings,
+        layouts: &[&str],
+        internal: (u32, u32),
+        tx: &dyn Fn(&'static str, &'static str) -> String,
+        action: &mut Option<Action>,
+    ) {
         let lang = Lang::resolve(&s.interface.language);
         for block in SHORT {
             match block {
@@ -156,17 +180,19 @@ impl Menu {
                         ui.add(egui::Slider::new(&mut s.video.res, 1..=8).suffix("x"));
                     });
                     ui.label(format!("{} {}x{}", tx("each screen, pixels:", "каждый экран, точек:"), internal.0, internal.1));
-                    egui::ComboBox::from_label(tx("Dialogue font", "Шрифт реплик")).selected_text(match s.video.dialogue_font.as_str() {
-                        "rubik" => "Rubik",
-                        "ubuntu" => "Ubuntu",
-                        "noto" => "Noto Sans",
-                        _ => "Nunito",
-                    }).show_ui(ui, |ui| {
-                        ui.selectable_value(&mut s.video.dialogue_font, "nunito".to_string(), "Nunito");
-                        ui.selectable_value(&mut s.video.dialogue_font, "noto".to_string(), "Noto Sans");
-                        ui.selectable_value(&mut s.video.dialogue_font, "rubik".to_string(), "Rubik");
-                        ui.selectable_value(&mut s.video.dialogue_font, "ubuntu".to_string(), "Ubuntu");
-                    });
+                    egui::ComboBox::from_label(tx("Dialogue font", "Шрифт реплик"))
+                        .selected_text(match s.video.dialogue_font.as_str() {
+                            "rubik" => "Rubik",
+                            "ubuntu" => "Ubuntu",
+                            "noto" => "Noto Sans",
+                            _ => "Nunito",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut s.video.dialogue_font, "nunito".to_string(), "Nunito");
+                            ui.selectable_value(&mut s.video.dialogue_font, "noto".to_string(), "Noto Sans");
+                            ui.selectable_value(&mut s.video.dialogue_font, "rubik".to_string(), "Rubik");
+                            ui.selectable_value(&mut s.video.dialogue_font, "ubuntu".to_string(), "Ubuntu");
+                        });
                     ui.checkbox(&mut s.video.linear, tx("Smooth when stretched (linear filter)", "Сглаживание при растяжении (линейный фильтр)"));
                     self.variant_rows(ui, s, tx);
                 }
@@ -174,7 +200,11 @@ impl Menu {
                     ui.heading(tx("Saves", "Сохранения"));
                     self.save_row(ui, tx, action);
                     let ask = self.restart_ask;
-                    let label = if ask { tx("Progress not saved in the game is lost. Press again to restart", "Несохранённый прогресс пропадёт. Нажмите ещё раз для перезапуска") } else { tx("Restart the game", "Перезапустить игру") };
+                    let label = if ask {
+                        tx("Progress not saved in the game is lost. Press again to restart", "Несохранённый прогресс пропадёт. Нажмите ещё раз для перезапуска")
+                    } else {
+                        tx("Restart the game", "Перезапустить игру")
+                    };
                     if ui.button(label).clicked() {
                         if ask {
                             *action = Some(Action::Restart);
@@ -186,7 +216,14 @@ impl Menu {
                     ui.separator();
                     // The machine is the recompiled program with its own threads: leaving to the title is the program started anew.
                     let ask = self.main_ask;
-                    let label = if ask { tx("Progress not saved in the game is lost. Press again to go to the main menu", "Несохранённый прогресс пропадёт. Нажмите ещё раз, чтобы выйти в главное меню") } else { tx("Exit to the main menu", "Выйти в главное меню") };
+                    let label = if ask {
+                        tx(
+                            "Progress not saved in the game is lost. Press again to go to the main menu",
+                            "Несохранённый прогресс пропадёт. Нажмите ещё раз, чтобы выйти в главное меню",
+                        )
+                    } else {
+                        tx("Exit to the main menu", "Выйти в главное меню")
+                    };
                     if ui.button(label).clicked() {
                         if ask {
                             *action = Some(Action::Restart);
@@ -201,7 +238,10 @@ impl Menu {
                             *action = Some(Action::Quit);
                         }
                     });
-                    ui.label(tx("All the settings: full_menu = true under [ui] in the settings file, or --full-menu.", "Все настройки: full_menu = true в разделе [ui] файла настроек или --full-menu."));
+                    ui.label(tx(
+                        "All the settings: full_menu = true under [ui] in the settings file, or --full-menu.",
+                        "Все настройки: full_menu = true в разделе [ui] файла настроек или --full-menu.",
+                    ));
                 }
             }
         }

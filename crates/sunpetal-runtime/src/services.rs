@@ -128,7 +128,11 @@ pub unsafe extern "C" fn arm_set_mode(c: *mut Cpu, mode: u32) {
 pub unsafe extern "C" fn arm_get_spsr(c: *const Cpu) -> u32 {
     let c = &*c;
     let b = bank_of(c.mode);
-    if b == BANK_USR { c.cpsr() } else { c.spsr[b] }
+    if b == BANK_USR {
+        c.cpsr()
+    } else {
+        c.spsr[b]
+    }
 }
 
 #[no_mangle]

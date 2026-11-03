@@ -122,7 +122,22 @@ impl Session {
         debug::log_card_reads();
         nds::track_script();
         let tracker = Tracker::install();
-        Ok(Session { keys: 0, pen: None, tracker, fs, rom: rom_path, scene: None, shown: None, log: None, events: Vec::new(), texts: None, frames: 0, silenced: Vec::new(), quiet_opening: false, quiet: false })
+        Ok(Session {
+            keys: 0,
+            pen: None,
+            tracker,
+            fs,
+            rom: rom_path,
+            scene: None,
+            shown: None,
+            log: None,
+            events: Vec::new(),
+            texts: None,
+            frames: 0,
+            silenced: Vec::new(),
+            quiet_opening: false,
+            quiet: false,
+        })
     }
 
     pub fn vblank(&self) -> u64 {
@@ -177,7 +192,19 @@ impl Session {
         let widths = dialogue::line_widths(&line.text).unwrap_or_default();
         let lines = line.text.split('\n').count();
         let overflow = lines > dialogue::MAX_LINES || widths.iter().any(|w| *w > dialogue::MAX_WIDTH);
-        Event { frame: nds::vblanks(), scene: self.scene.clone(), id: line.id.map(|i| format!("{:05}", i)), face: line.face, portrait: line.portrait.then_some("left"), text_x0: dialogue::TEXT_X0, text_x1: dialogue::TEXT_X1, text: line.text, lines, widths, overflow }
+        Event {
+            frame: nds::vblanks(),
+            scene: self.scene.clone(),
+            id: line.id.map(|i| format!("{:05}", i)),
+            face: line.face,
+            portrait: line.portrait.then_some("left"),
+            text_x0: dialogue::TEXT_X0,
+            text_x1: dialogue::TEXT_X1,
+            text: line.text,
+            lines,
+            widths,
+            overflow,
+        }
     }
 
     /// Starts writing the dialogue log to `path` (one JSON line per line shown), or stops it.
@@ -296,7 +323,11 @@ impl Session {
             debug::log_calls(4_000_000);
             let r = self.run(1);
             let wide: Vec<u8> = prefix.iter().flat_map(|b| [*b, 0]).collect();
-            found.extend(debug::take_calls().into_iter().filter(|c| c.args.iter().any(|a| debug::peek(*a, prefix.len()).as_deref() == Some(prefix) || debug::peek(*a, wide.len()).as_deref() == Some(&wide[..]))));
+            found.extend(
+                debug::take_calls()
+                    .into_iter()
+                    .filter(|c| c.args.iter().any(|a| debug::peek(*a, prefix.len()).as_deref() == Some(prefix) || debug::peek(*a, wide.len()).as_deref() == Some(&wide[..]))),
+            );
             debug::log_calls(0);
             r?;
         }
@@ -783,7 +814,16 @@ impl Session {
         }
         self.set_value(0, value.unwrap_or(event.value_min))?;
         let here = self.map().ok_or("the hero is not on a map: the opening has not ended")?;
-        for door in route(&doors, here, event.map).ok_or_else(|| format!("no way from map {} to map {} by the {} doors of chapter {} ({:?})", here, event.map, doors.len(), chapter, doors.iter().map(|d| (d.event.map, d.target)).collect::<Vec<_>>()))? {
+        for door in route(&doors, here, event.map).ok_or_else(|| {
+            format!(
+                "no way from map {} to map {} by the {} doors of chapter {} ({:?})",
+                here,
+                event.map,
+                doors.len(),
+                chapter,
+                doors.iter().map(|d| (d.event.map, d.target)).collect::<Vec<_>>()
+            )
+        })? {
             self.take_door(&door)?;
         }
         let silenced = self.silence_rivals(scene);

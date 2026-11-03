@@ -191,11 +191,7 @@ impl Shared {
 }
 
 pub fn spawn(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) -> std::thread::JoinHandle<()> {
-    std::thread::Builder::new()
-        .name("machine".into())
-        .stack_size(64 << 20)
-        .spawn(move || run(cfg, shared, audio))
-        .expect("the machine's thread")
+    std::thread::Builder::new().name("machine".into()).stack_size(64 << 20).spawn(move || run(cfg, shared, audio)).expect("the machine's thread")
 }
 
 fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
@@ -439,7 +435,13 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             let mut wide = if want_e > 0 { nds::upper_wide_rgba() } else { None };
             t_wid += t_b.elapsed();
             no_wide = if wide.is_some() { 0 } else { no_wide.saturating_add(1) };
-            wide_streak = if wide.is_some() { wide_streak + 1 } else if no_wide > WIDE_KEEP_FRAMES { 0 } else { wide_streak };
+            wide_streak = if wide.is_some() {
+                wide_streak + 1
+            } else if no_wide > WIDE_KEEP_FRAMES {
+                0
+            } else {
+                wide_streak
+            };
             // no 3D for a moment: the plain upper screen, its edge columns run on, so the view does not
             // jump between wide and narrow
             if wide.is_none() && want_e > 0 && no_wide <= WIDE_KEEP_FRAMES && wide_streak >= 30 {

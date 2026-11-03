@@ -60,25 +60,7 @@ impl Cpu {
 
     /// Like `new`, for use where the machine is already borrowed.
     pub fn with_map(cpu: i32, mm: *const MemMap) -> Cpu {
-        Cpu {
-            r: [0; 16],
-            n: 0,
-            z: 0,
-            c: 0,
-            v: 0,
-            q: 0,
-            i: 0,
-            f: 0,
-            mode: 0x1F,
-            pc: 0,
-            budget: 0,
-            cpu,
-            bank: [[0; 2]; NBANKS],
-            fiq_other: [0; 5],
-            spsr: [0; NBANKS],
-            irq: 0,
-            mm,
-        }
+        Cpu { r: [0; 16], n: 0, z: 0, c: 0, v: 0, q: 0, i: 0, f: 0, mode: 0x1F, pc: 0, budget: 0, cpu, bank: [[0; 2]; NBANKS], fiq_other: [0; 5], spsr: [0; NBANKS], irq: 0, mm }
     }
 
     pub fn cpsr(&self) -> u32 {
@@ -141,19 +123,39 @@ impl ArmModule {
         unsafe { std::ffi::CStr::from_ptr(self.name) }.to_str().unwrap_or("?")
     }
     pub fn segs(&self) -> &[ArmSegment] {
-        if self.nsegs == 0 { &[] } else { unsafe { std::slice::from_raw_parts(self.segs, self.nsegs as usize) } }
+        if self.nsegs == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(self.segs, self.nsegs as usize) }
+        }
     }
     pub fn funcs(&self) -> &[ArmFuncEntry] {
-        if self.nfuncs == 0 { &[] } else { unsafe { std::slice::from_raw_parts(self.funcs, self.nfuncs as usize) } }
+        if self.nfuncs == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(self.funcs, self.nfuncs as usize) }
+        }
     }
     pub fn landings(&self) -> &[u32] {
-        if self.nlandings == 0 { &[] } else { unsafe { std::slice::from_raw_parts(self.landings, self.nlandings as usize) } }
+        if self.nlandings == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(self.landings, self.nlandings as usize) }
+        }
     }
     pub fn extents(&self) -> &[ArmRange] {
-        if self.overlay < 0 || self.nfuncs == 0 { &[] } else { unsafe { std::slice::from_raw_parts(self.extents, self.nfuncs as usize) } }
+        if self.overlay < 0 || self.nfuncs == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(self.extents, self.nfuncs as usize) }
+        }
     }
     pub fn crcs(&self) -> &[u32] {
-        if self.overlay < 0 || self.nfuncs == 0 { &[] } else { unsafe { std::slice::from_raw_parts(self.crcs, self.nfuncs as usize) } }
+        if self.overlay < 0 || self.nfuncs == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(self.crcs, self.nfuncs as usize) }
+        }
     }
 }
 

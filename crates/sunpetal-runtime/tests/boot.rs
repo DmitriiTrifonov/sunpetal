@@ -323,7 +323,8 @@ fn a_2d_pack_replaces_background_layers() {
     for frames in [1200u64, 1600, 2000, 2400, 3000, 3600, 4800] {
         let _ = std::fs::remove_dir_all(&dump);
         let (_, _, plain, _) = run_2d(&rom, frames, None, Some(dump.clone()), tmp.join("plain.png"));
-        let layers: Vec<String> = std::fs::read_dir(&dump).map(|d| d.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.starts_with("bg")).collect()).unwrap_or_default();
+        let layers: Vec<String> =
+            std::fs::read_dir(&dump).map(|d| d.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.starts_with("bg")).collect()).unwrap_or_default();
         if layers.is_empty() {
             continue;
         }

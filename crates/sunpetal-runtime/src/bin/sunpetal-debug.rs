@@ -151,7 +151,9 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             done(json!({}))
         }
         "scene" => done(json!({"scene": s.scene()})),
-        "scriptstate" => done(json!({"loaded": sunpetal_runtime::nds::script_loaded(), "idle": sunpetal_runtime::nds::script_idle(), "waits": sunpetal_runtime::nds::script_waits(), "mark": sunpetal_runtime::nds::script_mark()})),
+        "scriptstate" => done(
+            json!({"loaded": sunpetal_runtime::nds::script_loaded(), "idle": sunpetal_runtime::nds::script_idle(), "waits": sunpetal_runtime::nds::script_waits(), "mark": sunpetal_runtime::nds::script_mark()}),
+        ),
         "skip" => {
             let (frames, why) = s.skip(number(w.first(), "FRAMES", Some(18000))?)?;
             done(json!({"frames": frames, "stopped": why}))
@@ -189,7 +191,8 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             done(json!({}))
         }
         "cliprep" => {
-            let top: Vec<Value> = debug::clip_report().into_iter().take(20).map(|((k, lr), n)| json!({"fn": format!("{:08X}", k), "lr": format!("{:08X}", lr), "reads": n})).collect();
+            let top: Vec<Value> =
+                debug::clip_report().into_iter().take(20).map(|((k, lr), n)| json!({"fn": format!("{:08X}", k), "lr": format!("{:08X}", lr), "reads": n})).collect();
             let callers: Vec<Value> = debug::clip_callers().into_iter().take(20).map(|(lr, n)| json!({"lr": format!("{:08X}", lr), "calls": n})).collect();
             done(json!({"top": top, "callers": callers}))
         }
@@ -260,7 +263,8 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             done(json!({"slots": rows}))
         }
         "findhex" => {
-            let bytes: Vec<u8> = (0..rest.len() / 2).map(|i| u8::from_str_radix(&rest[2 * i..2 * i + 2], 16).map_err(|_| format!("{}: not hex", rest))).collect::<Result<_, _>>()?;
+            let bytes: Vec<u8> =
+                (0..rest.len() / 2).map(|i| u8::from_str_radix(&rest[2 * i..2 * i + 2], 16).map_err(|_| format!("{}: not hex", rest))).collect::<Result<_, _>>()?;
             let at: Vec<String> = debug::find(&bytes).iter().map(|a| format!("{:08X}", a)).collect();
             done(json!({"at": at}))
         }
@@ -313,7 +317,10 @@ fn run(a: Args) -> Result<(), String> {
     let mut values = Vec::new();
     for f in &a.set {
         let (name, v) = f.split_once('=').ok_or_else(|| format!("--set {}: name=value", f))?;
-        let index: i32 = name.strip_prefix("value").and_then(|i| i.parse().ok()).ok_or_else(|| format!("--set {}: the only names are value0, value1, ... (the story values SETVALUE sets)", f))?;
+        let index: i32 = name
+            .strip_prefix("value")
+            .and_then(|i| i.parse().ok())
+            .ok_or_else(|| format!("--set {}: the only names are value0, value1, ... (the story values SETVALUE sets)", f))?;
         values.push((index, v.parse::<i32>().map_err(|_| format!("--set {}: not a number", f))?));
     }
     let mut s = Session::open_with(a.rom.clone(), a.save.clone(), a.overlay.clone(), a.data.clone().zip(a.lang.clone()))?;
@@ -325,12 +332,24 @@ fn run(a: Args) -> Result<(), String> {
         sunpetal_runtime::nds::set_pack_2d(Some(p))?;
     }
     let mut extras = sunpetal_runtime::nds::Extras::default();
-    if let Some(v) = a.outline { extras.outline = v; }
-    if let Some(v) = a.outline_width { extras.outline_width = v; }
-    if let Some(v) = a.shadow { extras.shadow = v; }
-    if let Some(v) = a.shadow_radius { extras.shadow_radius = v; }
-    if let Some(v) = a.msaa { extras.msaa = v; }
-    if let Some(v) = &a.texture_filter { extras.filter = sunpetal_runtime::nds::TexFilter::parse(v); }
+    if let Some(v) = a.outline {
+        extras.outline = v;
+    }
+    if let Some(v) = a.outline_width {
+        extras.outline_width = v;
+    }
+    if let Some(v) = a.shadow {
+        extras.shadow = v;
+    }
+    if let Some(v) = a.shadow_radius {
+        extras.shadow_radius = v;
+    }
+    if let Some(v) = a.msaa {
+        extras.msaa = v;
+    }
+    if let Some(v) = &a.texture_filter {
+        extras.filter = sunpetal_runtime::nds::TexFilter::parse(v);
+    }
     if a.outline.is_some() || a.outline_width.is_some() || a.shadow.is_some() || a.shadow_radius.is_some() || a.msaa.is_some() || a.texture_filter.is_some() {
         sunpetal_runtime::nds::set_extras(extras);
     }
@@ -355,7 +374,12 @@ fn run(a: Args) -> Result<(), String> {
         s.log_to(Some(p), a.append_log)?;
     }
     let mut scenes: Vec<String> = match (&a.scenes, &a.goto) {
-        (Some(f), _) => std::fs::read_to_string(f).map_err(|e| format!("{}: {}", f.display(), e))?.lines().map(|l| l.split('#').next().unwrap_or("").trim().to_string()).filter(|l| !l.is_empty()).collect(),
+        (Some(f), _) => std::fs::read_to_string(f)
+            .map_err(|e| format!("{}: {}", f.display(), e))?
+            .lines()
+            .map(|l| l.split('#').next().unwrap_or("").trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect(),
         (None, Some(g)) => g.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect(),
         _ => Vec::new(),
     };
@@ -442,7 +466,10 @@ fn batch(s: &mut Session, a: &Args, values: &[(i32, i32)], scenes: &[String]) ->
             Ok(()) => ("ok", None, None),
         };
         let shown = s.events()[before..].iter().filter(|e| e.scene.as_deref() == Some(scene)).count();
-        println!("{}", json!({"scene": scene, "status": status, "stop": stop, "lines": shown, "state": s.state(), "frame": s.vblank(), "map": s.map(), "value0": s.value(0), "error": error}));
+        println!(
+            "{}",
+            json!({"scene": scene, "status": status, "stop": stop, "lines": shown, "state": s.state(), "frame": s.vblank(), "map": s.map(), "value0": s.value(0), "error": error})
+        );
         last = Some(scene);
     }
     Ok(())
@@ -470,7 +497,11 @@ fn rerun(a: &Args, rest: &[String]) -> Result<(), String> {
     }
     let status = std::process::Command::new(std::env::current_exe().map_err(|e| e.to_string())?).args(&args).status().map_err(|e| e.to_string())?;
     let _ = std::fs::remove_file(&list);
-    if status.success() { Ok(()) } else { Err(format!("the run of the rest of the list ended with {}", status)) }
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("the run of the rest of the list ended with {}", status))
+    }
 }
 
 /// `sunpetal-debug frame REC N [--out DIR]` (K-099): everything the recording of a window session (`SUNPETAL_REC=1`, F10 or
@@ -540,9 +571,7 @@ mod frame {
             })
             .unwrap_or_default();
         let bld = n(&v["bldcnt"]);
-        let targets = |m: i64| -> Vec<&str> {
-            ["bg0", "bg1", "bg2", "bg3", "obj", "backdrop"].iter().enumerate().filter(|(i, _)| m >> i & 1 != 0).map(|(_, s)| *s).collect()
-        };
+        let targets = |m: i64| -> Vec<&str> { ["bg0", "bg1", "bg2", "bg3", "obj", "backdrop"].iter().enumerate().filter(|(i, _)| m >> i & 1 != 0).map(|(_, s)| *s).collect() };
         let bright = n(&v["bright"]);
         let bld_mode = ["off", "alpha", "brighten", "darken"][(bld >> 6 & 3) as usize];
         let bright_mode = ["off", "brighten", "darken", "off"][(bright >> 14 & 3) as usize];

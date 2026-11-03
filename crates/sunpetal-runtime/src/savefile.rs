@@ -65,9 +65,8 @@ fn backups(path: &Path) -> Vec<PathBuf> {
     let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else { return Vec::new() };
     let prefix = format!("{}.bak-", name.to_string_lossy());
     let dir = if dir.as_os_str().is_empty() { Path::new(".") } else { dir };
-    let mut v: Vec<PathBuf> = fs::read_dir(dir)
-        .map(|d| d.flatten().map(|e| e.path()).filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(&prefix))).collect())
-        .unwrap_or_default();
+    let mut v: Vec<PathBuf> =
+        fs::read_dir(dir).map(|d| d.flatten().map(|e| e.path()).filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(&prefix))).collect()).unwrap_or_default();
     v.sort();
     v
 }

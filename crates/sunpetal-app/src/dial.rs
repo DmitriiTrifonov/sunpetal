@@ -153,7 +153,13 @@ mod tests {
             assert!(recognise(scale, &frame(scale, colours)));
         }
         // a screen effect that darkens and shifts the colours a little
-        assert!(recognise(2, &frame(2, |c| { let (r, g, b) = colours(c); (r.saturating_sub(4), g.saturating_sub(4), b) })));
+        assert!(recognise(
+            2,
+            &frame(2, |c| {
+                let (r, g, b) = colours(c);
+                (r.saturating_sub(4), g.saturating_sub(4), b)
+            })
+        ));
     }
 
     #[test]

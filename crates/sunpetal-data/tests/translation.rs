@@ -42,7 +42,10 @@ fn the_table_makes_the_files_of_the_translated_rom() {
     // the files of the translated ROM that the table should have changed but did not
     let missing: Vec<&str> = fs_done
         .paths()
-        .filter(|p| (p.starts_with("Chapter/Pack/") && p.ends_with(".s.z") || ["EdoComment/", "Profile/", "2D/"].iter().any(|d| p.starts_with(d)) && p.ends_with(".txt")) && fs_rom.file(&rom, p) != fs_done.file(&done, p))
+        .filter(|p| {
+            (p.starts_with("Chapter/Pack/") && p.ends_with(".s.z") || ["EdoComment/", "Profile/", "2D/"].iter().any(|d| p.starts_with(d)) && p.ends_with(".txt"))
+                && fs_rom.file(&rom, p) != fs_done.file(&done, p)
+        })
         .filter(|p| !built.files.iter().any(|f| f.0 == *p))
         .collect();
     eprintln!("{} files built, {} equal, {} different, {} not built; {} entries", built.files.len(), same, different.len(), missing.len(), built.entries_changed);

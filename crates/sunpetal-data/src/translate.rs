@@ -300,7 +300,11 @@ pub fn build_overlay(rom: &[u8], table: &Table, lang: &str) -> Result<Built, Str
             } else {
                 let n = seen.entry(id.clone()).or_insert(0);
                 *n += 1;
-                if *n == 1 { id.clone() } else { format!("{}#{}", id, n) }
+                if *n == 1 {
+                    id.clone()
+                } else {
+                    format!("{}#{}", id, n)
+                }
             };
             let mut body = body;
             if let Some(cell) = cells.get(&key) {

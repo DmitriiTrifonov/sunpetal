@@ -213,10 +213,13 @@ pub fn collection_in(scale: usize, rgba: &[u8]) -> bool {
     }
     let rows = (80..190)
         .filter(|&y| {
-            (8..18).filter(|&x| {
-                let o = ((top + y * scale) * w + x * scale) * 4;
-                rgba[o] > 200 && rgba[o + 1] > 170 && rgba[o + 2] < 110
-            }).count() >= 3
+            (8..18)
+                .filter(|&x| {
+                    let o = ((top + y * scale) * w + x * scale) * 4;
+                    rgba[o] > 200 && rgba[o + 1] > 170 && rgba[o + 2] < 110
+                })
+                .count()
+                >= 3
         })
         .count();
     dark * 2 >= n && rows >= 20
@@ -364,7 +367,11 @@ pub fn edo_in(scale: usize, rgba: &[u8]) -> bool {
 pub fn wide_each_side(win: (f32, f32), par: f32, max: usize) -> usize {
     let aspect = win.0 / win.1.max(1.0) / par.clamp(0.25, 4.0);
     let e = ((aspect * 192.0 - 256.0) / 2.0).ceil();
-    if e.is_finite() && e >= 2.0 { (e as usize).min(max) } else { 0 }
+    if e.is_finite() && e >= 2.0 {
+        (e as usize).min(max)
+    } else {
+        0
+    }
 }
 
 /// The most DS pixels each side the 3D view may be widened by when its shape is limited to `limit` (width over
@@ -427,14 +434,14 @@ pub fn title_menu_in(scale: usize, rgba: &[u8]) -> bool {
     // thresholds on the DS's own pixels (pixel counts and areas are scaled by scale² below);
     // they are guessed from the frames' description, to be tuned after a run of the tests
     const MIN_PLAQUE: usize = 900; // plaque pixels (at scale 1)
-    const X0: usize = 90;          // the bbox's left edge
-    const X1: usize = 235;         // its right edge
-    const MIN_WIDTH: usize = 100;  // the bbox's width
-    const ROW_MIN: usize = 60;     // plaque pixels a row needs to count as one
-    const MIN_ROWS: usize = 12;    // such rows
-    const MIN_BANDS: usize = 2;    // separate runs of rows
-    const GAP: usize = 3;          // rows of none between two bands
-    const MIN_FILL: usize = 30;    // the plaque covers the bbox this much (%)
+    const X0: usize = 90; // the bbox's left edge
+    const X1: usize = 235; // its right edge
+    const MIN_WIDTH: usize = 100; // the bbox's width
+    const ROW_MIN: usize = 60; // plaque pixels a row needs to count as one
+    const MIN_ROWS: usize = 12; // such rows
+    const MIN_BANDS: usize = 2; // separate runs of rows
+    const GAP: usize = 3; // rows of none between two bands
+    const MIN_FILL: usize = 30; // the plaque covers the bbox this much (%)
 
     let s = scale.max(1);
     // the bbox and the fill come from the dense rows only: scattered orange pixels of the
@@ -681,7 +688,17 @@ impl Layout {
         if let Some(lo) = self.screens[1] {
             let right_of = lo.x >= up.x + up.w;
             let below = lo.x == up.x && lo.w == up.w;
-            self.screens[1] = Some(Rect { x: lo.x + if right_of { 2.0 * e } else if below { e } else { 2.0 * e }, ..lo });
+            self.screens[1] = Some(Rect {
+                x: lo.x
+                    + if right_of {
+                        2.0 * e
+                    } else if below {
+                        e
+                    } else {
+                        2.0 * e
+                    },
+                ..lo
+            });
         }
         self.screens[0] = Some(new_up);
         self.size.0 += 2.0 * e;
@@ -1013,7 +1030,11 @@ mod tests {
         // two orange plaques 140 x 20 to the right, a dark gap between them: the title menu
         let menu = frame(1, |x, y| {
             let plaque = (100..240).contains(&x) && ((70..90).contains(&y) || (110..130).contains(&y));
-            if plaque { [240, 120, 30] } else { [0, 0, 0] }
+            if plaque {
+                [240, 120, 30]
+            } else {
+                [0, 0, 0]
+            }
         });
         assert!(title_menu_in(1, &menu), "two orange keys");
         // the plain "Press START" title: a blue box alone is not the menu
@@ -1024,7 +1045,11 @@ mod tests {
         // two plaques too narrow are no menu
         let narrow = frame(1, |x, y| {
             let plaque = (100..140).contains(&x) && ((70..90).contains(&y) || (110..130).contains(&y));
-            if plaque { [240, 120, 30] } else { [0, 0, 0] }
+            if plaque {
+                [240, 120, 30]
+            } else {
+                [0, 0, 0]
+            }
         });
         assert!(!title_menu_in(1, &narrow), "too narrow");
     }

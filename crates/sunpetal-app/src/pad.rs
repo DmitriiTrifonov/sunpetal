@@ -95,7 +95,17 @@ pub fn stick_dir(x: f32, y: f32, threshold: f32) -> Option<Dir> {
     if x.abs().max(y.abs()) < threshold {
         return None;
     }
-    Some(if x.abs() >= y.abs() { if x < 0.0 { Dir::Left } else { Dir::Right } } else if y < 0.0 { Dir::Down } else { Dir::Up })
+    Some(if x.abs() >= y.abs() {
+        if x < 0.0 {
+            Dir::Left
+        } else {
+            Dir::Right
+        }
+    } else if y < 0.0 {
+        Dir::Down
+    } else {
+        Dir::Up
+    })
 }
 
 /// A held direction repeating in the menu (a slider is moved by holding): after `FIRST` frames, each `EVERY`.

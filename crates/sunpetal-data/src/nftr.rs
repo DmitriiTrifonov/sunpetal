@@ -93,7 +93,13 @@ impl Font {
         line.chars()
             .enumerate()
             .map(|(i, c)| match self.glyph(c) {
-                Some((_, ink, adv)) => if i + 1 < n { adv as usize + 1 } else { ink as usize },
+                Some((_, ink, adv)) => {
+                    if i + 1 < n {
+                        adv as usize + 1
+                    } else {
+                        ink as usize
+                    }
+                }
                 None => 0,
             })
             .sum()

@@ -8,8 +8,8 @@ use std::cell::UnsafeCell;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use crate::sched::Sched;
 use crate::abi::{modules, ArmFunc, ArmModule, Cpu, MemMap, SEG_PROGRAM};
+use crate::sched::Sched;
 
 pub const MAIN_SIZE: usize = 0x40_0000;
 pub const ITCM_SIZE: usize = 0x8000;
@@ -222,7 +222,11 @@ pub fn machine<R>(f: impl FnOnce(&mut Machine) -> R) -> R {
 }
 
 fn ci(cpu: i32) -> usize {
-    if cpu == 9 { 0 } else { 1 }
+    if cpu == 9 {
+        0
+    } else {
+        1
+    }
 }
 
 fn crc_table() -> &'static [u32; 256] {
@@ -422,13 +426,7 @@ impl Machine {
             self.make_overlays();
         }
         let a = key & !1;
-        modules().into_iter().any(|m| {
-            m.cpu == cpu
-                && m.overlay >= 0
-                && m.nsegs > 0
-                && a.wrapping_sub(m.segs()[0].base) < m.segs()[0].size
-                && has(m)
-        })
+        modules().into_iter().any(|m| m.cpu == cpu && m.overlay >= 0 && m.nsegs > 0 && a.wrapping_sub(m.segs()[0].base) < m.segs()[0].size && has(m))
     }
 
     /// Memory changed behind the stores' back: every overlay is checked again.

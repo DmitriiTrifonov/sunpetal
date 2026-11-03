@@ -135,7 +135,11 @@ impl Sched {
 }
 
 fn ci(cpu: i32) -> usize {
-    if cpu == 9 { 0 } else { 1 }
+    if cpu == 9 {
+        0
+    } else {
+        1
+    }
 }
 
 fn is_marker(a: u32) -> bool {
@@ -169,15 +173,7 @@ fn new_thread(m: &mut Machine, cpu: i32, key: u32) -> usize {
     let num = m.sched.threads[i].len();
     let stack = DefaultStack::new(STACK_SIZE).unwrap_or_else(|e| fatal_msg(&format!("no stack for a thread: {}", e)));
     let co: Co = Coroutine::with_stack(stack, move |y: &Yielder<(), Yield>, ()| thread_main(cpu, num, y));
-    m.sched.threads[i].push(Thread {
-        co: Some(co),
-        yielder: std::ptr::null(),
-        num,
-        marker: MARKER_BASE + 16 * num as u32,
-        key,
-        saved: false,
-        saved_sp: 0,
-    });
+    m.sched.threads[i].push(Thread { co: Some(co), yielder: std::ptr::null(), num, marker: MARKER_BASE + 16 * num as u32, key, saved: false, saved_sp: 0 });
     num
 }
 

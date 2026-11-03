@@ -109,7 +109,12 @@ pub fn utf16le(d: &[u8]) -> String {
 
 /// The map a script leads to: the first parameter of its first `CHANGEMAP` or `CHANGEMAP2`.
 pub fn map_target(src: &str) -> Option<i32> {
-    commands(src).iter().find(|c| c.tag == "CHANGEMAP" || c.tag == "CHANGEMAP2").and_then(|c| c.params.first()).and_then(|p| p.split_whitespace().next()).and_then(|p| p.parse().ok())
+    commands(src)
+        .iter()
+        .find(|c| c.tag == "CHANGEMAP" || c.tag == "CHANGEMAP2")
+        .and_then(|c| c.params.first())
+        .and_then(|p| p.split_whitespace().next())
+        .and_then(|p| p.parse().ok())
 }
 
 #[cfg(test)]
@@ -138,10 +143,7 @@ mod tests {
     #[test]
     fn lines_of_speech_break_at_r_and_end_at_the_next_header() {
         let l = lines("\u{feff}[[16001\r\nfirst\r\n<R>\r\nsecond\r\n\r\n[[16002\r\nonly\r\n\r\n");
-        assert_eq!(
-            l,
-            vec![Line { id: "16001".into(), text: "first\nsecond".into() }, Line { id: "16002".into(), text: "only".into() }]
-        );
+        assert_eq!(l, vec![Line { id: "16001".into(), text: "first\nsecond".into() }, Line { id: "16002".into(), text: "only".into() }]);
     }
 
     #[test]

@@ -128,13 +128,7 @@ impl Recorder {
                 pending2.fetch_sub(1, Ordering::AcqRel);
             }
         });
-        Recorder {
-            sender: Mutex::new(Some(tx)),
-            ring,
-            writer: Some(writer),
-            last: Mutex::new(None),
-            pending,
-        }
+        Recorder { sender: Mutex::new(Some(tx)), ring, writer: Some(writer), last: Mutex::new(None), pending }
     }
 
     /// Puts a raw frame into the queue without blocking; false when it was dropped (full queue, a
@@ -230,14 +224,7 @@ impl Recorder {
         let first = chosen.first().unwrap().vblank;
         let last = chosen.last().unwrap().vblank;
         let (width, height) = (chosen.last().unwrap().width, chosen.last().unwrap().height);
-        let index = format!(
-            "{{\"frames\":{},\"first_vblank\":{},\"last_vblank\":{},\"width\":{},\"height\":{}}}",
-            chosen.len(),
-            first,
-            last,
-            width,
-            height
-        );
+        let index = format!("{{\"frames\":{},\"first_vblank\":{},\"last_vblank\":{},\"width\":{},\"height\":{}}}", chosen.len(), first, last, width, height);
         std::fs::write(dir.join("index.json"), index)?;
         Ok(Saved { dir: dir.to_path_buf(), frames: chosen.len(), first_vblank: first, last_vblank: last })
     }

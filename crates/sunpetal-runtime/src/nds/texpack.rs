@@ -159,7 +159,11 @@ impl Pack {
 
     /// A folder or a data file, whichever the path is.
     pub(super) fn open(path: &Path) -> Result<Pack, String> {
-        if path.is_dir() { Pack::from_dir(path) } else { Pack::from_file(path) }
+        if path.is_dir() {
+            Pack::from_dir(path)
+        } else {
+            Pack::from_file(path)
+        }
     }
 }
 
@@ -211,8 +215,18 @@ pub(super) fn texture_key(m: &Mem, tex: u32, pal: u32) -> TexKey {
     let used = |from: usize, bytes_per_index: usize| -> u64 {
         let top = match fmt {
             1 => (0..n).map(|i| (tex_byte(m, base + i) & 31) as usize).max(),
-            2 => (0..n).flat_map(|i| { let b = tex_byte(m, base + i) as usize; [b & 3, b >> 2 & 3, b >> 4 & 3, b >> 6] }).max(),
-            3 => (0..n).flat_map(|i| { let b = tex_byte(m, base + i) as usize; [b & 15, b >> 4] }).max(),
+            2 => (0..n)
+                .flat_map(|i| {
+                    let b = tex_byte(m, base + i) as usize;
+                    [b & 3, b >> 2 & 3, b >> 4 & 3, b >> 6]
+                })
+                .max(),
+            3 => (0..n)
+                .flat_map(|i| {
+                    let b = tex_byte(m, base + i) as usize;
+                    [b & 15, b >> 4]
+                })
+                .max(),
             4 => (0..n).map(|i| tex_byte(m, base + i) as usize).max(),
             _ => (0..n).map(|i| (tex_byte(m, base + i) & 7) as usize).max(),
         };
@@ -233,7 +247,11 @@ pub(super) fn texture_key(m: &Mem, tex: u32, pal: u32) -> TexKey {
                 lo = lo.min(idx);
                 hi = hi.max(idx);
             }
-            if lo == usize::MAX { 0 } else { fnv(pal_bytes(m, pal16 + lo * 4, (hi - lo) * 4 + 8), FNV_BASIS) }
+            if lo == usize::MAX {
+                0
+            } else {
+                fnv(pal_bytes(m, pal16 + lo * 4, (hi - lo) * 4 + 8), FNV_BASIS)
+            }
         }
         _ => 0,
     };
@@ -266,13 +284,7 @@ pub(super) fn parse_name(name: &str) -> Option<TexKey> {
         return None;
     }
     let (w, h) = size.split_once('x')?;
-    Some(TexKey {
-        data: u64::from_str_radix(data, 16).ok()?,
-        pal: u64::from_str_radix(pal, 16).ok()?,
-        fmt: fmt.parse().ok()?,
-        w: w.parse().ok()?,
-        h: h.parse().ok()?,
-    })
+    Some(TexKey { data: u64::from_str_radix(data, 16).ok()?, pal: u64::from_str_radix(pal, 16).ok()?, fmt: fmt.parse().ok()?, w: w.parse().ok()?, h: h.parse().ok()? })
 }
 
 fn write_png(path: &Path, img: &Image) -> Result<(), String> {

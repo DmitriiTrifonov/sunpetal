@@ -35,11 +35,13 @@ enum Source {
 impl Entry {
     fn picture(&self) -> Option<Arc<Img>> {
         self.image
-            .get_or_init(|| match &self.source {
-                Source::Path(p) => std::fs::read(p).ok().and_then(|b| decode(&b)),
-                Source::Bytes(b) => decode(b),
-            }
-            .map(Arc::new))
+            .get_or_init(|| {
+                match &self.source {
+                    Source::Path(p) => std::fs::read(p).ok().and_then(|b| decode(&b)),
+                    Source::Bytes(b) => decode(b),
+                }
+                .map(Arc::new)
+            })
             .clone()
     }
 }
@@ -328,11 +330,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("sunpetal-p2d-rt-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("push.png"), png([9, 0, 0, 255])).unwrap();
-        std::fs::write(
-            dir.join("pack.toml"),
-            "[push]\nen = [\"obj0_8x8_00000000000000aa_00000000000000bb\"]\nru = [\"obj0_8x8_00000000000000cc_00000000000000dd\"]\n",
-        )
-        .unwrap();
+        std::fs::write(dir.join("pack.toml"), "[push]\nen = [\"obj0_8x8_00000000000000aa_00000000000000bb\"]\nru = [\"obj0_8x8_00000000000000cc_00000000000000dd\"]\n").unwrap();
         let p = Pack2d::load(&dir).unwrap();
         for k in [(8, 8, 0xaa, 0xbb), (8, 8, 0xcc, 0xdd)] {
             assert_eq!(p.get(&k).map(|i| i.rgba[0]), Some(9));

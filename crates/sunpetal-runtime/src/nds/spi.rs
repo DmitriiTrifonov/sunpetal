@@ -30,8 +30,8 @@ fn make_firmware() -> Vec<u8> {
     fw[..0x200].fill(0);
     put16(&mut fw[0x20..], (USER_SETTINGS >> 3) as u16); // where the user settings are, / 8
     fw[0x1D] = 0xFF; // console type: DS
-    // the wireless settings the ARM7 copies to 0x027FFCF4 at boot: melonDS's MAC address
-    // (00:09:BF:11:22:33) and enabled channels (1-13)
+                     // the wireless settings the ARM7 copies to 0x027FFCF4 at boot: melonDS's MAC address
+                     // (00:09:BF:11:22:33) and enabled channels (1-13)
     fw[0x36..0x3C].copy_from_slice(&[0x00, 0x09, 0xBF, 0x11, 0x22, 0x33]);
     put16(&mut fw[0x3C..], 0x3FFE);
     put16(&mut fw[0x2C..], 0x0138); // the wireless block's length, and its CRC
@@ -208,7 +208,11 @@ impl Nds {
             }
             0x9F => {
                 const ID: [u8; 3] = [0x20, 0x40, 0x12];
-                if n <= 3 { ID[n as usize - 1] } else { 0xFF }
+                if n <= 3 {
+                    ID[n as usize - 1]
+                } else {
+                    0xFF
+                }
             }
             0x0A | 0x02 => {
                 // page write, page program
@@ -245,10 +249,34 @@ impl Nds {
             // no pen: Y reads full scale, X and the pressure none
             let pen = s.pen;
             s.tsc_val = match (v >> 4) & 7 {
-                1 => if pen { s.pen_y } else { 0xFFF }, // Y
-                5 => if pen { s.pen_x } else { 0 },     // X
-                3 => if pen { 0x200 } else { 0 },       // Z1
-                4 => if pen { 0xE00 } else { 0xFFF },   // Z2
+                1 => {
+                    if pen {
+                        s.pen_y
+                    } else {
+                        0xFFF
+                    }
+                } // Y
+                5 => {
+                    if pen {
+                        s.pen_x
+                    } else {
+                        0
+                    }
+                } // X
+                3 => {
+                    if pen {
+                        0x200
+                    } else {
+                        0
+                    }
+                } // Z1
+                4 => {
+                    if pen {
+                        0xE00
+                    } else {
+                        0xFFF
+                    }
+                } // Z2
                 0 => 0x2D4, // temperature 0
                 7 => 0x358, // temperature 1
                 _ => 0,
@@ -296,7 +324,11 @@ impl Nds {
     }
 
     pub(super) fn spi_read(&self, addr: u32) -> u32 {
-        if addr & 0xFF == 0xC0 { self.spi.spicnt as u32 } else { self.spi.spidata as u32 }
+        if addr & 0xFF == 0xC0 {
+            self.spi.spicnt as u32
+        } else {
+            self.spi.spidata as u32
+        }
     }
 
     // ---- the RTC ----------------------------------------------------------------------------

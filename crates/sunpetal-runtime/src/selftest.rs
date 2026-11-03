@@ -24,9 +24,7 @@ use crate::{call, module};
 
 /// armemu.RETURN_SENTINEL
 const SENTINEL: u32 = 0xFFFF_FFF0;
-const NAMES: [&str; 16] = [
-    "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8", "r9", "r10", "r11", "r12", "sp", "lr", "cpsr",
-];
+const NAMES: [&str; 16] = ["r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8", "r9", "r10", "r11", "r12", "sp", "lr", "cpsr"];
 
 #[derive(Debug, Default)]
 pub struct Report {
@@ -150,14 +148,8 @@ pub fn run_vectors(path: &Path, interp: bool) -> Result<Report, String> {
                 let have = crcs(cpu);
                 if want != have {
                     rep.failures += 1;
-                    let which: Vec<&str> =
-                        have.iter().zip(&want).map(|(h, w)| if h == w { "same" } else { "differs" }).collect();
-                    rep.messages.push(format!(
-                        "FAIL {:08X} {}: memory differs after its vectors ({})",
-                        key,
-                        label,
-                        which.join(", ")
-                    ));
+                    let which: Vec<&str> = have.iter().zip(&want).map(|(h, w)| if h == w { "same" } else { "differs" }).collect();
+                    rep.messages.push(format!("FAIL {:08X} {}: memory differs after its vectors ({})", key, label, which.join(", ")));
                     break; // going on from the interpreter's state is not possible
                 }
             }

@@ -51,19 +51,16 @@ pub(super) struct System {
 
 impl System {
     pub(super) fn new() -> System {
-        System {
-            tm: [[Timer::default(); 4]; 2],
-            dma: [[Dma::default(); 4]; 2],
-            sync: [0; 2],
-            fcnt: [0; 2],
-            fifo: [VecDeque::new(), VecDeque::new()],
-            last: [0; 2],
-        }
+        System { tm: [[Timer::default(); 4]; 2], dma: [[Dma::default(); 4]; 2], sync: [0; 2], fcnt: [0; 2], fifo: [VecDeque::new(), VecDeque::new()], last: [0; 2] }
     }
 }
 
 fn other(cpu: i32) -> i32 {
-    if cpu == 9 { 7 } else { 9 }
+    if cpu == 9 {
+        7
+    } else {
+        9
+    }
 }
 
 impl Nds {
@@ -146,7 +143,11 @@ impl Nds {
 
     // ---- DMA --------------------------------------------------------------------------------
     fn dma_mode(cpu: i32, ctl: u16) -> u32 {
-        if cpu == 9 { (ctl as u32 >> 11) & 7 } else { (ctl as u32 >> 12) & 3 }
+        if cpu == 9 {
+            (ctl as u32 >> 11) & 7
+        } else {
+            (ctl as u32 >> 12) & 3
+        }
     }
 
     fn dma_run(&mut self, cpu: i32, ch: usize) {
@@ -225,9 +226,7 @@ impl Nds {
         d.dst = dst;
         d.count = if n != 0 { n } else { maxn };
         let (count, mode) = (d.count, Self::dma_mode(cpu, ctl));
-        self.trace(|| {
-            format!("DMA{}.{}: {:08X} -> {:08X}, {} x {}, mode {}", cpu, ch, src, dst, count, if ctl & 0x400 != 0 { 4 } else { 2 }, mode)
-        });
+        self.trace(|| format!("DMA{}.{}: {:08X} -> {:08X}, {} x {}, mode {}", cpu, ch, src, dst, count, if ctl & 0x400 != 0 { 4 } else { 2 }, mode));
         if mode == 0 || (cpu == 9 && mode == 7) {
             self.dma_run(cpu, ch);
         } else if (cpu == 9 && mode == 5) || (cpu == 7 && mode == 2) {

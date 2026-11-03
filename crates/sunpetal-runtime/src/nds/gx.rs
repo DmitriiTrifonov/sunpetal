@@ -66,11 +66,9 @@ fn mult44(m: &mut Mtx, n: &Mtx) {
     let t = *m;
     for r in 0..4 {
         for c in 0..4 {
-            m[r * 4 + c] = ((n[r * 4] as i64 * t[c] as i64
-                + n[r * 4 + 1] as i64 * t[4 + c] as i64
-                + n[r * 4 + 2] as i64 * t[8 + c] as i64
-                + n[r * 4 + 3] as i64 * t[12 + c] as i64)
-                >> 12) as i32;
+            m[r * 4 + c] =
+                ((n[r * 4] as i64 * t[c] as i64 + n[r * 4 + 1] as i64 * t[4 + c] as i64 + n[r * 4 + 2] as i64 * t[8 + c] as i64 + n[r * 4 + 3] as i64 * t[12 + c] as i64) >> 12)
+                    as i32;
         }
     }
 }
@@ -90,10 +88,7 @@ fn mult33(m: &mut Mtx, n: &[i32]) {
     let t = *m;
     for r in 0..3 {
         for c in 0..4 {
-            m[r * 4 + c] = ((n[r * 3] as i64 * t[c] as i64
-                + n[r * 3 + 1] as i64 * t[4 + c] as i64
-                + n[r * 3 + 2] as i64 * t[8 + c] as i64)
-                >> 12) as i32;
+            m[r * 4 + c] = ((n[r * 3] as i64 * t[c] as i64 + n[r * 3 + 1] as i64 * t[4 + c] as i64 + n[r * 3 + 2] as i64 * t[8 + c] as i64) >> 12) as i32;
         }
     }
 }
@@ -108,11 +103,7 @@ fn scale(m: &mut Mtx, s: &[i32]) {
 
 fn translate(m: &mut Mtx, v: &[i32]) {
     for c in 0..4 {
-        m[12 + c] = ((m[c] as i64 * v[0] as i64
-            + m[4 + c] as i64 * v[1] as i64
-            + m[8 + c] as i64 * v[2] as i64
-            + ((m[12 + c] as i64) << 12))
-            >> 12) as i32;
+        m[12 + c] = ((m[c] as i64 * v[0] as i64 + m[4 + c] as i64 * v[1] as i64 + m[8 + c] as i64 * v[2] as i64 + ((m[12 + c] as i64) << 12)) >> 12) as i32;
     }
 }
 
@@ -128,7 +119,11 @@ fn clip_point(inp: &V, out: &V, comp: usize, plane: i64) -> V {
     let num = inp.p[3] as i64 - plane * inp.p[comp] as i64;
     let den = num - (out.p[3] as i64 - plane * out.p[comp] as i64);
     let lerp = |a: i32, b: i32| -> i32 {
-        if den != 0 { (a as i64 + ((b as i64 - a as i64) * num) / den) as i32 } else { a }
+        if den != 0 {
+            (a as i64 + ((b as i64 - a as i64) * num) / den) as i32
+        } else {
+            a
+        }
     };
     let mut m = V::default();
     for i in 0..4 {
@@ -213,25 +208,13 @@ pub(super) struct Trace {
 impl Trace {
     fn from_env() -> Option<Trace> {
         let path = std::env::var_os("SUNPETAL_GX_TRACE")?;
-        let (lo, hi) = std::env::var("SUNPETAL_GX_FRAMES")
-            .ok()
-            .and_then(|v| v.split_once('-').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
-            .unwrap_or((u64::MAX, u64::MAX));
+        let (lo, hi) =
+            std::env::var("SUNPETAL_GX_FRAMES").ok().and_then(|v| v.split_once('-').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)))).unwrap_or((u64::MAX, u64::MAX));
         let trigger = std::path::PathBuf::from(format!("{}.go", path.to_string_lossy()));
         let verts = std::env::var("SUNPETAL_GX_VERTS").ok();
         let vall = verts.as_deref() == Some("all");
         let vtex = verts.and_then(|v| u32::from_str_radix(v.trim_start_matches("0x"), 16).ok());
-        Some(Trace {
-            out: std::io::BufWriter::new(std::fs::File::create(path).ok()?),
-            lo,
-            hi,
-            open: None,
-            vtex,
-            vall,
-            batch: 0,
-            used: Default::default(),
-            trigger,
-        })
+        Some(Trace { out: std::io::BufWriter::new(std::fs::File::create(path).ok()?), lo, hi, open: None, vtex, vall, batch: 0, used: Default::default(), trigger })
     }
 
     /// At SWAP_BUFFERS: the trigger file asks for the next two frames.
@@ -245,12 +228,7 @@ impl Trace {
     fn flush(&mut self, frame: u64) {
         use std::io::Write;
         if let Some((prim, n, lo, hi, m, tex)) = self.open.take() {
-            let _ = writeln!(
-                self.out,
-                "f={frame} vb={} b={} prim={prim} n={n} min={lo:?} max={hi:?} tex={tex:#010x} pos={m:?}",
-                super::vblanks(),
-                self.batch
-            );
+            let _ = writeln!(self.out, "f={frame} vb={} b={} prim={prim} n={n} min={lo:?} max={hi:?} tex={tex:#010x} pos={m:?}", super::vblanks(), self.batch);
             self.batch += 1;
         }
     }
@@ -552,10 +530,7 @@ impl Gx {
             let lv = self.light_vec[l];
             let mut dl = -(((lv[0] as i64 * n[0] as i64 + lv[1] as i64 * n[1] as i64 + lv[2] as i64 * n[2] as i64) >> 10) as i32);
             dl = dl.clamp(0, 255);
-            let mut sl = -((((lv[0] >> 1) as i64 * n[0] as i64
-                + (lv[1] >> 1) as i64 * n[1] as i64
-                + ((lv[2] - 0x200) >> 1) as i64 * n[2] as i64)
-                >> 10) as i32);
+            let mut sl = -((((lv[0] >> 1) as i64 * n[0] as i64 + (lv[1] >> 1) as i64 * n[1] as i64 + ((lv[2] - 0x200) >> 1) as i64 * n[2] as i64) >> 10) as i32);
             if sl < 0 {
                 sl = 0;
             } else if sl > 255 {
@@ -827,8 +802,7 @@ impl Nds {
             }
             let mut nv = V::default();
             for i in 0..4 {
-                nv.p[i] = (q[0] * m[i] as f64 + q[1] * m[4 + i] as f64 + q[2] * m[8 + i] as f64 + m[12 + i] as f64)
-                    .round() as i32;
+                nv.p[i] = (q[0] * m[i] as f64 + q[1] * m[4 + i] as f64 + q[2] * m[8 + i] as f64 + m[12 + i] as f64).round() as i32;
             }
             for k in 0..3 {
                 let c = ((v[5 + k] * 31.0 / 128.0).round() as i32).clamp(0, 31);
@@ -860,11 +834,7 @@ impl Nds {
             // texture coordinates from the vertex
             let m = g.mtx_tex;
             for i in 0..2 {
-                g.tc[i] = ((g.vtx[0] as i64 * m[i] as i64
-                    + g.vtx[1] as i64 * m[4 + i] as i64
-                    + g.vtx[2] as i64 * m[8 + i] as i64
-                    + ((g.raw_tc[i] as i64) << 24))
-                    >> 24) as i16;
+                g.tc[i] = ((g.vtx[0] as i64 * m[i] as i64 + g.vtx[1] as i64 * m[4 + i] as i64 + g.vtx[2] as i64 * m[8 + i] as i64 + ((g.raw_tc[i] as i64) << 24)) >> 24) as i16;
             }
         }
         #[cfg(feature = "debug-tools")]
@@ -878,11 +848,7 @@ impl Nds {
         let m = g.mtx_clip;
         let mut nv = V::default();
         for i in 0..4 {
-            nv.p[i] = ((g.vtx[0] as i64 * m[i] as i64
-                + g.vtx[1] as i64 * m[4 + i] as i64
-                + g.vtx[2] as i64 * m[8 + i] as i64
-                + 0x1000 * m[12 + i] as i64)
-                >> 12) as i32;
+            nv.p[i] = ((g.vtx[0] as i64 * m[i] as i64 + g.vtx[1] as i64 * m[4 + i] as i64 + g.vtx[2] as i64 * m[8 + i] as i64 + 0x1000 * m[12 + i] as i64) >> 12) as i32;
         }
         for i in 0..3 {
             let c = g.vcolor[i] as i32;
@@ -1142,11 +1108,7 @@ impl Nds {
                 if g.tex_param >> 30 == 1 {
                     let m = g.mtx_tex;
                     for i in 0..2 {
-                        g.tc[i] = ((g.raw_tc[0] as i64 * m[i] as i64
-                            + g.raw_tc[1] as i64 * m[4 + i] as i64
-                            + m[8 + i] as i64
-                            + m[12 + i] as i64)
-                            >> 12) as i16;
+                        g.tc[i] = ((g.raw_tc[0] as i64 * m[i] as i64 + g.raw_tc[1] as i64 * m[4 + i] as i64 + m[8 + i] as i64 + m[12 + i] as i64) >> 12) as i16;
                     }
                 } else {
                     g.tc = g.raw_tc;
@@ -1290,7 +1252,8 @@ impl Nds {
                 g.update_clip();
                 let m = g.mtx_clip;
                 for i in 0..4 {
-                    g.pos_result[i] = ((g.vtx[0] as i64 * m[i] as i64 + g.vtx[1] as i64 * m[4 + i] as i64 + g.vtx[2] as i64 * m[8 + i] as i64 + 0x1000 * m[12 + i] as i64) >> 12) as i32;
+                    g.pos_result[i] =
+                        ((g.vtx[0] as i64 * m[i] as i64 + g.vtx[1] as i64 * m[4 + i] as i64 + g.vtx[2] as i64 * m[8 + i] as i64 + 0x1000 * m[12 + i] as i64) >> 12) as i32;
                 }
             }
             0x72 => {

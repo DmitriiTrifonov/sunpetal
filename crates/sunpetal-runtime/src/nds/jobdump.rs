@@ -229,15 +229,7 @@ impl<'a> In<'a> {
         })
     }
     fn poly(&mut self) -> Result<GxPoly, String> {
-        Ok(GxPoly {
-            first: self.u32()?,
-            n: self.u32()?,
-            attr: self.u32()?,
-            tex: self.u32()?,
-            pal: self.u32()?,
-            translucent: self.u8()? != 0,
-            sortkey: self.u32()?,
-        })
+        Ok(GxPoly { first: self.u32()?, n: self.u32()?, attr: self.u32()?, tex: self.u32()?, pal: self.u32()?, translucent: self.u8()? != 0, sortkey: self.u32()? })
     }
     fn extras(&mut self) -> Result<Extras, String> {
         Ok(Extras {
@@ -296,10 +288,7 @@ pub(super) fn read(path: &Path) -> Result<Loaded, String> {
     for _ in 0..n {
         let tex = i.u32()?;
         let pal = i.u32()?;
-        keys.insert(
-            (tex, pal),
-            TexKey { data: i.u64()?, pal: i.u64()?, fmt: i.u8()?, w: i.u16()?, h: i.u16()? },
-        );
+        keys.insert((tex, pal), TexKey { data: i.u64()?, pal: i.u64()?, fmt: i.u8()?, w: i.u16()?, h: i.u16()? });
     }
     let pack_active = i.u8()? != 0;
     if pack_active {
@@ -378,7 +367,13 @@ mod tests {
         assert_eq!(l.notes, notes);
         assert_eq!(l.job.verts.len(), job.verts.len());
         assert!(l.job.verts.iter().zip(&job.verts).all(|(a, b)| a.x == b.x && a.w == b.w && a.sx == b.sx && a.r == b.r && a.s == b.s));
-        assert!(l.job.polys.iter().zip(&job.polys).all(|(a, b)| a.first == b.first && a.n == b.n && a.attr == b.attr && a.tex == b.tex && a.pal == b.pal && a.translucent == b.translucent && a.sortkey == b.sortkey));
+        assert!(l.job.polys.iter().zip(&job.polys).all(|(a, b)| a.first == b.first
+            && a.n == b.n
+            && a.attr == b.attr
+            && a.tex == b.tex
+            && a.pal == b.pal
+            && a.translucent == b.translucent
+            && a.sortkey == b.sortkey));
         assert_eq!(l.job.wbuffer, job.wbuffer);
         assert_eq!(l.job.width, job.width);
         assert_eq!(l.job.clear_color, job.clear_color);

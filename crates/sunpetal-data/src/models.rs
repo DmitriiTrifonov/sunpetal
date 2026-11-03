@@ -171,12 +171,7 @@ mod tests {
 
     fn model(name: &str, key: bool) -> Model {
         let v = |x: f32| Vertex { pos: [x, 2.0, 3.0], nrm: [0.0, 1.0, 0.0], uv: [0.25, 0.75] };
-        Model {
-            name: name.into(),
-            key: key.then_some(DsKey { data: 0xaa, pal: 0xbb, fmt: 5, w: 128, h: 128 }),
-            verts: vec![v(0.0), v(1.0), v(2.0)],
-            idx: vec![0, 1, 2, 2, 1, 0],
-        }
+        Model { name: name.into(), key: key.then_some(DsKey { data: 0xaa, pal: 0xbb, fmt: 5, w: 128, h: 128 }), verts: vec![v(0.0), v(1.0), v(2.0)], idx: vec![0, 1, 2, 2, 1, 0] }
     }
 
     #[test]

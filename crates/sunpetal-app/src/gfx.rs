@@ -249,26 +249,11 @@ pub struct Gfx {
 /// The index of a patch's uniform, for the drawing pass.
 struct Extra2(usize);
 
-fn make_screen(
-    device: &wgpu::Device,
-    bgl: &wgpu::BindGroupLayout,
-    nearest: &wgpu::Sampler,
-    linear: &wgpu::Sampler,
-    scale: usize,
-    label: &str,
-) -> Screen {
+fn make_screen(device: &wgpu::Device, bgl: &wgpu::BindGroupLayout, nearest: &wgpu::Sampler, linear: &wgpu::Sampler, scale: usize, label: &str) -> Screen {
     make_texture(device, bgl, nearest, linear, 256 * scale as u32, 192 * scale as u32, label)
 }
 
-fn make_texture(
-    device: &wgpu::Device,
-    bgl: &wgpu::BindGroupLayout,
-    nearest: &wgpu::Sampler,
-    linear: &wgpu::Sampler,
-    width: u32,
-    height: u32,
-    label: &str,
-) -> Screen {
+fn make_texture(device: &wgpu::Device, bgl: &wgpu::BindGroupLayout, nearest: &wgpu::Sampler, linear: &wgpu::Sampler, width: u32, height: u32, label: &str) -> Screen {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some(label),
         size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
@@ -332,17 +317,31 @@ impl RecState {
     const MAX_FLYING: usize = 3;
 
     fn new() -> RecState {
-        RecState { rec: {
-            let mut cfg = crate::rec::RecConfig::default();
-            if let Some(k) = std::env::var("SUNPETAL_REC_SHRINK").ok().and_then(|v| v.parse::<u32>().ok()) {
-                cfg.shrink = k.clamp(1, 8);
-            }
-            crate::rec::Recorder::new(cfg)
-        }, flying: Default::default(), pool: Vec::new(), last: None }
+        RecState {
+            rec: {
+                let mut cfg = crate::rec::RecConfig::default();
+                if let Some(k) = std::env::var("SUNPETAL_REC_SHRINK").ok().and_then(|v| v.parse::<u32>().ok()) {
+                    cfg.shrink = k.clamp(1, 8);
+                }
+                crate::rec::Recorder::new(cfg)
+            },
+            flying: Default::default(),
+            pool: Vec::new(),
+            last: None,
+        }
     }
 
     /// Adds the copy of the window's texture to the frame's commands (once per DS frame, not when the queue is full).
-    fn begin(&mut self, device: &wgpu::Device, enc: &mut wgpu::CommandEncoder, texture: &wgpu::Texture, size: (u32, u32), bgra: bool, vblank: u64, journal: &str) -> Option<Flight> {
+    fn begin(
+        &mut self,
+        device: &wgpu::Device,
+        enc: &mut wgpu::CommandEncoder,
+        texture: &wgpu::Texture,
+        size: (u32, u32),
+        bgra: bool,
+        vblank: u64,
+        journal: &str,
+    ) -> Option<Flight> {
         if self.flying.len() >= Self::MAX_FLYING || self.last.is_some_and(|l| vblank <= l) {
             return None;
         }
@@ -351,7 +350,12 @@ impl RecState {
         let bytes = (row * h) as u64;
         let buf = match self.pool.iter().position(|b| b.size() == bytes) {
             Some(i) => self.pool.swap_remove(i),
-            None => device.create_buffer(&wgpu::BufferDescriptor { label: Some("rec"), size: bytes, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false }),
+            None => device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("rec"),
+                size: bytes,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
         };
         enc.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo { texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
@@ -401,13 +405,9 @@ impl Gfx {
         let w = window.clone();
         let instance = wgpu::Instance::default();
         let surface = instance.create_surface(window).map_err(|e| e.to_string())?;
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            compatible_surface: Some(&surface),
-            ..Default::default()
-        }))
-        .map_err(|e| format!("no GPU: {}", e))?;
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
-            .map_err(|e| e.to_string())?;
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { compatible_surface: Some(&surface), ..Default::default() }))
+            .map_err(|e| format!("no GPU: {}", e))?;
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).map_err(|e| e.to_string())?;
         let caps = surface.get_capabilities(&adapter);
         // the picture's colours are already what the screen shows: a format that does not convert
         let format = caps.formats.iter().copied().find(|f| !f.is_srgb()).unwrap_or(caps.formats[0]);
@@ -430,14 +430,8 @@ impl Gfx {
         };
         surface.configure(&device, &config);
         let egui_ctx = egui::Context::default();
-        let egui_state = egui_winit::State::new(
-            egui_ctx.clone(),
-            egui::ViewportId::ROOT,
-            &*w,
-            Some(w.scale_factor() as f32),
-            None,
-            Some(device.limits().max_texture_dimension_2d as usize),
-        );
+        let egui_state =
+            egui_winit::State::new(egui_ctx.clone(), egui::ViewportId::ROOT, &*w, Some(w.scale_factor() as f32), None, Some(device.limits().max_texture_dimension_2d as usize));
         Ok(Self::build(device, queue, config, egui_ctx, Some((w, egui_state)), Some(surface), None))
     }
 
@@ -485,20 +479,13 @@ impl Gfx {
         offscreen: Option<(wgpu::Texture, f32)>,
     ) -> Gfx {
         let format = config.format;
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("screens"),
-            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
-        });
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("screens"), source: wgpu::ShaderSource::Wgsl(SHADER.into()) });
         let entries = |_: ()| {
             [
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
@@ -519,46 +506,58 @@ impl Gfx {
                 },
             ]
         };
-        let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: None,
-            entries: &entries(()),
-        });
-        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: None,
-            bind_group_layouts: &[Some(&bgl)],
-            immediate_size: 0,
-        });
+        let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: None, entries: &entries(()) });
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: None, bind_group_layouts: &[Some(&bgl)], immediate_size: 0 });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("screens"),
             layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs"),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs"),
-                compilation_options: Default::default(),
-                targets: &[Some(format.into())],
-            }),
+            vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
+            fragment: Some(wgpu::FragmentState { module: &shader, entry_point: Some("fs"), compilation_options: Default::default(), targets: &[Some(format.into())] }),
             primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleStrip, ..Default::default() },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             multiview_mask: None,
             cache: None,
         });
-        let sampler = |f: wgpu::FilterMode| {
-            device.create_sampler(&wgpu::SamplerDescriptor { mag_filter: f, min_filter: f, ..Default::default() })
-        };
+        let sampler = |f: wgpu::FilterMode| device.create_sampler(&wgpu::SamplerDescriptor { mag_filter: f, min_filter: f, ..Default::default() });
         let (nearest, linear) = (sampler(wgpu::FilterMode::Nearest), sampler(wgpu::FilterMode::Linear));
         let screens = [make_screen(&device, &bgl, &nearest, &linear, 1, "upper"), make_screen(&device, &bgl, &nearest, &linear, 1, "lower")];
         let glow = make_texture(&device, &bgl, &nearest, &linear, GLOW_W as u32, GLOW_H as u32, "glow");
         egui_ctx.set_fonts(crate::fonts::definitions(None));
         let egui_renderer = egui_wgpu::Renderer::new(&device, format, egui_wgpu::RendererOptions::default());
         let post_kit = post::Kit::new(&device, format);
-        Gfx { window, egui_ctx, offscreen, pad_keys: Vec::new(), egui_renderer, bgl, nearest, linear_sampler: linear, scale: 1, surface, device, queue, config, pipeline, post_kit, post: None, screens, glow, glow_grid: vec![0.0; GLOW_W * GLOW_H * 3], background: true, edge_bars: false, capture: None, rec: std::env::var_os("SUNPETAL_REC").map(|_| RecState::new()), rec_vblank: 0, rec_journal: String::new(), bar_color: None, wide_screen: None, wide_e: 0, linear: true, reserve: 0.0 }
+        Gfx {
+            window,
+            egui_ctx,
+            offscreen,
+            pad_keys: Vec::new(),
+            egui_renderer,
+            bgl,
+            nearest,
+            linear_sampler: linear,
+            scale: 1,
+            surface,
+            device,
+            queue,
+            config,
+            pipeline,
+            post_kit,
+            post: None,
+            screens,
+            glow,
+            glow_grid: vec![0.0; GLOW_W * GLOW_H * 3],
+            background: true,
+            edge_bars: false,
+            capture: None,
+            rec: std::env::var_os("SUNPETAL_REC").map(|_| RecState::new()),
+            rec_vblank: 0,
+            rec_journal: String::new(),
+            bar_color: None,
+            wide_screen: None,
+            wide_e: 0,
+            linear: true,
+            reserve: 0.0,
+        }
     }
 
     pub fn resize(&mut self, w: u32, h: u32) {
@@ -720,7 +719,13 @@ impl Gfx {
         let rects = layout.fit(self.size());
         let smooth = [fx.smooth_mode(), fx.smooth_strength, self.scale as f32, 0.0];
         let wide = self.wide_screen.as_ref().filter(|_| self.wide_e > 0);
-        let pick = |i: usize| -> &Screen { if i == 0 { wide.map_or(&self.screens[0], |w| &w.0) } else { &self.screens[1] } };
+        let pick = |i: usize| -> &Screen {
+            if i == 0 {
+                wide.map_or(&self.screens[0], |w| &w.0)
+            } else {
+                &self.screens[1]
+            }
+        };
         let upper_w = 256.0 + 2.0 * if wide.is_some() { self.wide_e as f32 } else { 0.0 };
         for (i, r) in rects.iter().enumerate() {
             let s = pick(i);
@@ -779,7 +784,14 @@ impl Gfx {
         // (two screens, or none lone: the glow, as in the glow mode)
         if (self.background || self.edge_bars) && self.bar_color.is_none() && edge.is_none() {
             // the whole window, dimmed, no screen effects
-            let q = Quad { rect: [-1.0, 1.0, 1.0, -1.0], fx: [0.0, 0.0, 0.55, 0.0], color: [1.1, 0.9, -0.2, 1.0], dims: [GLOW_W as f32, GLOW_H as f32, 0.0, 0.0], uvr: WHOLE, sm: [0.0; 4] };
+            let q = Quad {
+                rect: [-1.0, 1.0, 1.0, -1.0],
+                fx: [0.0, 0.0, 0.55, 0.0],
+                color: [1.1, 0.9, -0.2, 1.0],
+                dims: [GLOW_W as f32, GLOW_H as f32, 0.0, 0.0],
+                uvr: WHOLE,
+                sm: [0.0; 4],
+            };
             self.queue.write_buffer(&self.glow.uniform, 0, bytemuck::bytes_of(&q));
         }
         let view = texture.create_view(&Default::default());
@@ -801,7 +813,10 @@ impl Gfx {
                     view: target,
                     depth_slice: None,
                     resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(self.bar_color.map_or(wgpu::Color::BLACK, |c| wgpu::Color { r: c[0] as f64, g: c[1] as f64, b: c[2] as f64, a: 1.0 })), store: wgpu::StoreOp::Store },
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(self.bar_color.map_or(wgpu::Color::BLACK, |c| wgpu::Color { r: c[0] as f64, g: c[1] as f64, b: c[2] as f64, a: 1.0 })),
+                        store: wgpu::StoreOp::Store,
+                    },
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
@@ -840,7 +855,10 @@ impl Gfx {
                 (Some((w, st)), _) => st.take_egui_input(w),
                 // off screen: the whole texture is the screen, at the scale asked for
                 (None, Some((_, ppp))) => {
-                    let mut raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(self.config.width as f32 / ppp, self.config.height as f32 / ppp))), ..Default::default() };
+                    let mut raw = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(self.config.width as f32 / ppp, self.config.height as f32 / ppp))),
+                        ..Default::default()
+                    };
                     raw.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(*ppp);
                     raw
                 }
@@ -861,10 +879,7 @@ impl Gfx {
                     self.egui_renderer.update_texture(&self.device, &self.queue, *id, delta);
                 }
             }
-            let sd = egui_wgpu::ScreenDescriptor {
-                size_in_pixels: [self.config.width, self.config.height],
-                pixels_per_point: out.pixels_per_point,
-            };
+            let sd = egui_wgpu::ScreenDescriptor { size_in_pixels: [self.config.width, self.config.height], pixels_per_point: out.pixels_per_point };
             buffers = self.egui_renderer.update_buffers(&self.device, &self.queue, &mut enc, &jobs, &sd);
             {
                 let mut pass = enc
@@ -890,7 +905,12 @@ impl Gfx {
         let grab = self.capture.take().filter(|_| self.config.usage.contains(wgpu::TextureUsages::COPY_SRC)).map(|path| {
             let (w, h) = (self.config.width, self.config.height);
             let row = (w * 4).div_ceil(256) * 256;
-            let buf = self.device.create_buffer(&wgpu::BufferDescriptor { label: Some("capture"), size: (row * h) as u64, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+            let buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("capture"),
+                size: (row * h) as u64,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
             enc.copy_texture_to_buffer(
                 wgpu::TexelCopyTextureInfo { texture: &texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
                 wgpu::TexelCopyBufferInfo { buffer: &buf, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(h) } },

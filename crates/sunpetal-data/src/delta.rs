@@ -238,7 +238,12 @@ mod tests {
 
     fn noise(n: usize, seed: u32) -> Vec<u8> {
         let mut s = seed;
-        (0..n).map(|_| { s = s.wrapping_mul(1664525).wrapping_add(1013904223); (s >> 24) as u8 }).collect()
+        (0..n)
+            .map(|_| {
+                s = s.wrapping_mul(1664525).wrapping_add(1013904223);
+                (s >> 24) as u8
+            })
+            .collect()
     }
 
     #[test]

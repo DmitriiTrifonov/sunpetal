@@ -84,9 +84,7 @@ pub fn classify(path: &Path) -> Result<Picked, String> {
         check_data(path)?;
         return Ok(Picked::Data);
     }
-    check_rom(path).map(|_| Picked::Rom).map_err(|e| {
-        format!("{}\n\nPick the European release's .nds, or a sunpetal.data that holds the game (made by sunpetal-build).", e)
-    })
+    check_rom(path).map(|_| Picked::Rom).map_err(|e| format!("{}\n\nPick the European release's .nds, or a sunpetal.data that holds the game (made by sunpetal-build).", e))
 }
 
 /// The language of a translation in the data file that is the system's (`ru` for `ru_RU.UTF-8`

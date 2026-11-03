@@ -119,7 +119,22 @@ impl Gpu2d {
     }
 
     pub(super) fn new() -> Gpu2d {
-        Gpu2d { px: vec![0; 2 * 192 * 256 * 2], refs: [[[0; 2]; 2]; 2], on: true, mosaic: vec![[0; 256]; 8], hide_dialogue: false, band: (0, 0), text_box: [None; 2], pack: None, skip: [[false; 128]; 2], placed: Vec::new(), held: [vec![None; 128], vec![None; 128]], top: vec![5; 2 * 192 * 256], topobj: vec![0xFFFF; 2 * 192 * 256], layers_placed: Vec::new() }
+        Gpu2d {
+            px: vec![0; 2 * 192 * 256 * 2],
+            refs: [[[0; 2]; 2]; 2],
+            on: true,
+            mosaic: vec![[0; 256]; 8],
+            hide_dialogue: false,
+            band: (0, 0),
+            text_box: [None; 2],
+            pack: None,
+            skip: [[false; 128]; 2],
+            placed: Vec::new(),
+            held: [vec![None; 128], vec![None; 128]],
+            top: vec![5; 2 * 192 * 256],
+            topobj: vec![0xFFFF; 2 * 192 * 256],
+            layers_placed: Vec::new(),
+        }
     }
 
     fn at(e: usize, y: usize) -> usize {
@@ -355,7 +370,11 @@ impl Nds {
             let s = 128u32 << size;
             (s, s)
         } else if kind == 4 {
-            if size & 1 != 0 { (1024, 512) } else { (512, 1024) }
+            if size & 1 != 0 {
+                (1024, 512)
+            } else {
+                (512, 1024)
+            }
         } else {
             const BW: [u32; 4] = [128, 256, 512, 512];
             const BH: [u32; 4] = [128, 256, 256, 512];
@@ -385,7 +404,11 @@ impl Nds {
                 0 => {
                     let tile = self.vram_r8(l.abg, screenbase + (uy >> 3) * (w >> 3) + (ux >> 3)) as u32;
                     let idx = self.vram_r8(l.abg, charbase + tile * 64 + (uy & 7) * 8 + (ux & 7)) as u32;
-                    if idx != 0 { c666(self.pal16(l.e, idx)) | PX_OPAQUE } else { 0 }
+                    if idx != 0 {
+                        c666(self.pal16(l.e, idx)) | PX_OPAQUE
+                    } else {
+                        0
+                    }
                 }
                 1 => {
                     let entry = self.vram_r16(l.abg, screenbase + ((uy >> 3) * (w >> 3) + (ux >> 3)) * 2) as u32;
@@ -395,21 +418,25 @@ impl Nds {
                     if idx == 0 {
                         0
                     } else {
-                        let c = if ext {
-                            self.vram_r16(l.abgext, bg as u32 * 0x2000 + (entry >> 12) * 512 + idx * 2)
-                        } else {
-                            self.pal16(l.e, idx)
-                        };
+                        let c = if ext { self.vram_r16(l.abgext, bg as u32 * 0x2000 + (entry >> 12) * 512 + idx * 2) } else { self.pal16(l.e, idx) };
                         c666(c) | PX_OPAQUE
                     }
                 }
                 2 | 4 => {
                     let idx = self.vram_r8(l.abg, (if kind == 2 { bmpbase } else { 0 }) + uy * w + ux) as u32;
-                    if idx != 0 { c666(self.pal16(l.e, idx)) | PX_OPAQUE } else { 0 }
+                    if idx != 0 {
+                        c666(self.pal16(l.e, idx)) | PX_OPAQUE
+                    } else {
+                        0
+                    }
                 }
                 _ => {
                     let c = self.vram_r16(l.abg, bmpbase + (uy * w + ux) * 2);
-                    if c & 0x8000 != 0 { c666(c) | PX_OPAQUE } else { 0 }
+                    if c & 0x8000 != 0 {
+                        c666(c) | PX_OPAQUE
+                    } else {
+                        0
+                    }
                 }
             };
         }
@@ -576,9 +603,7 @@ impl Nds {
         let mut out = String::new();
         for e in 0..2usize {
             let io = if e == 1 { 0x0400_1000 } else { 0x0400_0000 };
-            let list = |f: &dyn Fn(u32) -> u16, base: u32, n: u32, step: u32| {
-                (0..n).map(|k| f(io + base + step * k).to_string()).collect::<Vec<_>>().join(",")
-            };
+            let list = |f: &dyn Fn(u32) -> u16, base: u32, n: u32, step: u32| (0..n).map(|k| f(io + base + step * k).to_string()).collect::<Vec<_>>().join(",");
             let g = |a: u32| self.g16(a);
             let mut spr = Vec::new();
             for i in 0..128usize {
@@ -668,8 +693,7 @@ impl Nds {
                 continue;
             }
             let bgmode = (d & 7) as usize;
-            const KIND: [[i8; 4]; 8] =
-                [[0, 0, 0, 0], [0, 0, 0, 1], [0, 0, 1, 1], [0, 0, 0, 2], [0, 0, 1, 2], [0, 0, 2, 2], [0, -1, 3, -1], [-1, -1, -1, -1]];
+            const KIND: [[i8; 4]; 8] = [[0, 0, 0, 0], [0, 0, 0, 1], [0, 0, 1, 1], [0, 0, 0, 2], [0, 0, 1, 2], [0, 0, 2, 2], [0, -1, 3, -1], [-1, -1, -1, -1]];
             let saved = self.gpu.refs;
             for bg in 0..4usize {
                 let kind = KIND[bgmode][bg];
@@ -686,7 +710,13 @@ impl Nds {
                         1 => self.bg_affine(&l, bg, 0, &mut buf),
                         3 => self.bg_affine(&l, bg, 4, &mut buf),
                         _ => {
-                            let k = if cnt & 0x80 == 0 { 1 } else if cnt & 4 != 0 { 3 } else { 2 };
+                            let k = if cnt & 0x80 == 0 {
+                                1
+                            } else if cnt & 4 != 0 {
+                                3
+                            } else {
+                                2
+                            };
                             self.bg_affine(&l, bg, k, &mut buf)
                         }
                     }
@@ -799,7 +829,11 @@ impl Nds {
                     }
                     used[idx as usize] = true;
                     c = if c256 {
-                        if ext { self.vram_r16(l.aobjext, (a2 >> 12) * 512 + idx * 2) } else { self.pal16(e, 0x100 + idx) }
+                        if ext {
+                            self.vram_r16(l.aobjext, (a2 >> 12) * 512 + idx * 2)
+                        } else {
+                            self.pal16(e, 0x100 + idx)
+                        }
                     } else {
                         self.pal16(e, 0x100 + (a2 >> 12) * 16 + idx)
                     };
@@ -816,7 +850,11 @@ impl Nds {
         for (k, u) in used.iter().enumerate() {
             if *u {
                 let c = if c256 {
-                    if ext { self.vram_r16(l.aobjext, (a2 >> 12) * 512 + k as u32 * 2) } else { self.pal16(e, 0x100 + k as u32) }
+                    if ext {
+                        self.vram_r16(l.aobjext, (a2 >> 12) * 512 + k as u32 * 2)
+                    } else {
+                        self.pal16(e, 0x100 + k as u32)
+                    }
                 } else {
                     self.pal16(e, 0x100 + (a2 >> 12) * 16 + k as u32)
                 };
@@ -834,7 +872,22 @@ impl Nds {
         }
         let double = affine && a0 & 0x200 != 0;
         // an affine sprite's bits 12-13 of attribute 1 pick its matrix, they are no flips
-        Some(Sprite { x: x0, y: y0, w, h, rgba, data: hd, pal: hp, flip_h: !affine && a1 & 0x1000 != 0, flip_v: !affine && a1 & 0x2000 != 0, affine, mode: ((a0 >> 10) & 3) as u8, prio: ((a2 >> 10) & 3) as u8, mat, double })
+        Some(Sprite {
+            x: x0,
+            y: y0,
+            w,
+            h,
+            rgba,
+            data: hd,
+            pal: hp,
+            flip_h: !affine && a1 & 0x1000 != 0,
+            flip_v: !affine && a1 & 0x2000 != 0,
+            affine,
+            mode: ((a0 >> 10) & 3) as u8,
+            prio: ((a2 >> 10) & 3) as u8,
+            mat,
+            double,
+        })
     }
 
     /// Every picture the 2D engines show, for a 2D pack (`docs/2D-UPSCALE.md`, 8е.2): the background
@@ -870,9 +923,8 @@ impl Nds {
         }
         // merge with the index an earlier call wrote
         let idx = dir.join("index.csv");
-        let mut all: std::collections::BTreeSet<String> = std::fs::read_to_string(&idx)
-            .map(|t| t.lines().skip(1).map(|l| l.splitn(10, ',').take(9).collect::<Vec<_>>().join(",")).collect())
-            .unwrap_or_default();
+        let mut all: std::collections::BTreeSet<String> =
+            std::fs::read_to_string(&idx).map(|t| t.lines().skip(1).map(|l| l.splitn(10, ',').take(9).collect::<Vec<_>>().join(",")).collect()).unwrap_or_default();
         all.extend(rows);
         let mut text = String::from("kind,engine,layer_or_oam,x,y,w,h,key,file\n");
         for r in &all {
@@ -915,7 +967,17 @@ impl Nds {
             let io = |e: usize| if e == 1 { 0x0400_1000 } else { 0x0400_0000 };
             let now = (0..2usize).fold(0u32, |m, e| m | (!plain(self, e) as u32) << e);
             if LAST.swap(now, std::sync::atomic::Ordering::Relaxed) != now {
-                eprintln!("pack2d: not plain A={} B={} (BLDCNT A {:04X} B {:04X}, BLDY A {} B {}, MASTER_BRIGHT A {:04X} B {:04X})", now & 1, now >> 1 & 1, self.g16(io(0) + 0x50), self.g16(io(1) + 0x50), self.g16(io(0) + 0x54), self.g16(io(1) + 0x54), self.g16(io(0) + 0x6C), self.g16(io(1) + 0x6C));
+                eprintln!(
+                    "pack2d: not plain A={} B={} (BLDCNT A {:04X} B {:04X}, BLDY A {} B {}, MASTER_BRIGHT A {:04X} B {:04X})",
+                    now & 1,
+                    now >> 1 & 1,
+                    self.g16(io(0) + 0x50),
+                    self.g16(io(1) + 0x50),
+                    self.g16(io(0) + 0x54),
+                    self.g16(io(1) + 0x54),
+                    self.g16(io(0) + 0x6C),
+                    self.g16(io(1) + 0x6C)
+                );
             }
         }
         if pack.has_layers() {
@@ -978,7 +1040,13 @@ impl Nds {
                 // a DS colour (a 6-bit value widened): faded in 6 bits as the engine does, the same byte; else in 8
                 let c = *v >> 2;
                 *v = if m != 0 && *v == (c << 2 | c >> 4) {
-                    let c = if m == 1 { c + ((63 - c) * f >> 4) } else if m == 2 { c - ((c * f + 7) >> 4) } else { c };
+                    let c = if m == 1 {
+                        c + ((63 - c) * f >> 4)
+                    } else if m == 2 {
+                        c - ((c * f + 7) >> 4)
+                    } else {
+                        c
+                    };
                     c << 2 | c >> 4
                 } else {
                     match m {
@@ -1142,7 +1210,8 @@ impl Nds {
         let d = l.dispcnt;
         self.sprites(l, y);
         for x in 0..256 {
-            self.gpu.topobj[(e * 192 + y as usize) * 256 + x] = if l.objprio[x] < 4 && l.obj[x] & PX_OPAQUE != 0 { (l.objprio[x] as u16) << 8 | l.objidx[x] as u16 } else { 0xFFFF };
+            self.gpu.topobj[(e * 192 + y as usize) * 256 + x] =
+                if l.objprio[x] < 4 && l.obj[x] & PX_OPAQUE != 0 { (l.objprio[x] as u16) << 8 | l.objidx[x] as u16 } else { 0xFFFF };
         }
         self.windows(l, y);
         let backdrop = c666(self.pal16(e, 0));
@@ -1153,16 +1222,7 @@ impl Nds {
         let bgmode = (d & 7) as usize;
         let is3d = e == 0 && d & 8 != 0;
         // each BG's kind in this mode: -1 none, 0 text, 1 affine, 2 extended, 3 large bitmap
-        const KIND: [[i8; 4]; 8] = [
-            [0, 0, 0, 0],
-            [0, 0, 0, 1],
-            [0, 0, 1, 1],
-            [0, 0, 0, 2],
-            [0, 0, 1, 2],
-            [0, 0, 2, 2],
-            [0, -1, 3, -1],
-            [-1, -1, -1, -1],
-        ];
+        const KIND: [[i8; 4]; 8] = [[0, 0, 0, 0], [0, 0, 0, 1], [0, 0, 1, 1], [0, 0, 0, 2], [0, 0, 1, 2], [0, 0, 2, 2], [0, -1, 3, -1], [-1, -1, -1, -1]];
         let mut buf = [0u32; 256];
         fn push(l: &mut Line, x: usize, px: u32, layer: u8) {
             l.below[x] = l.top[x];
@@ -1203,7 +1263,13 @@ impl Nds {
                         1 => self.bg_affine(l, bg, 0, &mut buf),
                         3 => self.bg_affine(l, bg, 4, &mut buf),
                         _ => {
-                            let k = if cnt & 0x80 == 0 { 1 } else if cnt & 4 != 0 { 3 } else { 2 };
+                            let k = if cnt & 0x80 == 0 {
+                                1
+                            } else if cnt & 4 != 0 {
+                                3
+                            } else {
+                                2
+                            };
                             self.bg_affine(l, bg, k, &mut buf)
                         }
                     }
@@ -1403,9 +1469,21 @@ impl Nds {
                             // beside the DS's own picture the 3D shows only on the rows where the picture's
                             // edge has it: a panel or a rule over the 3D there runs on, not cut off by it
                             let x3 = x * f3 / s;
-                            let edge = if x3 < c3 { c3 } else if x3 >= c3 + 256 * f3 { c3 + 256 * f3 - 1 } else { x3 };
+                            let edge = if x3 < c3 {
+                                c3
+                            } else if x3 >= c3 + 256 * f3 {
+                                c3 + 256 * f3 - 1
+                            } else {
+                                x3
+                            };
                             let p3 = if (self.frame3d[y3 * w3 + edge] >> 18) & 31 == 0 { 0 } else { self.frame3d[y3 * w3 + x3] };
-                            let words = if layers & 1 != 0 { [self.gpu.px[i], self.gpu.px[i + 1]] } else if layers & 2 != 0 { [1 << 24, 0] } else { [0, 0] }; // mode 1: the 3D replaces
+                            let words = if layers & 1 != 0 {
+                                [self.gpu.px[i], self.gpu.px[i + 1]]
+                            } else if layers & 2 != 0 {
+                                [1 << 24, 0]
+                            } else {
+                                [0, 0]
+                            }; // mode 1: the 3D replaces
                             let c = compose(&words, if layers & 2 != 0 { p3 } else { 0 });
                             row[3 * x] = (c >> 16) as u8;
                             row[3 * x + 1] = (c >> 8) as u8;

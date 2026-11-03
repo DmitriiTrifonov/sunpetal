@@ -17,7 +17,9 @@ fn main() -> ExitCode {
     let mut rest = Vec::new();
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--vblanks" | "--out" | "--save" | "--save-size" | "--dump-textures" | "--dump-bg" | "--dump-2d" | "--pack-2d" | "--texture-pack" | "--overlay" | "--data" | "--lang" | "--shots" | "--shot-every" | "--input" | "--wav" | "--scale" | "--outline" | "--outline-width" | "--shadow" | "--shadow-radius" | "--texture-filter" | "--wide" | "--msaa" | "--renderer" => rest.push((a, args.next().unwrap_or_default())),
+            "--vblanks" | "--out" | "--save" | "--save-size" | "--dump-textures" | "--dump-bg" | "--dump-2d" | "--pack-2d" | "--texture-pack" | "--overlay" | "--data"
+            | "--lang" | "--shots" | "--shot-every" | "--input" | "--wav" | "--scale" | "--outline" | "--outline-width" | "--shadow" | "--shadow-radius" | "--texture-filter"
+            | "--wide" | "--msaa" | "--renderer" => rest.push((a, args.next().unwrap_or_default())),
             "--trace" | "--draw-all" | "--pipeline" => rest.push((a, String::new())),
             _ if cfg.is_none() => cfg = Some(Config::new(a)),
             _ => {

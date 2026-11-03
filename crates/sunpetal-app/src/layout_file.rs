@@ -77,15 +77,10 @@ pub fn parse(text: &str) -> Result<Layout, String> {
 
 /// The built-in layouts that are files.
 pub fn builtin() -> Vec<Layout> {
-    [
-        include_str!("../layouts/stacked.toml"),
-        include_str!("../layouts/side-by-side.toml"),
-        include_str!("../layouts/upper-only.toml"),
-        include_str!("../layouts/lower-only.toml"),
-    ]
-    .iter()
-    .map(|t| parse(t).expect("a built-in layout file reads"))
-    .collect()
+    [include_str!("../layouts/stacked.toml"), include_str!("../layouts/side-by-side.toml"), include_str!("../layouts/upper-only.toml"), include_str!("../layouts/lower-only.toml")]
+        .iter()
+        .map(|t| parse(t).expect("a built-in layout file reads"))
+        .collect()
 }
 
 /// The player's layouts in `dir` (`*.toml`, by name), and the errors of those that do not read.
@@ -121,10 +116,7 @@ mod tests {
     /// rectangles (the state decides which one shows, in `layout::pick`).
     #[test]
     fn the_panel_files_are_the_codes_geometry() {
-        for (text, code) in [
-            (include_str!("../layouts/overlay-open.toml"), layout::overlay(true)),
-            (include_str!("../layouts/puzzle-panel.toml"), layout::puzzle_panel()),
-        ] {
+        for (text, code) in [(include_str!("../layouts/overlay-open.toml"), layout::overlay(true)), (include_str!("../layouts/puzzle-panel.toml"), layout::puzzle_panel())] {
             let file = parse(text).unwrap();
             assert_eq!(file.name, code.name);
             assert_eq!(file.screens[0], code.screens[0]);

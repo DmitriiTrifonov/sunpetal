@@ -22,7 +22,6 @@ use sunpetal_data::nftr::Nftr;
 use sunpetal_data::nitrofs::NitroFs;
 use sunpetal_data::translate::{font_file_name, parse_csv, DIALOGUE_FONT, FONTS};
 
-
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,

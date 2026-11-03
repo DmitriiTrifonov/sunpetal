@@ -128,7 +128,11 @@ fn hiding_the_raster_text_changes_only_the_dialogue_band() {
     for (i, (a, b)) in plain.chunks_exact(4).zip(hidden.chunks_exact(4)).enumerate() {
         if a != b {
             let y = i * 4 / row;
-            if (144 * scale..192 * scale).contains(&y) { inside += 1 } else { outside += 1 }
+            if (144 * scale..192 * scale).contains(&y) {
+                inside += 1
+            } else {
+                outside += 1
+            }
         }
     }
     eprintln!("changed: {} in the band, {} elsewhere", inside, outside);

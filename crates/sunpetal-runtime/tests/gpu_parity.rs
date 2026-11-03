@@ -259,13 +259,7 @@ fn gpu_outline_on_real_frames() {
             w.write_image_data(&gp.diff).unwrap();
             println!("  outline diff map: {}", path.display());
         }
-        assert!(
-            gp.outline_exact * 100 >= gp.pixels * 95,
-            "{}: outline bits match on {} of {} pixels",
-            gp.path,
-            gp.outline_exact,
-            gp.pixels
-        );
+        assert!(gp.outline_exact * 100 >= gp.pixels * 95, "{}: outline bits match on {} of {} pixels", gp.path, gp.outline_exact, gp.pixels);
     }
     if any {
         println!("outline bits matched on all the dumps");
@@ -317,13 +311,7 @@ fn gpu_shade_on_real_frames() {
         if let Some((i, g, s)) = gp.first {
             println!("  first word mismatch at pixel {i}: gpu {g:08x} soft {s:08x}");
         }
-        assert!(
-            gp.shade_exact * 100 >= gp.pixels * 95,
-            "{}: shade bits match on {} of {} pixels",
-            gp.path,
-            gp.shade_exact,
-            gp.pixels
-        );
+        assert!(gp.shade_exact * 100 >= gp.pixels * 95, "{}: shade bits match on {} of {} pixels", gp.path, gp.shade_exact, gp.pixels);
     }
     if any {
         println!("shade bits matched on all the dumps");
@@ -406,10 +394,7 @@ fn gpu_wide_on_real_frames() {
             Ok(gp) => gp,
         };
         any = true;
-        println!(
-            "{}: words exact {}/{} ({} side pixels with content, e {})",
-            gp.path, gp.exact, gp.pixels, gp.side_pixels, gp.e
-        );
+        println!("{}: words exact {}/{} ({} side pixels with content, e {})", gp.path, gp.exact, gp.pixels, gp.side_pixels, gp.e);
         if let Some((i, g, s)) = gp.first {
             println!("  first word mismatch at pixel {i}: gpu {g:08x} soft {s:08x}");
         }

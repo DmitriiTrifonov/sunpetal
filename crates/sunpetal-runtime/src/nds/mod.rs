@@ -17,14 +17,14 @@ mod gx;
 mod input;
 mod jobdump;
 mod mmio;
+mod pack2d;
 mod render3d;
 #[cfg(feature = "gpu")]
 mod render3d_gpu;
 mod sound;
-mod pack2d;
-mod texpack;
 mod spi;
 mod system;
+mod texpack;
 mod video;
 
 use std::cell::UnsafeCell;
@@ -127,7 +127,11 @@ pub fn overlay_files(cfg: &Config, rom: &[u8]) -> Result<Vec<(String, Vec<u8>)>,
 }
 
 fn ci(cpu: i32) -> usize {
-    if cpu == 9 { 0 } else { 1 }
+    if cpu == 9 {
+        0
+    } else {
+        1
+    }
 }
 
 // ---- events ---------------------------------------------------------------------------------
@@ -320,13 +324,7 @@ impl Nds {
 
     fn fire_events(&mut self, now: u64) {
         loop {
-            let best = self
-                .events
-                .iter()
-                .enumerate()
-                .filter(|(_, e)| e.on && e.when <= now)
-                .min_by_key(|(_, e)| e.when)
-                .map(|(i, _)| i);
+            let best = self.events.iter().enumerate().filter(|(_, e)| e.on && e.when <= now).min_by_key(|(_, e)| e.when).map(|(i, _)| i);
             let Some(i) = best else { return };
             self.events[i].on = false;
             let (kind, when) = (self.events[i].kind, self.events[i].when);
@@ -865,17 +863,8 @@ pub fn gpu_outline_check(path: &std::path::Path) -> Result<OutlineParity, String
     if notes != ref_notes {
         eprintln!("{}: notes differ (gpu {:#x} soft {:#x})", path.display(), notes, ref_notes);
     }
-    let mut rep = OutlineParity {
-        path: path.display().to_string(),
-        w,
-        h,
-        pixels: ref_px.len(),
-        exact: 0,
-        outline_exact: 0,
-        outline_on: 0,
-        first: None,
-        diff: vec![0; ref_px.len() * 4],
-    };
+    let mut rep =
+        OutlineParity { path: path.display().to_string(), w, h, pixels: ref_px.len(), exact: 0, outline_exact: 0, outline_on: 0, first: None, diff: vec![0; ref_px.len() * 4] };
     for (i, (a, b)) in px.iter().zip(ref_px.iter()).enumerate() {
         if a >> 24 & 15 == b >> 24 & 15 {
             rep.outline_exact += 1;
@@ -923,14 +912,7 @@ pub fn gpu_shade_check(path: &std::path::Path) -> Result<ShadeParity, String> {
     if notes != ref_notes {
         eprintln!("{}: notes differ (gpu {:#x} soft {:#x})", path.display(), notes, ref_notes);
     }
-    let mut rep = ShadeParity {
-        path: path.display().to_string(),
-        pixels: ref_px.len(),
-        exact: 0,
-        shade_exact: 0,
-        shade_on: 0,
-        first: None,
-    };
+    let mut rep = ShadeParity { path: path.display().to_string(), pixels: ref_px.len(), exact: 0, shade_exact: 0, shade_on: 0, first: None };
     for (i, (a, b)) in px.iter().zip(ref_px.iter()).enumerate() {
         if a >> 28 & 15 == b >> 28 & 15 {
             rep.shade_exact += 1;
@@ -1026,17 +1008,7 @@ pub fn gpu_wide_check(path: &std::path::Path) -> Result<WideParity, String> {
     let calpha = (job.clear_color >> 16) & 31;
     let clear_word = if calpha == 0 { 0 } else { cr | cg << 6 | cb << 12 | calpha << 18 };
     let e = job.width.saturating_sub(256) / 2 * d.scale;
-    let mut rep = WideParity {
-        path: path.display().to_string(),
-        w,
-        h,
-        e,
-        pixels: ref_px.len(),
-        exact: 0,
-        side_pixels: 0,
-        first: None,
-        diff: vec![0; ref_px.len() * 4],
-    };
+    let mut rep = WideParity { path: path.display().to_string(), w, h, e, pixels: ref_px.len(), exact: 0, side_pixels: 0, first: None, diff: vec![0; ref_px.len() * 4] };
     for (i, (a, b)) in px.iter().zip(ref_px.iter()).enumerate() {
         if a == b {
             rep.exact += 1;
@@ -1121,7 +1093,11 @@ pub fn set_extras(e: Extras) {
             shadow: c(e.shadow, 0.0, 1.0, 0.0),
             shadow_radius: c(e.shadow_radius, 0.5, 6.0, 2.0),
             filter: e.filter,
-            msaa: match e.msaa { 0..=1 => 0, 2..=3 => 2, _ => 4 },
+            msaa: match e.msaa {
+                0..=1 => 0,
+                2..=3 => 2,
+                _ => 4,
+            },
         }
     });
 }
@@ -1540,9 +1516,7 @@ pub fn script_waits() -> Option<bool> {
     nds(|n| n.cart.rom.get(0xC..0x10) == Some(b"YHNP".as_slice())).then(|| {
         crate::machine::machine(|m| {
             let mut w = [0u8; 4];
-            m.mem.read_bytes(9, 0x0207_5988, &mut w).then(|| u32::from_le_bytes(w)).and_then(|cmd| {
-                m.mem.read_bytes(9, cmd, &mut w).then(|| u32::from_le_bytes(w) == OP_WAIT)
-            })
+            m.mem.read_bytes(9, 0x0207_5988, &mut w).then(|| u32::from_le_bytes(w)).and_then(|cmd| m.mem.read_bytes(9, cmd, &mut w).then(|| u32::from_le_bytes(w) == OP_WAIT))
         })
     })?
 }
@@ -1589,12 +1563,8 @@ pub fn report() {
             ie,
             iflags
         );
-        eprintln!(
-            "    r0-r12: {}",
-            regs[..13].iter().map(|r| format!("{:08X}", r)).collect::<Vec<_>>().join(" ")
-        );
-        let irqs: Vec<String> =
-            counts.iter().enumerate().filter(|(_, c)| **c != 0).map(|(b, c)| format!("{}:{}", b, c)).collect();
+        eprintln!("    r0-r12: {}", regs[..13].iter().map(|r| format!("{:08X}", r)).collect::<Vec<_>>().join(" "));
+        let irqs: Vec<String> = counts.iter().enumerate().filter(|(_, c)| **c != 0).map(|(b, c)| format!("{}:{}", b, c)).collect();
         eprintln!("    interrupts: {}", irqs.join(" "));
     }
 }

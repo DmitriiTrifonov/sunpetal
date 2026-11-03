@@ -23,12 +23,12 @@ mod fonts;
 mod gfx;
 mod layout;
 mod layout_file;
-pub mod screen_report;
 mod locate;
 mod pad;
 mod post;
 #[allow(dead_code)]
 mod rec;
+pub mod screen_report;
 mod script;
 mod touchpad;
 mod ui;
@@ -275,14 +275,31 @@ impl App {
     }
 
     fn live(&self) -> layout::Live {
-        layout::Live { vblank: self.shared.vblank.load(Ordering::Relaxed), counter_seen: self.counter_seen, hint_seen: self.hint_seen, both: self.puzzle_hold > 0, both_side: self.puzzle_side, collection: self.coll_seen.then(|| self.coll_card.get()), lower: self.auto_lower || self.hold.is_some(), edo: self.edo_seen, prompt: self.prompt, wide: self.wide_now as f32, scroll: (self.paper && self.auto_lower).then_some(self.scroll) }
+        layout::Live {
+            vblank: self.shared.vblank.load(Ordering::Relaxed),
+            counter_seen: self.counter_seen,
+            hint_seen: self.hint_seen,
+            both: self.puzzle_hold > 0,
+            both_side: self.puzzle_side,
+            collection: self.coll_seen.then(|| self.coll_card.get()),
+            lower: self.auto_lower || self.hold.is_some(),
+            edo: self.edo_seen,
+            prompt: self.prompt,
+            wide: self.wide_now as f32,
+            scroll: (self.paper && self.auto_lower).then_some(self.scroll),
+        }
     }
 
     /// F10: the emulation writes the picture and its parts to `artifacts/shots`; this is what the window knows, for the
     /// file beside them (commit, layout, window, widening, what the picture was taken for, settings).
     fn dump_shot(&self) {
         let v = &self.settings.video;
-        let commit = std::process::Command::new("git").args(["rev-parse", "--short", "HEAD"]).output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+        let commit = std::process::Command::new("git")
+            .args(["rev-parse", "--short", "HEAD"])
+            .output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
         let dirty = std::process::Command::new("git").args(["status", "--porcelain"]).output().ok().is_some_and(|o| !o.stdout.is_empty());
         let l = self.layout();
         let (ww, wh) = self.gfx.as_ref().map_or((0, 0), |g| (g.size().0 as u32, g.size().1 as u32));
@@ -463,12 +480,7 @@ impl App {
             r.set_volume(if s.audio.mute { 0.0 } else { s.audio.volume });
         }
         if s.input != a.input {
-            self.keymap = s
-                .input
-                .keys
-                .iter()
-                .filter_map(|(button, key)| Some((config::parse_key(key)?, bit(button))))
-                .collect();
+            self.keymap = s.input.keys.iter().filter_map(|(button, key)| Some((config::parse_key(key)?, bit(button)))).collect();
         }
         self.applied = s;
     }
@@ -563,7 +575,14 @@ impl App {
     }
 
     fn pad_press(&mut self, b: gilrs::Button) {
-        let act = pad::press(b, pad::Ctx { menu_open: self.menu.open, start_to_game: start_to_game(self.prompt.is_some() || self.prompt_off < PROMPT_HOLD, self.title_seen, self.title_menu), game_menu_up: self.auto_lower && self.puzzle_hold == 0 && !self.dial_scene });
+        let act = pad::press(
+            b,
+            pad::Ctx {
+                menu_open: self.menu.open,
+                start_to_game: start_to_game(self.prompt.is_some() || self.prompt_off < PROMPT_HOLD, self.title_seen, self.title_menu),
+                game_menu_up: self.auto_lower && self.puzzle_hold == 0 && !self.dial_scene,
+            },
+        );
         if self.pad_log {
             eprintln!("    {:?} -> {:?}", b, act);
         }
@@ -773,7 +792,8 @@ impl App {
             self.paper = paper;
             // the bars of the window: the picture's edge colour if that is one
             let layout = self.layout();
-            let ask = if self.settings.video.bars_match && matches!(self.settings.video.background.as_str(), "glow" | "edge") { layout::edge_color(&layout, *scale, rgba) } else { None };
+            let ask =
+                if self.settings.video.bars_match && matches!(self.settings.video.background.as_str(), "glow" | "edge") { layout::edge_color(&layout, *scale, rgba) } else { None };
             let same = match (ask, self.bar_ask.0) {
                 (Some(a), Some(b)) => (0..3).all(|c| (a[c] - b[c]).abs() < 0.04),
                 (None, None) => true,
@@ -833,8 +853,46 @@ impl App {
         let toast = self.toast.as_ref().map(|(m, _)| m.clone());
         {
             let (cursor, pen_now) = (self.stylus.pos.filter(|_| !self.menu.open), self.pen_down);
-            let App { gfx, menu, force_full, settings, layouts, touch_held, stopped_msg, shared, counter_seen, hint_seen, puzzle_hold, puzzle_side, coll_seen, coll_card, pending_capture, edo_seen, prompt, bar_color, auto_lower, hold, wide_now, paper, scroll, portrait_left, .. } = self;
-            let live = layout::Live { vblank: shared.vblank.load(Ordering::Relaxed), counter_seen: *counter_seen, hint_seen: *hint_seen, both: *puzzle_hold > 0, both_side: *puzzle_side, collection: coll_seen.then(|| coll_card.get()), lower: *auto_lower || hold.is_some(), edo: *edo_seen, prompt: *prompt, wide: *wide_now as f32, scroll: (*paper && *auto_lower).then_some(*scroll) };
+            let App {
+                gfx,
+                menu,
+                force_full,
+                settings,
+                layouts,
+                touch_held,
+                stopped_msg,
+                shared,
+                counter_seen,
+                hint_seen,
+                puzzle_hold,
+                puzzle_side,
+                coll_seen,
+                coll_card,
+                pending_capture,
+                edo_seen,
+                prompt,
+                bar_color,
+                auto_lower,
+                hold,
+                wide_now,
+                paper,
+                scroll,
+                portrait_left,
+                ..
+            } = self;
+            let live = layout::Live {
+                vblank: shared.vblank.load(Ordering::Relaxed),
+                counter_seen: *counter_seen,
+                hint_seen: *hint_seen,
+                both: *puzzle_hold > 0,
+                both_side: *puzzle_side,
+                collection: coll_seen.then(|| coll_card.get()),
+                lower: *auto_lower || hold.is_some(),
+                edo: *edo_seen,
+                prompt: *prompt,
+                wide: *wide_now as f32,
+                scroll: (*paper && *auto_lower).then_some(*scroll),
+            };
             if let Some(g) = gfx {
                 let layout = layout::find(layouts, &settings.video, &live);
                 g.bar_color = *bar_color;
@@ -1395,7 +1453,10 @@ fn prepare(o: Options, scripted: bool) -> (App, Arc<Shared>, Option<cpal::Stream
     if rom.as_os_str().is_empty() {
         cfg.data = cfg.texture_pack.clone();
     } else if cfg.data.is_none() && !settings.game.language.is_empty() {
-        eprintln!("the game language `{}` is set, but there is no data file to take it from (the texture setting or --texture-pack); the ROM's own text is used", settings.game.language);
+        eprintln!(
+            "the game language `{}` is set, but there is no data file to take it from (the texture setting or --texture-pack); the ROM's own text is used",
+            settings.game.language
+        );
     }
     let shared = Shared::new();
     shared.scale.store(settings.video.res, Ordering::Relaxed);
@@ -1529,7 +1590,22 @@ mod save_command_tests {
     use std::path::PathBuf;
 
     fn options() -> Options {
-        Options { rom: PathBuf::new(), out: None, save: None, mute: false, res: None, menu: false, full_menu: false, dump: None, pack: None, lang: None, wide: None, renderer: None, pipeline: false, goto: None }
+        Options {
+            rom: PathBuf::new(),
+            out: None,
+            save: None,
+            mute: false,
+            res: None,
+            menu: false,
+            full_menu: false,
+            dump: None,
+            pack: None,
+            lang: None,
+            wide: None,
+            renderer: None,
+            pipeline: false,
+            goto: None,
+        }
     }
 
     #[test]
@@ -1603,9 +1679,7 @@ fn save_command(export: Option<&std::path::Path>, import: Option<&std::path::Pat
     };
     let path = save_file_of(o, source);
     if let Some(to) = export {
-        let said = std::fs::read(&path)
-            .map_err(|e| format!("no save to export at {}: {}", path.display(), e))
-            .and_then(|bytes| sunpetal_runtime::savefile::export(&bytes, to));
+        let said = std::fs::read(&path).map_err(|e| format!("no save to export at {}: {}", path.display(), e)).and_then(|bytes| sunpetal_runtime::savefile::export(&bytes, to));
         match said {
             Ok(s) => println!("{}", s),
             Err(e) => {
@@ -1616,7 +1690,12 @@ fn save_command(export: Option<&std::path::Path>, import: Option<&std::path::Pat
     }
     if let Some(from) = import {
         if let Some(pid) = sunpetal_runtime::savefile::running(&path) {
-            eprintln!("a game (process {}) is running on {}: close it first, or it writes its own memory over the import (a lock left by a crash: delete {})", pid, path.display(), sunpetal_runtime::savefile::lock_path(&path).display());
+            eprintln!(
+                "a game (process {}) is running on {}: close it first, or it writes its own memory over the import (a lock left by a crash: delete {})",
+                pid,
+                path.display(),
+                sunpetal_runtime::savefile::lock_path(&path).display()
+            );
             return 1;
         }
         match sunpetal_runtime::savefile::import(from, &path) {
@@ -1634,7 +1713,22 @@ fn save_command(export: Option<&std::path::Path>, import: Option<&std::path::Pat
 pub fn desktop_main() {
     let mut args = std::env::args().skip(1);
     let mut rom: Option<PathBuf> = None;
-    let mut o = Options { rom: PathBuf::new(), out: None, save: None, mute: false, res: None, menu: false, full_menu: false, dump: None, pack: None, lang: None, wide: None, renderer: None, pipeline: false, goto: None };
+    let mut o = Options {
+        rom: PathBuf::new(),
+        out: None,
+        save: None,
+        mute: false,
+        res: None,
+        menu: false,
+        full_menu: false,
+        dump: None,
+        pack: None,
+        lang: None,
+        wide: None,
+        renderer: None,
+        pipeline: false,
+        goto: None,
+    };
     // the save file out to a copy, or a copy in (`--export-save FILE`, `--import-save FILE`): done with no window
     let (mut export_save, mut import_save): (Option<PathBuf>, Option<PathBuf>) = (None, None);
     // `--script FILE|-`: no window, the commands drive the app and take its pictures (script.rs)
@@ -1678,9 +1772,7 @@ pub fn desktop_main() {
     }
     // no ROM named: the one in the settings, then one found in the usual folders
     let dirs = locate::search_dirs();
-    let rom = rom
-        .or_else(|| Some(PathBuf::from(config::load().game.rom)).filter(|p| !p.as_os_str().is_empty()))
-        .or_else(|| locate::find_rom(&dirs));
+    let rom = rom.or_else(|| Some(PathBuf::from(config::load().game.rom)).filter(|p| !p.as_os_str().is_empty())).or_else(|| locate::find_rom(&dirs));
     if export_save.is_some() || import_save.is_some() {
         let named_data = o.pack.clone().or_else(|| Some(PathBuf::from(config::load().video.texture_pack)).filter(|p| !p.as_os_str().is_empty()));
         let data = named_data.or_else(|| locate::find_data(&dirs)).filter(|p| sunpetal_data::dsrom::has_rom(p));
@@ -1786,9 +1878,7 @@ fn run_script(mut o: Options, from: &str) -> i32 {
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn pick_game() -> Option<(locate::Picked, PathBuf)> {
     loop {
-        let path = rfd::FileDialog::new()
-            .set_title("Sunpetal: pick the game's ROM (.nds) or sunpetal.data")
-            .pick_file()?;
+        let path = rfd::FileDialog::new().set_title("Sunpetal: pick the game's ROM (.nds) or sunpetal.data").pick_file()?;
         match locate::classify(&path) {
             Ok(p) => return Some((p, path)),
             Err(e) => {

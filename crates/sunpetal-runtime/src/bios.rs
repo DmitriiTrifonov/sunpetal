@@ -49,7 +49,11 @@ pub(crate) fn direct_boot_memory(n: &mut Nds) -> Result<[u32; 2], String> {
     let id = n.chip_id();
     let us = n.firmware_user_settings();
     let put = |cpu: i32, a: u32, d: &[u8]| -> Result<(), String> {
-        if machine(|m| m.mem.write_bytes(cpu, a, d)) { Ok(()) } else { Err(format!("cannot write {:08X}", a)) }
+        if machine(|m| m.mem.write_bytes(cpu, a, d)) {
+            Ok(())
+        } else {
+            Err(format!("cannot write {:08X}", a))
+        }
     };
     let p32 = |a: u32, v: u32| put(9, a, &v.to_le_bytes());
     let p16 = |a: u32, v: u16| put(9, a, &v.to_le_bytes());
@@ -120,7 +124,15 @@ pub fn irq(c: &mut Cpu) {
     let back = if cpu == 9 { BIOS_RET9 } else { BIOS_RET7 };
     c.r[14] = back;
     c.pc = 0;
-    let key = if cpu == 9 { if h & 1 != 0 { h } else { h & !3 } } else { h & !3 };
+    let key = if cpu == 9 {
+        if h & 1 != 0 {
+            h
+        } else {
+            h & !3
+        }
+    } else {
+        h & !3
+    };
     unsafe { arm_call(c, key) };
     if c.pc != back {
         fatal_msg(&format!("ARM{}: the interrupt handler {:08X} returned to {:08X}", cpu, h, c.pc));
@@ -323,8 +335,8 @@ pub fn swi(c: &mut Cpu, num: u32) {
             return;
         }
         0x04 => return intr_wait(c, c.r[0] & 1 != 0, c.r[1]), // IntrWait
-        0x05 => return intr_wait(c, true, 1),                  // VBlankIntrWait
-        0x06 => return sched::halt(c),                         // Halt
+        0x05 => return intr_wait(c, true, 1),                 // VBlankIntrWait
+        0x06 => return sched::halt(c),                        // Halt
         0x08 => {
             // SoundBias (ARM7)
             if cpu == 7 {
@@ -397,16 +409,27 @@ pub fn swi(c: &mut Cpu, num: u32) {
             if cpu == 7 {
                 let i = (c.r[0] % 724) as i32;
                 let db = i - 723;
-                let mul = if db < -240 { 16.0 } else if db < -120 { 4.0 } else if db < -60 { 2.0 } else { 1.0 };
+                let mul = if db < -240 {
+                    16.0
+                } else if db < -120 {
+                    4.0
+                } else if db < -60 {
+                    2.0
+                } else {
+                    1.0
+                };
                 let v = (128.0 * 10f64.powf(db as f64 / 200.0) * mul).round() as i64;
-                c.r[0] = (if v >= 128 { 127 } else if v == 127 { 126 } else { v }) as u32;
+                c.r[0] = (if v >= 128 {
+                    127
+                } else if v == 127 {
+                    126
+                } else {
+                    v
+                }) as u32;
                 return;
             }
         }
         _ => {}
     }
-    fatal_msg(&format!(
-        "ARM{}: swi {:02X} not done (r0 {:08X} r1 {:08X} r2 {:08X}, lr {:08X})",
-        cpu, num, c.r[0], c.r[1], c.r[2], c.r[14]
-    ));
+    fatal_msg(&format!("ARM{}: swi {:02X} not done (r0 {:08X} r1 {:08X} r2 {:08X}, lr {:08X})", cpu, num, c.r[0], c.r[1], c.r[2], c.r[14]));
 }

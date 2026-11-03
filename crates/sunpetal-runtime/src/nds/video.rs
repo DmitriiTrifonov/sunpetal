@@ -188,7 +188,11 @@ impl Video {
             }
         };
         let p = &self.map[area][pg];
-        if which < p.n { Some(p.p[which] + (a & 0x3FFF) as usize) } else { None }
+        if which < p.n {
+            Some(p.p[which] + (a & 0x3FFF) as usize)
+        } else {
+            None
+        }
     }
 }
 
