@@ -4,7 +4,7 @@
 //!     sunpetal-app ROM.nds [--out DIR] [--save FILE] [--mute] [--res N] [--menu]
 //!                          [--dump-textures DIR] [--texture-pack DIR]
 //!
-//! F1 or Esc: the settings menu (video, sound, keys, profiles). Hotkeys: F2 changes the layout, F8 the game's menu in the single layout while the screen follows the game (START and the lower screen, B and back), else the screen shown (or the panel of the overlay layout), F3
+//! F1 or Esc: the settings menu (video, sound, keys, profiles). Hotkeys: F2 changes the layout, F8 the game's menu in the single layout while the screen follows the game (START and the lower screen, B and back), else the screen shown (or the panel of the overlay layout), F9 saves the recording alone (the last 5 seconds), F3
 //! the filter, / (the key beside the right Shift), P or F10 writes the picture and its parts to `artifacts/shots` (for bug reports), F4 and F5 the 3D's internal resolution (1-8 times the DS's), F11 full screen, Tab
 //! (held) runs without waiting for the clock. The keys of the DS's buttons are set in the menu
 //! (default: arrows = D-pad, Z = A, X = B, S = X, A = Y, Q = L, W = R, Enter = START, Backspace =
@@ -117,6 +117,17 @@ fn paint_dialogue(ctx: &egui::Context, r: layout::Rect, wide: f32, left: bool, t
     }
 }
 
+/// The F9 toast, at the bottom of the window for about 3 seconds.
+fn paint_toast(ctx: &egui::Context, text: &str) {
+    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("toast")));
+    let galley = p.layout_no_wrap(text.to_string(), egui::FontId::monospace(14.0), egui::Color32::WHITE);
+    let at = egui::pos2((ctx.content_rect().width() - galley.size().x) / 2.0, ctx.content_rect().bottom() - galley.size().y - 16.0);
+    let rect = egui::Rect::from_min_size(at, galley.size()).expand(8.0);
+    p.rect_filled(rect, 4.0, egui::Color32::from_black_alpha(200));
+    p.rect_stroke(rect, 4.0, egui::Stroke::new(1.0, egui::Color32::from_gray(90)), egui::StrokeKind::Inside);
+    p.galley(at, galley, egui::Color32::WHITE);
+}
+
 fn next_hold(hold: Option<Hold>, wants: bool, settled: bool) -> Option<Hold> {
     match hold {
         Some(Hold::Waiting(_)) if wants => Some(Hold::Seen),
@@ -215,6 +226,8 @@ struct App {
     coll_card: std::cell::Cell<bool>,
     /// F10 asks the next frame for the window's picture (the file to write it to).
     pending_capture: std::cell::Cell<Option<PathBuf>>,
+    /// The toast shown for about 3 seconds after F9 (message, when it appeared).
+    toast: Option<(String, std::time::Instant)>,
     /// The buttons last sent, to find the press of A or B; and a B that closed the card, held back from the game.
     keys_before: std::cell::Cell<u32>,
     swallow_b: std::cell::Cell<bool>,
@@ -306,7 +319,7 @@ impl App {
         // recording (SUNPETAL_REC=1): the last 5 seconds beside the picture
         if let Some(g) = &self.gfx {
             let dir = std::path::PathBuf::from(format!("artifacts/rec/v{}", self.shared.vblank.load(Ordering::Relaxed)));
-            match g.rec_save(300, &dir) {
+            match g.rec_save(300, &dir, false) {
                 Some(Ok(s)) => eprintln!("recording: {} frames {}..{} -> {}", s.frames, s.first_vblank, s.last_vblank, s.dir.display()),
                 Some(Err(e)) => eprintln!("recording: {}", e),
                 None => {}
@@ -314,6 +327,19 @@ impl App {
         }
         *self.shared.dump_meta.lock().unwrap() = meta;
         self.shared.dump.store(true, Ordering::Relaxed);
+    }
+
+    /// F9: save only the recording's last 5 seconds (no F10 snapshot), with the pressed frame marked.
+    fn dump_rec(&mut self) {
+        let Some(g) = &self.gfx else { return };
+        let dir = rec::save_dir(self.shared.vblank.load(Ordering::Relaxed));
+        let said = match g.rec_save(300, &dir, true) {
+            None => "Запись выключена (запуск с SUNPETAL_REC=1)".to_string(),
+            Some(Err(e)) => format!("Запись: {}", e),
+            Some(Ok(s)) => format!("Запись сохранена: {} кадров → {}", s.frames, s.dir.display()),
+        };
+        eprintln!("{}", said);
+        self.toast = Some((said, std::time::Instant::now()));
     }
 
     /// Swaps the screen shown in the single layout; from another layout, goes into it.
@@ -800,6 +826,11 @@ impl App {
         let fade = self.skip_fade;
         let mut action = None;
         let mut want_shape: Option<f32> = None;
+        // the F9 toast lives for about 3 seconds
+        if self.toast.as_ref().is_some_and(|(_, at)| at.elapsed() >= std::time::Duration::from_secs(3)) {
+            self.toast = None;
+        }
+        let toast = self.toast.as_ref().map(|(m, _)| m.clone());
         {
             let (cursor, pen_now) = (self.stylus.pos.filter(|_| !self.menu.open), self.pen_down);
             let App { gfx, menu, force_full, settings, layouts, touch_held, stopped_msg, shared, counter_seen, hint_seen, puzzle_hold, puzzle_side, coll_seen, coll_card, pending_capture, edo_seen, prompt, bar_color, auto_lower, hold, wide_now, paper, scroll, portrait_left, .. } = self;
@@ -848,7 +879,7 @@ impl App {
                 let vline = shared.dialogue_text.lock().unwrap().clone();
                 let vwide = *wide_now as f32;
                 menu.short = !(settings.ui.full_menu || *force_full);
-                if menu.open || pad_on || corner_on || stats_on || fade > 0.0 || vline.is_some() || cursor.is_some() {
+                if menu.open || pad_on || corner_on || stats_on || fade > 0.0 || vline.is_some() || cursor.is_some() || toast.is_some() {
                     let held = touch_held.clone();
                     let mut f = |ctx: &egui::Context| {
                         if fade > 0.0 {
@@ -903,6 +934,9 @@ impl App {
                         if menu.open {
                             menu.pack_groups = shared.pack_groups.lock().unwrap().clone();
                             action = menu.show(ctx, settings, &names, internal);
+                        }
+                        if let Some(msg) = &toast {
+                            paint_toast(ctx, msg);
                         }
                     };
                     g.draw(&layout, &fx, Some(&mut f));
@@ -1100,6 +1134,7 @@ impl ApplicationHandler for App {
                     KeyCode::F8 => self.swap_screen(),
                     KeyCode::F3 => self.settings.video.linear = !self.settings.video.linear,
                     KeyCode::F10 | KeyCode::KeyP | KeyCode::Slash => self.dump_shot(),
+                    KeyCode::F9 => self.dump_rec(),
                     KeyCode::F7 => {
                         self.shared.toggle_skip();
                     }
@@ -1440,6 +1475,7 @@ fn prepare(o: Options, scripted: bool) -> (App, Arc<Shared>, Option<cpal::Stream
         coll_seen: false,
         coll_card: std::cell::Cell::new(false),
         pending_capture: std::cell::Cell::new(None),
+        toast: None,
         keys_before: std::cell::Cell::new(0),
         swallow_b: std::cell::Cell::new(false),
         edo_seen: false,

@@ -77,6 +77,18 @@ pub struct Saved {
     pub last_vblank: u64,
 }
 
+/// The folder for a recording saved now: `artifacts/rec/t<unix seconds>_v<vblank>` (the local time is not
+/// available without a dependency; the epoch seconds are enough to tell saves apart).
+pub fn save_dir(vblank: u64) -> PathBuf {
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    save_dir_at(secs, vblank)
+}
+
+/// The folder's name from the epoch seconds and the vblank, split out for the test.
+pub fn save_dir_at(secs: u64, vblank: u64) -> PathBuf {
+    PathBuf::from(format!("artifacts/rec/t{}_v{}", secs, vblank))
+}
+
 impl Recorder {
     /// Starts the writer thread.
     pub fn new(cfg: RecConfig) -> Recorder {
@@ -170,8 +182,9 @@ impl Recorder {
     }
 
     /// Saves the frames with `vblank >= last - frames` (the caller turns seconds into frames) into
-    /// `dir/frames/*.png` plus `frames.jsonl` and `index.json`.
-    pub fn save_last(&self, frames: u64, dir: &Path) -> std::io::Result<Saved> {
+    /// `dir/frames/*.png` plus `frames.jsonl` and `index.json`. With `mark`, the last frame's journal
+    /// line gets `"mark":true` (the key was pressed on it).
+    pub fn save_last(&self, frames: u64, dir: &Path, mark: bool) -> std::io::Result<Saved> {
         self.flush();
         let chosen: Vec<Entry> = {
             let ring = self.ring.lock().unwrap();
@@ -193,9 +206,21 @@ impl Recorder {
             std::fs::write(frames_dir.join(format!("v{:08}.png", e.vblank)), &e.png)?;
         }
         let mut jsonl = String::new();
-        for e in &chosen {
+        for (i, e) in chosen.iter().enumerate() {
+            let mark = mark && i + 1 == chosen.len();
             if e.journal.is_empty() {
-                jsonl.push_str(&format!("{{\"vblank\":{}}}\n", e.vblank));
+                if mark {
+                    jsonl.push_str(&format!("{{\"vblank\":{},\"mark\":true}}\n", e.vblank));
+                } else {
+                    jsonl.push_str(&format!("{{\"vblank\":{}}}\n", e.vblank));
+                }
+            } else if mark {
+                // the journal is a JSON object: the mark goes in before its closing brace
+                let mut line = e.journal.clone();
+                if line.ends_with('}') {
+                    line.pop();
+                }
+                jsonl.push_str(&format!("{},\"mark\":true}}\n", line));
             } else {
                 jsonl.push_str(&e.journal);
                 jsonl.push('\n');
@@ -423,7 +448,7 @@ mod tests {
         for v in 1..=5u64 {
             assert!(rec.push(frame(v, 8, 8)));
         }
-        let saved = rec.save_last(10, &d).unwrap();
+        let saved = rec.save_last(10, &d, false).unwrap();
         assert_eq!(saved.frames, 5);
         assert!(d.join("frames").join("v00000003.png").exists());
         let jsonl = std::fs::read_to_string(d.join("frames.jsonl")).unwrap();
@@ -441,7 +466,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         let rec = Recorder::new(RecConfig { burn_number: false, shrink: 1, ..RecConfig::default() });
         assert!(rec.push(frame(7, 12, 8)));
-        rec.save_last(1, &d).unwrap();
+        rec.save_last(1, &d, false).unwrap();
         let (w, h, px) = decode(&d.join("frames").join("v00000007.png"));
         assert_eq!((w, h), (12, 8));
         assert_eq!(px.len(), 12 * 8 * 4);
@@ -455,9 +480,66 @@ mod tests {
         let rec = Recorder::new(RecConfig { burn_number: false, shrink: 1, ..RecConfig::default() });
         let f = RawFrame { vblank: 1, width: 1, height: 1, pixels: Pixels::Bgra, data: vec![10, 20, 30, 255], journal: String::new() };
         assert!(rec.push(f));
-        rec.save_last(1, &d).unwrap();
+        rec.save_last(1, &d, false).unwrap();
         let (_, _, px) = decode(&d.join("frames").join("v00000001.png"));
         assert_eq!(px, vec![30, 20, 10, 255]);
         std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn save_last_marks_only_the_last_frame_when_asked() {
+        let d = dir("sunpetal-rec-test-mark");
+        let _ = std::fs::remove_dir_all(&d);
+        let rec = Recorder::new(RecConfig { queue: 8, shrink: 1, ..RecConfig::default() });
+        for v in 1..=3u64 {
+            let mut f = frame(v, 8, 8);
+            f.journal = format!("{{\"vblank\":{},\"layout\":\"single\"}}", v);
+            assert!(rec.push(f));
+        }
+        rec.save_last(10, &d, true).unwrap();
+        let jsonl = std::fs::read_to_string(d.join("frames.jsonl")).unwrap();
+        let lines: Vec<&str> = jsonl.lines().collect();
+        assert_eq!(lines.len(), 3);
+        assert!(!lines[0].contains("mark"));
+        assert!(!lines[1].contains("mark"));
+        // the mark goes into the last line, the journal's own fields stay
+        assert_eq!(lines[2], "{\"vblank\":3,\"layout\":\"single\",\"mark\":true}");
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn save_last_without_a_mark_writes_no_mark_field() {
+        let d = dir("sunpetal-rec-test-nomark");
+        let _ = std::fs::remove_dir_all(&d);
+        let rec = Recorder::new(RecConfig { queue: 8, shrink: 1, ..RecConfig::default() });
+        for v in 1..=3u64 {
+            let mut f = frame(v, 8, 8);
+            f.journal = format!("{{\"vblank\":{}}}", v);
+            assert!(rec.push(f));
+        }
+        rec.save_last(10, &d, false).unwrap();
+        let jsonl = std::fs::read_to_string(d.join("frames.jsonl")).unwrap();
+        assert!(!jsonl.contains("mark"));
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn save_last_marks_a_frame_with_an_empty_journal() {
+        let d = dir("sunpetal-rec-test-mark-empty");
+        let _ = std::fs::remove_dir_all(&d);
+        let rec = Recorder::new(RecConfig { queue: 8, shrink: 1, ..RecConfig::default() });
+        assert!(rec.push(frame(1, 8, 8)));
+        assert!(rec.push(frame(2, 8, 8)));
+        rec.save_last(10, &d, true).unwrap();
+        let jsonl = std::fs::read_to_string(d.join("frames.jsonl")).unwrap();
+        let lines: Vec<&str> = jsonl.lines().collect();
+        assert_eq!(lines[0], "{\"vblank\":1}");
+        assert_eq!(lines[1], "{\"vblank\":2,\"mark\":true}");
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn the_recording_folder_is_named_by_time_and_vblank() {
+        assert_eq!(save_dir_at(1_750_000_000, 42), PathBuf::from("artifacts/rec/t1750000000_v42"));
     }
 }

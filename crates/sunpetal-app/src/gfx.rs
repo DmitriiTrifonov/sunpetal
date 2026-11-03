@@ -391,8 +391,9 @@ impl RecState {
 
 impl Gfx {
     /// Saves the last `frames` DS frames of the recording to `dir`; `None` when not recording.
-    pub fn rec_save(&self, frames: u64, dir: &std::path::Path) -> Option<std::io::Result<crate::rec::Saved>> {
-        self.rec.as_ref().map(|st| st.rec.save_last(frames, dir))
+    /// With `mark`, the last saved frame's journal line gets `"mark":true`.
+    pub fn rec_save(&self, frames: u64, dir: &std::path::Path, mark: bool) -> Option<std::io::Result<crate::rec::Saved>> {
+        self.rec.as_ref().map(|st| st.rec.save_last(frames, dir, mark))
     }
 
     pub fn new(window: Arc<Window>) -> Result<Gfx, String> {
