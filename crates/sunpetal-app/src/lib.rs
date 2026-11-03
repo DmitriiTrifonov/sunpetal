@@ -137,6 +137,8 @@ fn start_to_game(prompt_visible: bool, title_seen: bool, title_menu: bool) -> bo
 /// Frames a button pressed by the app stays down, and the frames the menu may take to show.
 /// Frames Edo's screen may go unseen before its hint patch is dropped (B-05; about 0.5 s at 60 frames a second).
 const EDO_HOLD: u32 = 30;
+/// Frames the "Press START" box may be off (it blinks and fades) while START still goes to the game (B-18).
+const PROMPT_HOLD: u32 = 120;
 const TAP_FRAMES: u32 = 8;
 /// SELECT out of the game's menu: B presses at most (a page inside the case, the case), and frames between them.
 const LEAVE_PRESSES: u8 = 3;
@@ -220,6 +222,8 @@ struct App {
     edo_seen: bool,
     /// Frames since Edo's screen was last seen: the flag goes off only after `EDO_HOLD` of them (B-05).
     edo_off: u32,
+    /// Frames since the "Press START" box was last seen (`PROMPT_HOLD`).
+    prompt_off: u32,
     /// The side of the portrait last seen (`layout::portrait_left`).
     portrait_left: bool,
     /// The title's "Press START" box (`layout::prompt_box`).
@@ -299,10 +303,6 @@ impl App {
             meta, window_png, e.preset, e.smooth_2d, e.smooth_strength, e.texture_filter, e.outline, e.shadow, e.fxaa, e.bloom, e.sharp, v.background, v.texture_pack, v.renderer, e.msaa
         );
         self.pending_capture.set(Some(std::path::PathBuf::from(window_png)));
-        *self.shared.dump_meta.lock().unwrap() = meta;
-        self.shared.dump.store(true, Ordering::Relaxed);
-    }
-
         // recording (SUNPETAL_REC=1): the last 5 seconds beside the picture
         if let Some(g) = &self.gfx {
             let dir = std::path::PathBuf::from(format!("artifacts/rec/v{}", self.shared.vblank.load(Ordering::Relaxed)));
@@ -312,6 +312,10 @@ impl App {
                 None => {}
             }
         }
+        *self.shared.dump_meta.lock().unwrap() = meta;
+        self.shared.dump.store(true, Ordering::Relaxed);
+    }
+
     /// Swaps the screen shown in the single layout; from another layout, goes into it.
     fn swap_screen(&mut self) {
         if self.settings.video.layout == "single" && self.settings.video.auto {
@@ -533,7 +537,7 @@ impl App {
     }
 
     fn pad_press(&mut self, b: gilrs::Button) {
-        let act = pad::press(b, pad::Ctx { menu_open: self.menu.open, start_to_game: start_to_game(self.prompt.is_some(), self.title_seen, self.title_menu), game_menu_up: self.auto_lower && self.puzzle_hold == 0 && !self.dial_scene });
+        let act = pad::press(b, pad::Ctx { menu_open: self.menu.open, start_to_game: start_to_game(self.prompt.is_some() || self.prompt_off < PROMPT_HOLD, self.title_seen, self.title_menu), game_menu_up: self.auto_lower && self.puzzle_hold == 0 && !self.dial_scene });
         if self.pad_log {
             eprintln!("    {:?} -> {:?}", b, act);
         }
@@ -730,6 +734,7 @@ impl App {
                 self.edo_seen = self.edo_off < EDO_HOLD;
             }
             self.prompt = layout::prompt_box(*scale, rgba);
+            self.prompt_off = if self.prompt.is_some() { 0 } else { self.prompt_off.saturating_add(1) };
             self.title_seen |= self.prompt.is_some();
             self.title_menu = layout::title_menu_in(*scale, rgba);
             if let Some(left) = layout::portrait_left(*scale, rgba) {
@@ -802,13 +807,13 @@ impl App {
             if let Some(g) = gfx {
                 let layout = layout::find(layouts, &settings.video, &live);
                 g.bar_color = *bar_color;
+                g.rec_vblank = live.vblank;
+                g.rec_journal = format!("{{\"vblank\":{},\"layout\":{:?},\"window\":[{},{}],\"auto_lower\":{},\"hold\":{},\"counter\":{},\"hint\":{},\"edo\":{},\"puzzle_hold\":{},\"wide\":{},\"res\":{}}}", live.vblank, layout.name, g.size().0, g.size().1, live.lower, hold.is_some(), live.counter_seen, live.hint_seen, live.edo, *puzzle_hold, live.wide, settings.video.res);
                 if let Some(p) = pending_capture.take() {
                     g.capture = Some(p);
                 }
                 // the 3D view is widened to the window's shape when the upper screen is alone
                 let base = layout::find(layouts, &settings.video, &layout::Live { wide: 0.0, ..live });
-                g.rec_vblank = live.vblank;
-                g.rec_journal = format!("{{\"vblank\":{},\"layout\":{:?},\"window\":[{},{}],\"auto_lower\":{},\"hold\":{},\"counter\":{},\"hint\":{},\"edo\":{},\"puzzle_hold\":{},\"wide\":{},\"res\":{}}}", live.vblank, layout.name, g.size().0, g.size().1, live.lower, hold.is_some(), live.counter_seen, live.hint_seen, live.edo, *puzzle_hold, live.wide, settings.video.res);
                 // the layout the setting names, not what the game moves to for a moment (a puzzle, a card)
                 if settings.video.follow_shape && !settings.video.fullscreen {
                     let named = layouts.iter().find(|l| l.name == settings.video.layout).unwrap_or(&base);
@@ -1439,6 +1444,7 @@ fn prepare(o: Options, scripted: bool) -> (App, Arc<Shared>, Option<cpal::Stream
         swallow_b: std::cell::Cell::new(false),
         edo_seen: false,
         edo_off: 0,
+        prompt_off: u32::MAX,
         portrait_left: true,
         paper: false,
         bar_ask: (None, 0),
