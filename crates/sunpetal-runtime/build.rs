@@ -40,7 +40,7 @@ fn main() {
         .include(manifest.join("include"))
         .include(&dir)
         .std("gnu11")
-        .opt_level(2)
+        .opt_level(3)
         .warnings(false)
         .compile("sunpetal_generated");
     println!("cargo:rustc-cfg=has_generated");

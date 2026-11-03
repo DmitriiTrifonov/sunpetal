@@ -295,7 +295,7 @@
   {
    "id": "K-028",
    "t": "8ж.3 Флаги сборки: opt 3, LTO, codegen-units 1",
-   "col": "backlog",
+   "col": "check",
    "r": 8,
    "i": 1,
    "c": 0.5,
