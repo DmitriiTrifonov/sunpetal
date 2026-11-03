@@ -34,11 +34,13 @@ pub struct RecConfig {
     pub queue: usize,
     /// Burn the frame number into the picture (default true).
     pub burn_number: bool,
+    /// Integer downscale of the picture before encoding (default 2; 1 = full size).
+    pub shrink: u32,
 }
 
 impl Default for RecConfig {
     fn default() -> Self {
-        RecConfig { max_bytes: 512 * 1024 * 1024, queue: 4, burn_number: true }
+        RecConfig { max_bytes: 512 * 1024 * 1024, queue: 4, burn_number: true, shrink: 2 }
     }
 }
 
@@ -85,12 +87,17 @@ impl Recorder {
         let pending2 = Arc::clone(&pending);
         let max_bytes = cfg.max_bytes;
         let burn = cfg.burn_number;
+        let shrink = cfg.shrink.max(1);
         let writer = std::thread::spawn(move || {
             while let Ok(f) = rx.recv() {
                 let RawFrame { vblank, width, height, pixels, data, journal } = f;
                 let mut rgba = data;
+                let (mut width, mut height) = (width, height);
                 if pixels == Pixels::Bgra {
                     bgra_to_rgba(&mut rgba);
+                }
+                if shrink > 1 {
+                    (rgba, width, height) = shrink_box(&rgba, width, height, shrink);
                 }
                 if burn {
                     burn_number(&mut rgba, width, height, vblank);
@@ -230,6 +237,31 @@ fn bgra_to_rgba(rgba: &mut [u8]) {
     }
 }
 
+/// Averages `k`x`k` blocks (the edge remainder is dropped); returns the picture and its size.
+fn shrink_box(rgba: &[u8], width: u32, height: u32, k: u32) -> (Vec<u8>, u32, u32) {
+    let (w, h) = (width / k, height / k);
+    if w == 0 || h == 0 {
+        return (rgba.to_vec(), width, height);
+    }
+    let n = k * k;
+    let mut out = Vec::with_capacity(w as usize * h as usize * 4);
+    for y in 0..h {
+        for x in 0..w {
+            let mut acc = [0u32; 4];
+            for dy in 0..k {
+                let row = ((y * k + dy) * width + x * k) as usize * 4;
+                for dx in 0..k as usize {
+                    for c in 0..4 {
+                        acc[c] += rgba[row + dx * 4 + c] as u32;
+                    }
+                }
+            }
+            out.extend(acc.iter().map(|a| ((a + n / 2) / n) as u8));
+        }
+    }
+    (out, w, h)
+}
+
 /// Encodes RGBA (8 bit) into a PNG, fast. None when the encoding failed.
 fn encode_png(rgba: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
     let mut out = Vec::new();
@@ -340,6 +372,18 @@ mod tests {
     }
 
     #[test]
+    fn shrink_box_averages_blocks() {
+        let mut px = vec![0u8; 4 * 4 * 4];
+        for p in px.chunks_exact_mut(4).take(2) {
+            p.copy_from_slice(&[200, 100, 0, 255]);
+        }
+        let (out, w, h) = shrink_box(&px, 4, 4, 2);
+        assert_eq!((w, h), (2, 2));
+        assert_eq!(&out[..4], &[100, 50, 0, 128]);
+        assert_eq!(out.len(), 2 * 2 * 4);
+    }
+
+    #[test]
     fn burn_number_draws_and_is_safe() {
         let mut px = vec![255u8; 3 * 3 * 4];
         burn_number(&mut px, 3, 3, 123);
@@ -352,7 +396,7 @@ mod tests {
 
     #[test]
     fn ring_discards_oldest_over_max_bytes() {
-        let rec = Recorder::new(RecConfig { max_bytes: 4000, queue: 16, burn_number: false });
+        let rec = Recorder::new(RecConfig { max_bytes: 4000, queue: 16, burn_number: false, shrink: 1 });
         for v in 0..10u64 {
             assert!(rec.push(noise_frame(v, 16, 16)));
         }
@@ -365,7 +409,7 @@ mod tests {
 
     #[test]
     fn push_drops_duplicates_and_decreasing_vblank() {
-        let rec = Recorder::new(RecConfig { queue: 8, ..RecConfig::default() });
+        let rec = Recorder::new(RecConfig { queue: 8, shrink: 1, ..RecConfig::default() });
         assert!(rec.push(frame(5, 4, 4)));
         assert!(!rec.push(frame(5, 4, 4)));
         assert!(!rec.push(frame(3, 4, 4)));
@@ -375,7 +419,7 @@ mod tests {
     fn save_last_writes_frames_and_journal() {
         let d = dir("sunpetal-rec-test-save");
         let _ = std::fs::remove_dir_all(&d);
-        let rec = Recorder::new(RecConfig { queue: 8, ..RecConfig::default() });
+        let rec = Recorder::new(RecConfig { queue: 8, shrink: 1, ..RecConfig::default() });
         for v in 1..=5u64 {
             assert!(rec.push(frame(v, 8, 8)));
         }
@@ -395,7 +439,7 @@ mod tests {
     fn saved_png_decodes_to_the_right_size() {
         let d = dir("sunpetal-rec-test-png");
         let _ = std::fs::remove_dir_all(&d);
-        let rec = Recorder::new(RecConfig { burn_number: false, ..RecConfig::default() });
+        let rec = Recorder::new(RecConfig { burn_number: false, shrink: 1, ..RecConfig::default() });
         assert!(rec.push(frame(7, 12, 8)));
         rec.save_last(1, &d).unwrap();
         let (w, h, px) = decode(&d.join("frames").join("v00000007.png"));
@@ -408,7 +452,7 @@ mod tests {
     fn bgra_is_swapped_to_rgba() {
         let d = dir("sunpetal-rec-test-bgra");
         let _ = std::fs::remove_dir_all(&d);
-        let rec = Recorder::new(RecConfig { burn_number: false, ..RecConfig::default() });
+        let rec = Recorder::new(RecConfig { burn_number: false, shrink: 1, ..RecConfig::default() });
         let f = RawFrame { vblank: 1, width: 1, height: 1, pixels: Pixels::Bgra, data: vec![10, 20, 30, 255], journal: String::new() };
         assert!(rec.push(f));
         rec.save_last(1, &d).unwrap();

@@ -303,6 +303,15 @@ impl App {
         self.shared.dump.store(true, Ordering::Relaxed);
     }
 
+        // recording (SUNPETAL_REC=1): the last 5 seconds beside the picture
+        if let Some(g) = &self.gfx {
+            let dir = std::path::PathBuf::from(format!("artifacts/rec/v{}", self.shared.vblank.load(Ordering::Relaxed)));
+            match g.rec_save(300, &dir) {
+                Some(Ok(s)) => eprintln!("recording: {} frames {}..{} -> {}", s.frames, s.first_vblank, s.last_vblank, s.dir.display()),
+                Some(Err(e)) => eprintln!("recording: {}", e),
+                None => {}
+            }
+        }
     /// Swaps the screen shown in the single layout; from another layout, goes into it.
     fn swap_screen(&mut self) {
         if self.settings.video.layout == "single" && self.settings.video.auto {
@@ -798,6 +807,8 @@ impl App {
                 }
                 // the 3D view is widened to the window's shape when the upper screen is alone
                 let base = layout::find(layouts, &settings.video, &layout::Live { wide: 0.0, ..live });
+                g.rec_vblank = live.vblank;
+                g.rec_journal = format!("{{\"vblank\":{},\"layout\":{:?},\"window\":[{},{}],\"auto_lower\":{},\"hold\":{},\"counter\":{},\"hint\":{},\"edo\":{},\"puzzle_hold\":{},\"wide\":{},\"res\":{}}}", live.vblank, layout.name, g.size().0, g.size().1, live.lower, hold.is_some(), live.counter_seen, live.hint_seen, live.edo, *puzzle_hold, live.wide, settings.video.res);
                 // the layout the setting names, not what the game moves to for a moment (a puzzle, a card)
                 if settings.video.follow_shape && !settings.video.fullscreen {
                     let named = layouts.iter().find(|l| l.name == settings.video.layout).unwrap_or(&base);

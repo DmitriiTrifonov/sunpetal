@@ -230,6 +230,10 @@ pub struct Gfx {
     pub edge_bars: bool,
     /// A file to write the window's picture to after the next frame (F10).
     pub capture: Option<std::path::PathBuf>,
+    /// Recording of the window's frames (`SUNPETAL_REC=1`); the DS frame number and a journal line of the frame to record.
+    rec: Option<RecState>,
+    pub rec_vblank: u64,
+    pub rec_journal: String,
     /// The colour the picture's edges all have (a logo on white): the bars take it, no glow.
     pub bar_color: Option<[f32; 3]>,
     /// The widened upper screen (3D with the view opened sideways), its scale and how many pixels
@@ -305,7 +309,92 @@ fn make_texture(
     Screen { bind_nearest: bind(&uniform, nearest), bind_linear: bind(&uniform, linear), texture, uniform, extras }
 }
 
+/// A window frame being copied to a buffer by the GPU.
+struct Flight {
+    buf: wgpu::Buffer,
+    size: (u32, u32),
+    row: u32,
+    bgra: bool,
+    vblank: u64,
+    journal: String,
+    ready: Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// Recording without stalling the GPU: the copy of frame N is read when it is done, a few frames later.
+struct RecState {
+    rec: crate::rec::Recorder,
+    flying: std::collections::VecDeque<Flight>,
+    pool: Vec<wgpu::Buffer>,
+    last: Option<u64>,
+}
+
+impl RecState {
+    const MAX_FLYING: usize = 3;
+
+    fn new() -> RecState {
+        RecState { rec: {
+            let mut cfg = crate::rec::RecConfig::default();
+            if let Some(k) = std::env::var("SUNPETAL_REC_SHRINK").ok().and_then(|v| v.parse::<u32>().ok()) {
+                cfg.shrink = k.clamp(1, 8);
+            }
+            crate::rec::Recorder::new(cfg)
+        }, flying: Default::default(), pool: Vec::new(), last: None }
+    }
+
+    /// Adds the copy of the window's texture to the frame's commands (once per DS frame, not when the queue is full).
+    fn begin(&mut self, device: &wgpu::Device, enc: &mut wgpu::CommandEncoder, texture: &wgpu::Texture, size: (u32, u32), bgra: bool, vblank: u64, journal: &str) -> Option<Flight> {
+        if self.flying.len() >= Self::MAX_FLYING || self.last.is_some_and(|l| vblank <= l) {
+            return None;
+        }
+        let (w, h) = size;
+        let row = (w * 4).div_ceil(256) * 256;
+        let bytes = (row * h) as u64;
+        let buf = match self.pool.iter().position(|b| b.size() == bytes) {
+            Some(i) => self.pool.swap_remove(i),
+            None => device.create_buffer(&wgpu::BufferDescriptor { label: Some("rec"), size: bytes, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false }),
+        };
+        enc.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo { texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            wgpu::TexelCopyBufferInfo { buffer: &buf, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(h) } },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+        self.last = Some(vblank);
+        Some(Flight { buf, size, row, bgra, vblank, journal: journal.to_string(), ready: Arc::new(std::sync::atomic::AtomicBool::new(false)) })
+    }
+
+    /// Hands the finished copies, in order, to the recorder.
+    fn drain(&mut self) {
+        while self.flying.front().is_some_and(|f| f.ready.load(std::sync::atomic::Ordering::Acquire)) {
+            let f = self.flying.pop_front().unwrap();
+            let (w, h) = f.size;
+            let mut data = Vec::with_capacity((w * h * 4) as usize);
+            let ok = if let Ok(view) = f.buf.slice(..).get_mapped_range() {
+                for y in 0..h as usize {
+                    data.extend_from_slice(&view[y * f.row as usize..y * f.row as usize + w as usize * 4]);
+                }
+                true
+            } else {
+                false
+            };
+            f.buf.unmap();
+            if !ok {
+                continue;
+            }
+            let pixels = if f.bgra { crate::rec::Pixels::Bgra } else { crate::rec::Pixels::Rgba };
+            self.rec.push(crate::rec::RawFrame { vblank: f.vblank, width: w, height: h, pixels, data, journal: f.journal });
+            if self.pool.len() < 4 {
+                self.pool.push(f.buf);
+            }
+        }
+    }
+}
+
 impl Gfx {
+    /// Saves the last `frames` DS frames of the recording to `dir`; `None` when not recording.
+    pub fn rec_save(&self, frames: u64, dir: &std::path::Path) -> Option<std::io::Result<crate::rec::Saved>> {
+        self.rec.as_ref().map(|st| st.rec.save_last(frames, dir))
+    }
+
     pub fn new(window: Arc<Window>) -> Result<Gfx, String> {
         let size = window.inner_size();
         let w = window.clone();
@@ -468,7 +557,7 @@ impl Gfx {
         egui_ctx.set_fonts(crate::fonts::definitions(None));
         let egui_renderer = egui_wgpu::Renderer::new(&device, format, egui_wgpu::RendererOptions::default());
         let post_kit = post::Kit::new(&device, format);
-        Gfx { window, egui_ctx, offscreen, pad_keys: Vec::new(), egui_renderer, bgl, nearest, linear_sampler: linear, scale: 1, surface, device, queue, config, pipeline, post_kit, post: None, screens, glow, glow_grid: vec![0.0; GLOW_W * GLOW_H * 3], background: true, edge_bars: false, capture: None, bar_color: None, wide_screen: None, wide_e: 0, linear: true, reserve: 0.0 }
+        Gfx { window, egui_ctx, offscreen, pad_keys: Vec::new(), egui_renderer, bgl, nearest, linear_sampler: linear, scale: 1, surface, device, queue, config, pipeline, post_kit, post: None, screens, glow, glow_grid: vec![0.0; GLOW_W * GLOW_H * 3], background: true, edge_bars: false, capture: None, rec: std::env::var_os("SUNPETAL_REC").map(|_| RecState::new()), rec_vblank: 0, rec_journal: String::new(), bar_color: None, wide_screen: None, wide_e: 0, linear: true, reserve: 0.0 }
     }
 
     pub fn resize(&mut self, w: u32, h: u32) {
@@ -808,8 +897,25 @@ impl Gfx {
             );
             (path, buf, w, h, row)
         });
+        let rec_flight = match self.rec.as_mut() {
+            Some(st) if self.config.usage.contains(wgpu::TextureUsages::COPY_SRC) => {
+                let bgra = matches!(self.config.format, wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb);
+                st.begin(&self.device, &mut enc, &texture, (self.config.width, self.config.height), bgra, self.rec_vblank, &self.rec_journal)
+            }
+            _ => None,
+        };
         buffers.push(enc.finish());
         self.queue.submit(buffers);
+        if let Some(st) = self.rec.as_mut() {
+            if let Some(fl) = rec_flight {
+                let ready = Arc::clone(&fl.ready);
+                fl.buf.slice(..).map_async(wgpu::MapMode::Read, move |r| ready.store(r.is_ok(), std::sync::atomic::Ordering::Release));
+                st.flying.push_back(fl);
+            }
+            // no waiting: a frame whose copy has finished is taken, the rest next time
+            let _ = self.device.poll(wgpu::PollType::Poll);
+            st.drain();
+        }
         if let Some((path, buf, w, h, row)) = grab {
             let swap = matches!(self.config.format, wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb);
             let slice = buf.slice(..);
