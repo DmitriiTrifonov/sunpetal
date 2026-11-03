@@ -6,6 +6,7 @@ pub mod fingerprint;
 pub mod dsrom;
 pub mod fontgen;
 pub mod lz10;
+pub mod models;
 pub mod nftr;
 pub mod nitrofs;
 pub mod pack2d;
