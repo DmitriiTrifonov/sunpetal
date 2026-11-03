@@ -569,6 +569,44 @@ impl Nds {
         self.draw_line(1, y);
     }
 
+    /// The 2D engines' state at this moment as the inside of a JSON object (`"a":{..},"b":{..}`): the display
+    /// registers and the OAM entries that are not off (`[index, attr0, attr1, attr2]`), for a recording's
+    /// journal (K-099, `sunpetal-debug frame`). Cheap: reads of registers and OAM, no drawing.
+    pub(super) fn frame_state(&self) -> String {
+        let mut out = String::new();
+        for e in 0..2usize {
+            let io = if e == 1 { 0x0400_1000 } else { 0x0400_0000 };
+            let list = |f: &dyn Fn(u32) -> u16, base: u32, n: u32, step: u32| {
+                (0..n).map(|k| f(io + base + step * k).to_string()).collect::<Vec<_>>().join(",")
+            };
+            let g = |a: u32| self.g16(a);
+            let mut spr = Vec::new();
+            for i in 0..128usize {
+                let (a0, a1, a2) = (self.oam16(e, i * 8), self.oam16(e, i * 8 + 2), self.oam16(e, i * 8 + 4));
+                if a0 & 0x300 != 0x200 {
+                    spr.push(format!("[{},{},{},{}]", i, a0, a1, a2));
+                }
+            }
+            if e == 1 {
+                out.push(',');
+            }
+            out.push_str(&format!(
+                "\"{}\":{{\"dispcnt\":{},\"bgcnt\":[{}],\"hofs\":[{}],\"vofs\":[{}],\"bldcnt\":{},\"bldalpha\":{},\"bldy\":{},\"bright\":{},\"spr\":[{}]}}",
+                if e == 1 { "b" } else { "a" },
+                self.g32(io),
+                list(&g, 0x08, 4, 2),
+                list(&g, 0x10, 4, 4),
+                list(&g, 0x12, 4, 4),
+                g(io + 0x50),
+                g(io + 0x52),
+                g(io + 0x54),
+                g(io + 0x6C),
+                spr.join(",")
+            ));
+        }
+        out
+    }
+
     fn new_line(&self, e: usize) -> Box<Line> {
         let io = if e == 1 { 0x0400_1000 } else { 0x0400_0000 };
         Box::new(Line {

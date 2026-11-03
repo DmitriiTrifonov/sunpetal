@@ -2,12 +2,13 @@
 //! and reports on it as JSON lines on stdout and files. Needs `--features debug-tools`.
 //!
 //!     sunpetal-debug ROM.nds [--save FILE] [--repl]
+//!     sunpetal-debug frame REC N [--out DIR]     what a recording holds of DS frame N (no ROM needed)
 //!
 //! `--repl` reads commands from stdin, one per line, and answers each with a line of JSON
 //! (`{"ok":true,...}` or `{"error":"..."}`):
 //!
 //!     run N | press KEYS [FRAMES] | tap X Y [FRAMES] | shot FILE | shotwide FILE (with --wide)
-//!     dump2d DIR | log FILE|off | advance [FRAMES] | walk N [FRAMES] | shown | peek ADDR[:LEN] | find TEXT | findhex HEX | calls FRAMES FILE [KEYS] | callsarg FRAMES LO[-HI] [KEYS] | quit
+//!     dump2d DIR | state | log FILE|off | advance [FRAMES] | walk N [FRAMES] | shown | peek ADDR[:LEN] | find TEXT | findhex HEX | calls FRAMES FILE [KEYS] | callsarg FRAMES LO[-HI] [KEYS] | quit
 use std::io::BufRead;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -238,6 +239,11 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             }
             done(json!({"lines": seen}))
         }
+        "state" => {
+            // the 2D engines' registers and OAM now, decoded as `frame` does for a recording
+            let v: Value = serde_json::from_str(&format!("{{{}}}", sunpetal_runtime::nds::frame_state())).map_err(|e| e.to_string())?;
+            done(json!({"a": frame::engine(&v["a"]), "b": frame::engine(&v["b"])}))
+        }
         "shown" => {
             let v = tracker.shown().map(|l| json!({"ptr": format!("{:08X}", l.ptr), "id": l.id, "text": l.text}));
             done(json!({"shown": v}))
@@ -467,7 +473,204 @@ fn rerun(a: &Args, rest: &[String]) -> Result<(), String> {
     if status.success() { Ok(()) } else { Err(format!("the run of the rest of the list ended with {}", status)) }
 }
 
+/// `sunpetal-debug frame REC N [--out DIR]` (K-099): everything the recording of a window session (`SUNPETAL_REC=1`, F10 or
+/// the save key) holds of the DS frame N, read without running the game: the journal line, the 2D engines'
+/// registers and OAM decoded, the frame's picture copied to `DIR/window.png`, `DIR/frame.json` written.
+mod frame {
+    use serde_json::{json, Value};
+    use std::path::{Path, PathBuf};
+
+    const KW: [[i64; 4]; 3] = [[8, 16, 32, 64], [16, 32, 32, 64], [8, 8, 16, 32]];
+    const KH: [[i64; 4]; 3] = [[8, 16, 32, 64], [8, 8, 16, 32], [16, 32, 32, 64]];
+
+    fn n(v: &Value) -> i64 {
+        v.as_i64().unwrap_or(0)
+    }
+
+    /// One OAM entry `[index, a0, a1, a2]` as the engine reads it.
+    pub fn sprite(e: &Value, dispcnt: i64) -> Value {
+        let (i, a0, a1, a2) = (n(&e[0]), n(&e[1]), n(&e[2]), n(&e[3]));
+        let rot = a0 & 0x100 != 0;
+        let (shape, size) = ((a0 >> 14 & 3).min(2) as usize, (a1 >> 14 & 3) as usize);
+        let (w, h) = (KW[shape][size], KH[shape][size]);
+        let mut y = a0 & 255;
+        let mut x = a1 & 511;
+        if x >= 256 {
+            x -= 512;
+        }
+        if y >= 192 {
+            y -= 256;
+        }
+        let mode = ["normal", "blend", "window", "bitmap"][(a0 >> 10 & 3) as usize];
+        let mut o = json!({
+            "oam": i, "x": x, "y": y, "w": w, "h": h, "tile": a2 & 0x3FF, "palette": a2 >> 12 & 15,
+            "priority": a2 >> 10 & 3, "mode": mode, "colors256": a0 & 0x2000 != 0, "mosaic": a0 & 0x1000 != 0,
+            "affine": rot, "mapping_1d": dispcnt & 0x10 != 0,
+        });
+        if rot {
+            o["double_size"] = json!(a0 & 0x200 != 0);
+            o["matrix"] = json!(a1 >> 9 & 31);
+        } else {
+            o["flip_x"] = json!(a1 & 0x1000 != 0);
+            o["flip_y"] = json!(a1 & 0x2000 != 0);
+        }
+        o
+    }
+
+    /// One engine's registers decoded.
+    pub fn engine(v: &Value) -> Value {
+        let d = n(&v["dispcnt"]);
+        let layers: Vec<&str> = [(8, "bg0"), (9, "bg1"), (10, "bg2"), (11, "bg3"), (12, "obj"), (13, "win0"), (14, "win1"), (15, "objwin")]
+            .iter()
+            .filter(|(b, _)| d >> b & 1 != 0)
+            .map(|(_, s)| *s)
+            .collect();
+        let bgcnt: Vec<Value> = v["bgcnt"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .enumerate()
+                    .map(|(k, c)| {
+                        let c = n(c);
+                        json!({"bg": k, "priority": c & 3, "char_base": (c >> 2 & 15) * 0x4000, "mosaic": c & 0x40 != 0,
+                               "colors256": c & 0x80 != 0, "screen_base": (c >> 8 & 31) * 0x800, "size_code": c >> 14 & 3,
+                               "hofs": n(&v["hofs"][k]) & 0x1FF, "vofs": n(&v["vofs"][k]) & 0x1FF})
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let bld = n(&v["bldcnt"]);
+        let targets = |m: i64| -> Vec<&str> {
+            ["bg0", "bg1", "bg2", "bg3", "obj", "backdrop"].iter().enumerate().filter(|(i, _)| m >> i & 1 != 0).map(|(_, s)| *s).collect()
+        };
+        let bright = n(&v["bright"]);
+        let bld_mode = ["off", "alpha", "brighten", "darken"][(bld >> 6 & 3) as usize];
+        let bright_mode = ["off", "brighten", "darken", "off"][(bright >> 14 & 3) as usize];
+        let sprites: Vec<Value> = v["spr"].as_array().map(|a| a.iter().map(|e| sprite(e, d)).collect()).unwrap_or_default();
+        json!({
+            "dispcnt": d, "bg_mode": d & 7, "display_mode": d >> 16 & 3, "forced_blank": d & 0x80 != 0, "layers_on": layers,
+            "bgcnt": bgcnt,
+            "blend": {"mode": bld_mode, "first": targets(bld & 63), "second": targets(bld >> 8 & 63),
+                      "eva": n(&v["bldalpha"]) & 31, "evb": n(&v["bldalpha"]) >> 8 & 31, "evy": n(&v["bldy"]) & 31},
+            "master_bright": {"mode": bright_mode, "factor": bright & 31},
+            "sprites": sprites,
+        })
+    }
+
+    /// The journal line of frame `vblank` in `dir/frames.jsonl`, or an error that says what the file holds.
+    pub fn line(dir: &Path, vblank: u64) -> Result<Value, String> {
+        let text = std::fs::read_to_string(dir.join("frames.jsonl")).map_err(|e| format!("{}: {}", dir.join("frames.jsonl").display(), e))?;
+        let (mut first, mut last) = (u64::MAX, 0);
+        for l in text.lines() {
+            let Ok(v) = serde_json::from_str::<Value>(l) else { continue };
+            let b = v["vblank"].as_u64().unwrap_or(0);
+            first = first.min(b);
+            last = last.max(b);
+            if b == vblank {
+                return Ok(v);
+            }
+        }
+        Err(format!("frame {} is not in the recording (it holds {}..{})", vblank, first, last))
+    }
+
+    /// Everything about frame `vblank`; the picture goes to `out/window.png` and the answer to `out/frame.json`.
+    pub fn run(rec: &Path, vblank: u64, out: Option<&Path>) -> Result<Value, String> {
+        let j = line(rec, vblank)?;
+        let mut a = json!({"vblank": vblank, "journal": j.clone()});
+        let png = rec.join("frames").join(format!("v{:08}.png", vblank));
+        a["window_png"] = json!(png.display().to_string());
+        let have = j["ds_vblank"].as_u64();
+        a["ds_state"] = match have {
+            Some(b) if b == vblank => json!({"a": engine(&j["a"]), "b": engine(&j["b"])}),
+            Some(b) => json!({"note": format!("the state is of frame {}: the window drew {} from it", b, vblank), "a": engine(&j["a"]), "b": engine(&j["b"])}),
+            None => json!("not in this recording (made without registers: SUNPETAL_REC before K-099)"),
+        };
+        a["keys_hint"] = json!("the pictures' keys are in the F10 dump of the nearest frame (vN_2d/index.csv): match by OAM entry, x, y, w, h");
+        if let Some(o) = out {
+            std::fs::create_dir_all(o).map_err(|e| format!("{}: {}", o.display(), e))?;
+            if png.exists() {
+                std::fs::copy(&png, o.join("window.png")).map_err(|e| e.to_string())?;
+            }
+            std::fs::write(o.join("frame.json"), serde_json::to_string_pretty(&a).unwrap()).map_err(|e| e.to_string())?;
+        }
+        Ok(a)
+    }
+
+    /// `frame REC N [--out DIR]`
+    pub fn cli(args: &[String]) -> Result<Value, String> {
+        let usage = "usage: sunpetal-debug frame REC N [--out DIR]";
+        let mut pos: Vec<&String> = Vec::new();
+        let mut out: Option<PathBuf> = None;
+        let mut it = args.iter();
+        while let Some(x) = it.next() {
+            if x == "--out" {
+                out = Some(PathBuf::from(it.next().ok_or(usage)?));
+            } else {
+                pos.push(x);
+            }
+        }
+        let [rec, n] = pos[..] else { return Err(usage.into()) };
+        run(Path::new(rec), n.parse().map_err(|_| usage.to_string())?, out.as_deref())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn an_oam_entry_is_decoded() {
+            // 16x32 at (184,80): shape 2 (tall), size 2; tile 5, palette 3, priority 1
+            let a0 = 80 | 2 << 14;
+            let a1 = 184 | 2 << 14;
+            let a2 = 5 | 1 << 10 | 3 << 12;
+            let s = sprite(&json!([7, a0, a1, a2]), 0x10);
+            assert_eq!((s["x"].clone(), s["y"].clone(), s["w"].clone(), s["h"].clone()), (json!(184), json!(80), json!(16), json!(32)));
+            assert_eq!((s["tile"].clone(), s["palette"].clone(), s["priority"].clone(), s["oam"].clone()), (json!(5), json!(3), json!(1), json!(7)));
+            let neg = sprite(&json!([0, 250, 500, 0]), 0);
+            assert_eq!((neg["x"].clone(), neg["y"].clone()), (json!(-12), json!(-6)));
+        }
+
+        #[test]
+        fn registers_and_a_recording_are_read() {
+            let e = engine(&json!({"dispcnt": 0x1_0000 | 0x1100 | 0x0100, "bgcnt": [1, 0, 0, 0], "hofs": [0, 0, 0, 0], "vofs": [0, 0, 0, 0],
+                "bldcnt": 0x41, "bldalpha": 0x0408, "bldy": 0, "bright": 0x8004, "spr": []}));
+            assert_eq!(e["layers_on"], json!(["bg0", "obj"]));
+            assert_eq!(e["blend"]["mode"], json!("alpha"));
+            assert_eq!((e["blend"]["eva"].clone(), e["blend"]["evb"].clone()), (json!(8), json!(4)));
+            assert_eq!(e["master_bright"]["mode"], json!("darken"));
+            let dir = std::env::temp_dir().join(format!("sunpetal-frame-{}", std::process::id()));
+            std::fs::create_dir_all(dir.join("frames")).unwrap();
+            std::fs::write(dir.join("frames").join("v00000011.png"), b"png").unwrap();
+            std::fs::write(
+                dir.join("frames.jsonl"),
+                "{\"vblank\":10}\n{\"vblank\":11,\"ds_vblank\":11,\"a\":{\"dispcnt\":256,\"bgcnt\":[0,0,0,0],\"hofs\":[0,0,0,0],\"vofs\":[0,0,0,0],\"bldcnt\":0,\"bldalpha\":0,\"bldy\":0,\"bright\":0,\"spr\":[[0,0,0,0]]},\"b\":{\"dispcnt\":0}}\n",
+            )
+            .unwrap();
+            let out = dir.join("out");
+            let r = run(&dir, 11, Some(&out)).unwrap();
+            assert_eq!(r["ds_state"]["a"]["sprites"].as_array().unwrap().len(), 1);
+            assert!(out.join("window.png").exists() && out.join("frame.json").exists());
+            assert_eq!(run(&dir, 10, None).unwrap()["ds_state"], json!("not in this recording (made without registers: SUNPETAL_REC before K-099)"));
+            assert!(run(&dir, 99, None).unwrap_err().contains("10..11"));
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+    }
+}
+
 fn main() -> ExitCode {
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    if argv.first().map(String::as_str) == Some("frame") {
+        return match frame::cli(&argv[1..]) {
+            Ok(v) => {
+                println!("{}", serde_json::to_string_pretty(&v).unwrap());
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                println!("{}", json!({"error": e}));
+                ExitCode::from(1)
+            }
+        };
+    }
     match run(Args::parse()) {
         // the threads' coroutines are parked: do not unwind them
         Ok(()) => std::process::exit(0),

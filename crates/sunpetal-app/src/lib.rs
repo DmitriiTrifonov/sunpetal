@@ -839,7 +839,7 @@ impl App {
                 let layout = layout::find(layouts, &settings.video, &live);
                 g.bar_color = *bar_color;
                 g.rec_vblank = live.vblank;
-                g.rec_journal = format!("{{\"vblank\":{},\"layout\":{:?},\"window\":[{},{}],\"auto_lower\":{},\"hold\":{},\"counter\":{},\"hint\":{},\"edo\":{},\"puzzle_hold\":{},\"wide\":{},\"res\":{}}}", live.vblank, layout.name, g.size().0, g.size().1, live.lower, hold.is_some(), live.counter_seen, live.hint_seen, live.edo, *puzzle_hold, live.wide, settings.video.res);
+                g.rec_journal = format!("{{\"vblank\":{},\"layout\":{:?},\"window\":[{},{}],\"auto_lower\":{},\"hold\":{},\"counter\":{},\"hint\":{},\"edo\":{},\"puzzle_hold\":{},\"wide\":{},\"res\":{},{}}}", live.vblank, layout.name, g.size().0, g.size().1, live.lower, hold.is_some(), live.counter_seen, live.hint_seen, live.edo, *puzzle_hold, live.wide, settings.video.res, { let st = shared.ds_state.lock().unwrap(); if st.is_empty() { "\"ds_vblank\":null".to_string() } else { st.clone() } });
                 if let Some(p) = pending_capture.take() {
                     g.capture = Some(p);
                 }

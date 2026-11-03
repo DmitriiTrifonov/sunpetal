@@ -89,6 +89,8 @@ pub struct Shared {
     pub wide_frame: Mutex<Option<(usize, usize, Vec<u8>)>>,
     /// The DS frame the machine is at (set by the emulation each frame).
     pub vblank: AtomicU64,
+    /// The 2D engines' registers and OAM at that frame (`nds::frame_state`), kept while recording (`SUNPETAL_REC`) for the journal.
+    pub ds_state: Mutex<String>,
     /// Run without waiting for the clock.
     pub fast: AtomicBool,
     /// Skip: run without waiting until the picture stops changing (the game waits for the player).
@@ -162,6 +164,7 @@ impl Shared {
             logo_click: AtomicBool::new(false),
             quit: AtomicBool::new(false),
             vblank: AtomicU64::new(0),
+            ds_state: Mutex::new(String::new()),
             wide_px: AtomicUsize::new(0),
             dump: AtomicBool::new(false),
             dump_meta: Mutex::new(String::new()),
@@ -230,6 +233,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     let frame = Duration::from_secs_f64(1.0 / FRAME_RATE);
     let mut next = Instant::now();
     let stats = std::env::var_os("SUNPETAL_STATS").is_some();
+    let recording = std::env::var_os("SUNPETAL_REC").is_some();
     // SUNPETAL_PACK_LOG=1: how many sprites and layers the 2D pack placed, each time it changes (a dip is a frame with the old art, B-16)
     let pack_log = std::env::var_os("SUNPETAL_PACK_LOG").is_some();
     // SUNPETAL_DUMP_ON_TOUCH=1: each touch of the lower screen writes the picture and the 2D on show (with their keys) for
@@ -513,6 +517,9 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             eprintln!("{:.1} frames/s (DS frame {})", counted as f64 / since.elapsed().as_secs_f64(), nds::vblanks());
             counted = 0;
             since = Instant::now();
+        }
+        if recording {
+            *shared.ds_state.lock().unwrap() = format!("\"ds_vblank\":{},{}", nds::vblanks(), nds::frame_state());
         }
         shared.vblank.store(nds::vblanks(), Ordering::Relaxed);
         let samples = nds::take_samples();
