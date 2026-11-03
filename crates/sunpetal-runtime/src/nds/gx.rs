@@ -188,7 +188,56 @@ struct Queued {
     p: Vec<u32>,
 }
 
+/// `SUNPETAL_GX_TRACE=FILE` (+ `SUNPETAL_GX_FRAMES=a-b`, by SWAP_BUFFERS' count): one text line
+/// per BEGIN_VTXS..next batch, the vertices' box in model space (1.3.12 fixed point as sent),
+/// the position matrix and the texture parameter. Reads the stream, changes nothing (K-003).
+#[cfg(feature = "debug-tools")]
+pub(super) struct Trace {
+    out: std::io::BufWriter<std::fs::File>,
+    lo: u64,
+    hi: u64,
+    open: Option<(i32, u32, [i16; 3], [i16; 3], Mtx, u32)>,
+}
+
+#[cfg(feature = "debug-tools")]
+impl Trace {
+    fn from_env() -> Option<Trace> {
+        let path = std::env::var_os("SUNPETAL_GX_TRACE")?;
+        let (lo, hi) = std::env::var("SUNPETAL_GX_FRAMES")
+            .ok()
+            .and_then(|v| v.split_once('-').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
+            .unwrap_or((0, u64::MAX));
+        Some(Trace { out: std::io::BufWriter::new(std::fs::File::create(path).ok()?), lo, hi, open: None })
+    }
+
+    fn flush(&mut self, frame: u64) {
+        use std::io::Write;
+        if let Some((prim, n, lo, hi, m, tex)) = self.open.take() {
+            let _ = writeln!(
+                self.out,
+                "f={frame} prim={prim} n={n} min={lo:?} max={hi:?} tex={tex:#010x} pos={m:?}"
+            );
+        }
+    }
+
+    fn vertex(&mut self, frame: u64, v: [i16; 3], m: &Mtx, tex: u32) {
+        if frame < self.lo || frame > self.hi {
+            return;
+        }
+        if let Some(o) = &mut self.open {
+            o.1 += 1;
+            for i in 0..3 {
+                o.2[i] = o.2[i].min(v[i]);
+                o.3[i] = o.3[i].max(v[i]);
+            }
+        }
+        let _ = (m, tex);
+    }
+}
+
 pub(super) struct Gx {
+    #[cfg(feature = "debug-tools")]
+    trace: Option<Trace>,
     /// 0x04000320-0x0400071F, as written.
     regs: Vec<u8>,
     mtx_proj: Mtx,
@@ -265,6 +314,8 @@ impl Gx {
 
     pub(super) fn new() -> Gx {
         Gx {
+            #[cfg(feature = "debug-tools")]
+            trace: Trace::from_env(),
             regs: vec![0; 0x400],
             mtx_proj: IDENTITY,
             mtx_pos: IDENTITY,
@@ -565,6 +616,13 @@ impl Nds {
                     + g.vtx[2] as i64 * m[8 + i] as i64
                     + ((g.raw_tc[i] as i64) << 24))
                     >> 24) as i16;
+            }
+        }
+        #[cfg(feature = "debug-tools")]
+        {
+            let (frame, v, tex, pos) = (g.swaps, g.vtx, g.tex_param, g.mtx_pos);
+            if let Some(t) = &mut g.trace {
+                t.vertex(frame, v, &pos, tex);
             }
         }
         g.update_clip();
@@ -922,6 +980,16 @@ impl Nds {
             0x40 => {
                 // BEGIN_VTXS
                 let g = &mut self.gx;
+                #[cfg(feature = "debug-tools")]
+                {
+                    let (frame, pos, tex) = (g.swaps, g.mtx_pos, g.tex_param);
+                    if let Some(t) = &mut g.trace {
+                        t.flush(frame);
+                        if frame >= t.lo && frame <= t.hi {
+                            t.open = Some(((p[0] & 3) as i32, 0, [i16::MAX; 3], [i16::MIN; 3], pos, tex));
+                        }
+                    }
+                }
                 g.prim = (p[0] & 3) as i32;
                 g.attr = g.attr_pending;
                 g.nstrip = 0;
@@ -930,6 +998,13 @@ impl Nds {
             0x41 => {} // END_VTXS: nothing on the DS either
             0x50 => {
                 // SWAP_BUFFERS: at the VBlank
+                #[cfg(feature = "debug-tools")]
+                {
+                    let frame = self.gx.swaps;
+                    if let Some(t) = &mut self.gx.trace {
+                        t.flush(frame);
+                    }
+                }
                 self.gx.swap_pending = true;
                 self.gx.swap_param = p[0];
             }
