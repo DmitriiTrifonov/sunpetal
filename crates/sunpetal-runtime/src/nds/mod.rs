@@ -197,6 +197,7 @@ pub struct Nds {
     /// Stage 8ж.5: `run_frame` does not wait for the GPU's 3D frame; it is read at the next frame's start.
     pipeline: bool,
     script: Vec<input::Press>,
+    inrec: Option<input::InputRec>,
     cart: cart::Cart,
     spi: spi::Spi,
     told: HashSet<(&'static str, u32)>,
@@ -278,6 +279,7 @@ impl Nds {
             renderer: Renderer::Software,
             pipeline: false,
             script: Vec::new(),
+            inrec: input::InputRec::from_env(),
             cart: cart::Cart::new(),
             spi: spi::Spi::new(),
             told: HashSet::new(),
@@ -1226,13 +1228,13 @@ pub fn screenshot_wide(path: &std::path::Path) -> Result<bool, String> {
     Ok(true)
 }
 
-/// Writes both engines' background layers as PNGs into `dir` (see `gpu2d::dump_backgrounds`);
-/// returns how many.
 /// The 2D engines' registers and OAM now, as the inside of a JSON object (see `gpu2d::frame_state`).
 pub fn frame_state() -> String {
     nds(|n| n.frame_state())
 }
 
+/// Writes both engines' background layers as PNGs into `dir` (see `gpu2d::dump_backgrounds`);
+/// returns how many.
 pub fn dump_backgrounds(dir: &std::path::Path) -> usize {
     nds(|n| n.dump_backgrounds(dir))
 }

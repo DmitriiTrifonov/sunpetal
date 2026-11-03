@@ -197,6 +197,16 @@ pub(super) struct Trace {
     lo: u64,
     hi: u64,
     open: Option<(i32, u32, [i16; 3], [i16; 3], Mtx, u32)>,
+    /// `SUNPETAL_GX_VERTS=0xTEX`: also one `V` line per vertex of the batches with this texture parameter.
+    vtex: Option<u32>,
+    /// `SUNPETAL_GX_VERTS=all`: the vertices of every batch.
+    vall: bool,
+    batch: u32,
+    /// The (TEXIMAGE_PARAM, PLTT_BASE) pairs of the traced frames' batches: at SWAP_BUFFERS each
+    /// gets a `K` line with its texture key (the name of its picture in a texture pack).
+    used: std::collections::HashSet<(u32, u32)>,
+    /// With no `SUNPETAL_GX_FRAMES`: `FILE.go` appearing starts the trace for two frames (and is deleted).
+    trigger: std::path::PathBuf,
 }
 
 #[cfg(feature = "debug-tools")]
@@ -206,8 +216,30 @@ impl Trace {
         let (lo, hi) = std::env::var("SUNPETAL_GX_FRAMES")
             .ok()
             .and_then(|v| v.split_once('-').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
-            .unwrap_or((0, u64::MAX));
-        Some(Trace { out: std::io::BufWriter::new(std::fs::File::create(path).ok()?), lo, hi, open: None })
+            .unwrap_or((u64::MAX, u64::MAX));
+        let trigger = std::path::PathBuf::from(format!("{}.go", path.to_string_lossy()));
+        let verts = std::env::var("SUNPETAL_GX_VERTS").ok();
+        let vall = verts.as_deref() == Some("all");
+        let vtex = verts.and_then(|v| u32::from_str_radix(v.trim_start_matches("0x"), 16).ok());
+        Some(Trace {
+            out: std::io::BufWriter::new(std::fs::File::create(path).ok()?),
+            lo,
+            hi,
+            open: None,
+            vtex,
+            vall,
+            batch: 0,
+            used: Default::default(),
+            trigger,
+        })
+    }
+
+    /// At SWAP_BUFFERS: the trigger file asks for the next two frames.
+    fn poll(&mut self, frame: u64) {
+        if self.lo == u64::MAX && self.trigger.exists() {
+            let _ = std::fs::remove_file(&self.trigger);
+            (self.lo, self.hi) = (frame + 1, frame + 2);
+        }
     }
 
     fn flush(&mut self, frame: u64) {
@@ -215,8 +247,11 @@ impl Trace {
         if let Some((prim, n, lo, hi, m, tex)) = self.open.take() {
             let _ = writeln!(
                 self.out,
-                "f={frame} prim={prim} n={n} min={lo:?} max={hi:?} tex={tex:#010x} pos={m:?}"
+                "f={frame} vb={} b={} prim={prim} n={n} min={lo:?} max={hi:?} tex={tex:#010x} pos={m:?}",
+                super::vblanks(),
+                self.batch
             );
+            self.batch += 1;
         }
     }
 
@@ -231,11 +266,78 @@ impl Trace {
                 o.3[i] = o.3[i].max(v[i]);
             }
         }
-        let _ = (m, tex);
+        let _ = m;
+        if self.vall || self.vtex == Some(tex) {
+            use std::io::Write;
+            let _ = writeln!(self.out, "V f={frame} b={} {} {} {}", self.batch, v[0], v[1], v[2]);
+        }
+    }
+}
+
+/// K-111, the prototype of a model swap at the GX border (`SUNPETAL_MODEL_SWAP=FILE`, off by
+/// default): the batches that use the texture `tex` are not drawn; at the first of them in a frame
+/// the file's triangles take their place, moved by `e` into the first batch's model space and
+/// drawn through its matrix. The file: `tex HEX`, `size N` (the texture's side), `e` and twelve
+/// numbers (rows x, y, z, then the shift), then `v x y z u v r g b` for every vertex, three to a
+/// triangle (already in the DS's winding).
+pub(super) struct ModelSwap {
+    tex: u32,
+    /// With `key NAME` (a texture pack's picture name, no `.png`): the batches whose texture has
+    /// this key, wherever it lies in the texture memory (`tex` is then not looked at).
+    key: Option<super::render3d::TexKey>,
+    /// `hide NAME` lines: pictures whose batches are only taken out (a reflection slab, say).
+    hide: Vec<super::render3d::TexKey>,
+    /// The first matched batch of the frame: clip matrix, polygon attributes, texture, palette.
+    at: Vec<(Mtx, u32, u32, u32, usize)>,
+    size: f64,
+    e: [f64; 12],
+    verts: Vec<[f64; 8]>,
+    done: u64,
+    seen: std::collections::HashSet<u32>,
+}
+
+impl ModelSwap {
+    fn from_env() -> Option<ModelSwap> {
+        let text = std::fs::read_to_string(std::env::var_os("SUNPETAL_MODEL_SWAP")?).ok()?;
+        let mut sw = ModelSwap { tex: 0, key: None, hide: Vec::new(), at: Vec::new(), size: 128.0, e: [0.0; 12], verts: Vec::new(), done: 0, seen: Default::default() };
+        for line in text.lines() {
+            let mut w = line.split_whitespace();
+            match w.next() {
+                Some("tex") => sw.tex = u32::from_str_radix(w.next()?, 16).ok()?,
+                Some("key") => sw.key = super::texpack::parse_name(&format!("{}.png", w.next()?)),
+                Some("hide") => sw.hide.extend(super::texpack::parse_name(&format!("{}.png", w.next()?))),
+                Some("size") => sw.size = w.next()?.parse().ok()?,
+                Some("e") => {
+                    for (i, x) in w.take(12).enumerate() {
+                        sw.e[i] = x.parse().ok()?;
+                    }
+                }
+                Some("v") => {
+                    let n: Vec<f64> = w.filter_map(|x| x.parse().ok()).collect();
+                    if n.len() == 8 {
+                        sw.verts.push([n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7]]);
+                    }
+                }
+                _ => {}
+            }
+        }
+        (sw.verts.len() >= 3).then_some(sw)
     }
 }
 
 pub(super) struct Gx {
+    swap: Option<ModelSwap>,
+    swap_skip: bool,
+    swap_hide_r: Vec<(usize, usize)>,
+    swap_at_r: Option<(Mtx, u32, u32, u32)>,
+    swap_cur: Option<usize>,
+    swap_open: Option<usize>,
+    swap_hide: Vec<(usize, usize)>,
+    swap_cache: std::collections::HashMap<(u32, u32), u8>,
+    swap_gen: u64,
+    swap_count: std::collections::HashMap<u32, u32>,
+    swap_last: Vec<(u32, u32)>,
+    swap_mtime: Option<std::time::SystemTime>,
     #[cfg(feature = "debug-tools")]
     trace: Option<Trace>,
     /// 0x04000320-0x0400071F, as written.
@@ -314,6 +416,18 @@ impl Gx {
 
     pub(super) fn new() -> Gx {
         Gx {
+            swap: ModelSwap::from_env(),
+            swap_skip: false,
+            swap_hide_r: Vec::new(),
+            swap_at_r: None,
+            swap_cur: None,
+            swap_open: None,
+            swap_hide: Vec::new(),
+            swap_cache: Default::default(),
+            swap_gen: u64::MAX,
+            swap_count: Default::default(),
+            swap_last: Vec::new(),
+            swap_mtime: None,
             #[cfg(feature = "debug-tools")]
             trace: Trace::from_env(),
             regs: vec![0; 0x400],
@@ -374,6 +488,20 @@ impl Gx {
             pos_result: [0; 4],
             vec_result: [0; 3],
         }
+    }
+
+    /// Closes the open run of swapped polygons (and counts them for their matrix).
+    fn swap_close(&mut self) {
+        if let Some(s0) = self.swap_open.take() {
+            let n = self.build.polys.len();
+            if n > s0 {
+                self.swap_hide.push((s0, n));
+                if let (Some(sw), Some(i)) = (&mut self.swap, self.swap_cur) {
+                    sw.at[i].4 += n - s0;
+                }
+            }
+        }
+        self.swap_cur = None;
     }
 
     fn update_clip(&mut self) {
@@ -602,9 +730,130 @@ impl Nds {
         }
     }
 
+    /// BEGIN_VTXS with a swapped texture: skip its vertices, and once a frame draw the file's model.
+    /// Whether the batch that begins has the texture the swap is for.
+    fn swap_matches(&mut self) -> u8 {
+        let (tex, pal) = (self.gx.tex_param, self.gx.pltt_base);
+        let Some(sw) = &self.gx.swap else { return 0 };
+        let Some(want) = sw.key else { return (tex == sw.tex) as u8 };
+        let wants: Vec<super::render3d::TexKey> = std::iter::once(want).chain(sw.hide.iter().copied()).collect();
+        let gen = self.tex_generation();
+        if self.gx.swap_gen != gen {
+            self.gx.swap_cache.clear();
+            self.gx.swap_gen = gen;
+        }
+        if let Some(&b) = self.gx.swap_cache.get(&(tex, pal)) {
+            return b;
+        }
+        let mut r = 0;
+        if wants.iter().any(|w| (tex >> 26) & 7 == w.fmt as u32 && super::texpack::dims(tex) == (w.w as usize, w.h as usize)) {
+            let (tex_mem, pal_mem) = (self.vram_copy(super::video::VRAM_TEX, 0x80000), self.vram_copy(super::video::VRAM_TEXPAL, 0x18000));
+            // the palette's hash is not compared: the same picture may be read through another palette
+            let got = super::texpack::texture_key(&super::render3d::Mem { tex: &tex_mem, pal: &pal_mem }, tex, pal);
+            r = match wants.iter().position(|w| w.data == got.data) {
+                Some(0) => 1,
+                Some(_) => 2,
+                None => 0,
+            };
+        }
+        self.gx.swap_cache.insert((tex, pal), r);
+        r
+    }
+
+    fn swap_begin(&mut self) {
+        let g = &mut self.gx;
+        g.swap_skip = false;
+        if g.swaps % 30 == 0 {
+            if let Some(path) = std::env::var_os("SUNPETAL_MODEL_SWAP") {
+                let mt = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+                if mt.is_some() && mt != g.swap_mtime {
+                    g.swap_mtime = mt;
+                    if let Some(n) = ModelSwap::from_env() {
+                        eprintln!("swap: reloaded, {} vertices", n.verts.len());
+                        g.swap = Some(n);
+                    }
+                }
+            }
+        }
+        let g = &mut self.gx;
+        g.swap_close();
+        let hit = self.swap_matches();
+        let g = &mut self.gx;
+        if g.swap.is_none() || hit == 0 {
+            return;
+        }
+        // the batch is built as the game sends it (the counters it reads stay the same); its
+        // polygons are taken out at the start of rendering, and the file's model goes in
+        g.swap_open = Some(g.build.polys.len());
+        if hit == 2 {
+            return;
+        }
+        g.update_clip();
+        let (m, attr, tex, pal) = (g.mtx_clip, g.attr_pending, g.tex_param, g.pltt_base);
+        if let Some(sw) = &mut g.swap {
+            // the part of the model with most polygons, by the clip matrix, is what the swap is drawn through
+            let i = match sw.at.iter().position(|c| c.0 == m) {
+                Some(i) => i,
+                None => {
+                    sw.at.push((m, attr, tex, pal, 0));
+                    sw.at.len() - 1
+                }
+            };
+            g.swap_cur = Some(i);
+        }
+    }
+
+    /// At the start of rendering: the polygons of the swapped batches out, the model in.
+    fn swap_apply(&mut self, draw: bool) {
+        let g = &mut self.gx;
+        let hide = std::mem::take(&mut g.swap_hide_r);
+        let at = g.swap_at_r.take();
+        let Some(sw) = &mut g.swap else { return };
+        let Some((m, attr, tex, pal)) = at else { return };
+        if hide.is_empty() || !draw {
+            return;
+        }
+        let (e, size) = (sw.e, sw.size);
+        let mut i = 0;
+        g.render.polys.retain(|_| {
+            i += 1;
+            !hide.iter().any(|&(a, b)| i - 1 >= a && i - 1 < b)
+        });
+        let mut out = Vec::with_capacity(sw.verts.len());
+        for v in &sw.verts {
+            let mut q = [0f64; 3];
+            for (i, qi) in q.iter_mut().enumerate() {
+                *qi = v[0] * e[i] + v[1] * e[3 + i] + v[2] * e[6 + i] + e[9 + i];
+            }
+            let mut nv = V::default();
+            for i in 0..4 {
+                nv.p[i] = (q[0] * m[i] as f64 + q[1] * m[4 + i] as f64 + q[2] * m[8 + i] as f64 + m[12 + i] as f64)
+                    .round() as i32;
+            }
+            for k in 0..3 {
+                let c = ((v[5 + k] * 31.0 / 128.0).round() as i32).clamp(0, 31);
+                nv.c[k] = c << 4 | if c != 0 { 0xF } else { 0 };
+            }
+            nv.t = [(v[3] * size * 16.0).round() as i32, (v[4] * size * 16.0).round() as i32];
+            out.push(nv);
+        }
+        let saved = (g.attr, g.tex_param, g.pltt_base);
+        // both faces: the file's model may wind either way; into the frame's list, not the one being built
+        (g.attr, g.tex_param, g.pltt_base) = (attr | 0xC0, tex, pal);
+        std::mem::swap(&mut g.render, &mut g.build);
+        for t in out.chunks_exact(3) {
+            self.gx_submit(t, 3);
+        }
+        std::mem::swap(&mut self.gx.render, &mut self.gx.build);
+        (self.gx.attr, self.gx.tex_param, self.gx.pltt_base) = saved;
+    }
+
     fn gx_add_vertex(&mut self) {
         let g = &mut self.gx;
-        if g.prim < 0 {
+        if g.swap.is_some() && g.prim >= 0 {
+            *g.swap_count.entry(g.tex_param).or_insert(0) += 1;
+        }
+        if g.prim < 0 || g.swap_skip {
             return;
         }
         if g.tex_param >> 30 == 3 {
@@ -982,10 +1231,11 @@ impl Nds {
                 let g = &mut self.gx;
                 #[cfg(feature = "debug-tools")]
                 {
-                    let (frame, pos, tex) = (g.swaps, g.mtx_pos, g.tex_param);
+                    let (frame, pos, tex, pal) = (g.swaps, g.mtx_pos, g.tex_param, g.pltt_base);
                     if let Some(t) = &mut g.trace {
                         t.flush(frame);
                         if frame >= t.lo && frame <= t.hi {
+                            t.used.insert((tex, pal));
                             t.open = Some(((p[0] & 3) as i32, 0, [i16::MAX; 3], [i16::MIN; 3], pos, tex));
                         }
                     }
@@ -994,6 +1244,7 @@ impl Nds {
                 g.attr = g.attr_pending;
                 g.nstrip = 0;
                 g.strip_count = 0;
+                self.swap_begin();
             }
             0x41 => {} // END_VTXS: nothing on the DS either
             0x50 => {
@@ -1001,8 +1252,26 @@ impl Nds {
                 #[cfg(feature = "debug-tools")]
                 {
                     let frame = self.gx.swaps;
+                    let mut used = Vec::new();
                     if let Some(t) = &mut self.gx.trace {
                         t.flush(frame);
+                        t.poll(frame);
+                        used = std::mem::take(&mut t.used).into_iter().collect();
+                    }
+                    if !used.is_empty() {
+                        let (tex_mem, pal_mem) = (self.vram_copy(super::video::VRAM_TEX, 0x80000), self.vram_copy(super::video::VRAM_TEXPAL, 0x18000));
+                        let m = super::render3d::Mem { tex: &tex_mem, pal: &pal_mem };
+                        used.sort();
+                        if let Some(t) = &mut self.gx.trace {
+                            use std::io::Write;
+                            for (tex, pal) in used {
+                                if (tex >> 26) & 7 == 0 {
+                                    continue;
+                                }
+                                let key = super::texpack::file_name(&super::texpack::texture_key(&m, tex, pal));
+                                let _ = writeln!(t.out, "K f={frame} tex={tex:#010x} pal={pal:#x} key={}", key.trim_end_matches(".png"));
+                            }
+                        }
                     }
                 }
                 self.gx.swap_pending = true;
@@ -1214,6 +1483,14 @@ impl Nds {
         }
         let g = &mut self.gx;
         g.swap_pending = false;
+        // the swapped batches of the frame that goes to the rendering engine
+        g.swap_close();
+        g.swap_hide_r = std::mem::take(&mut g.swap_hide);
+        g.swap_at_r = g.swap.as_mut().and_then(|sw| {
+            let best = sw.at.iter().max_by_key(|c| c.4).map(|c| (c.0, c.1, c.2, c.3));
+            sw.at.clear();
+            best
+        });
         std::mem::swap(&mut g.render, &mut g.build);
         g.build = Lists::default();
         g.render_manual = g.swap_param & 1 != 0;
@@ -1238,6 +1515,7 @@ impl Nds {
     /// The rendering engine starts a frame: its job is taken (lists, 3D registers, texture
     /// memory) and drawn, to be shown in the next frame.
     pub(super) fn gx_render_start(&mut self) {
+        self.swap_apply(self.gpu.on);
         if !self.gpu.on {
             return; // a headless run with no picture of the next frame
         }

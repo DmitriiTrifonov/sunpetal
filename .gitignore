@@ -4,6 +4,7 @@ extracted/
 generated/
 build/
 dumps/
+tools/ps2/testdata/gx_trace_sample.txt
 logs/
 *.nds
 *.iso

@@ -1,0 +1,7 @@
+{"raw": "build/ps2-models/raw",
+ "swaps": {"car": {
+   "key": "128x128_5_8def2870adbfb901_f387cdfc24eb54ac", "size": 128,
+   "hide": ["64x64_5_0430bc758dfac332_58a85f96628fe037"],
+   "ps2": {"archive": "OP.BIN", "entry": 18},
+   "orient": {"perm": [0,2,1], "signs": [-1,1,1], "scale": 0.04, "offset": [0.0002,-0.2,-0.6166], "flipfront": true},
+   "color": 90}}}

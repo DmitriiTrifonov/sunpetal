@@ -85,11 +85,57 @@ impl Nds {
     /// Live input (a window, a pad): the buttons held (bit i of `KEY_NAMES`: A B SELECT START RIGHT
     /// LEFT UP DOWN R L X Y) and the stylus on the lower screen, if down. Replaces the script's.
     pub(super) fn set_input(&mut self, keys: u32, pen: Option<(i32, i32)>) {
+        self.input_record(keys, pen);
         self.keys = !keys as u16 & 0x3FF;
         let down = pen.is_some();
         self.extkeys = 0x7F & !((keys >> 10) & 3) as u16 & !(if down { 0x40 } else { 0 });
         let (x, y) = pen.unwrap_or((0, 0));
         self.spi_set_pen(down, x, y);
+    }
+}
+
+/// A recording of live input in the script's own format (`SUNPETAL_INPUT_REC=FILE`): each change
+/// of what is held closes the previous press, so that the file replays as `--input "$(cat FILE)"`
+/// at the same VBlanks.
+pub(super) struct InputRec {
+    path: std::path::PathBuf,
+    cur: (u32, Option<(i32, i32)>),
+    since: u64,
+}
+
+impl InputRec {
+    pub(super) fn from_env() -> Option<InputRec> {
+        let path = std::path::PathBuf::from(std::env::var_os("SUNPETAL_INPUT_REC")?);
+        let _ = std::fs::write(&path, "");
+        Some(InputRec { path, cur: (0, None), since: 0 })
+    }
+}
+
+impl Nds {
+    fn input_record(&mut self, keys: u32, pen: Option<(i32, i32)>) {
+        let now = self.vblanks;
+        let Some(r) = &mut self.inrec else { return };
+        if r.cur == (keys, pen) {
+            return;
+        }
+        let (k, p) = r.cur;
+        let frames = now - r.since;
+        let mut item = String::new();
+        if k != 0 {
+            let names: Vec<&str> = KEY_NAMES.iter().enumerate().filter(|(i, _)| k >> i & 1 != 0).map(|(_, n)| *n).collect();
+            item.push_str(&format!("{}:{}:{},", r.since, names.join("+"), frames.max(1)));
+        }
+        if let Some((x, y)) = p {
+            item.push_str(&format!("{}:tap:{}:{}:{},", r.since, x, y, frames.max(1)));
+        }
+        if !item.is_empty() {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(&r.path) {
+                let _ = f.write_all(item.as_bytes());
+            }
+        }
+        r.cur = (keys, pen);
+        r.since = now;
     }
 }
 
