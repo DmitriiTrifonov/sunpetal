@@ -123,6 +123,12 @@ impl Pack2d {
             for f in rd.flatten() {
                 p.add(&f.file_name().to_string_lossy(), Source::Path(f.path()));
             }
+            // the manifest's keys, unless a file already has that name
+            for (name, file) in sunpetal_data::pack2d::manifest_pictures(dir)? {
+                if !dir.join(&name).exists() {
+                    p.add(&name, Source::Path(file));
+                }
+            }
         }
         for v in p.variants.values_mut() {
             v.sort_by(|a, b| (&a.group, &a.name).cmp(&(&b.group, &b.name)));
@@ -315,5 +321,23 @@ mod tests {
         let img = Img { w: 2, h: 1, rgba: vec![255, 0, 0, 255, 0, 0, 255, 0], scaled: Default::default() };
         assert_eq!(img.sample(0.25, 0.5), [255, 0, 0, 255]);
         assert_eq!(img.sample(0.75, 0.5)[3], 0);
+    }
+
+    #[test]
+    fn a_manifest_folder_serves_every_key_of_an_id() {
+        let dir = std::env::temp_dir().join(format!("sunpetal-p2d-rt-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("push.png"), png([9, 0, 0, 255])).unwrap();
+        std::fs::write(
+            dir.join("pack.toml"),
+            "[push]\nen = [\"obj0_8x8_00000000000000aa_00000000000000bb\"]\nru = [\"obj0_8x8_00000000000000cc_00000000000000dd\"]\n",
+        )
+        .unwrap();
+        let p = Pack2d::load(&dir).unwrap();
+        for k in [(8, 8, 0xaa, 0xbb), (8, 8, 0xcc, 0xdd)] {
+            assert_eq!(p.get(&k).map(|i| i.rgba[0]), Some(9));
+        }
+        assert!(p.get(&(8, 8, 1, 2)).is_none());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -833,7 +833,7 @@ impl Nds {
         // merge with the index an earlier call wrote
         let idx = dir.join("index.csv");
         let mut all: std::collections::BTreeSet<String> = std::fs::read_to_string(&idx)
-            .map(|t| t.lines().skip(1).map(str::to_owned).collect())
+            .map(|t| t.lines().skip(1).map(|l| l.splitn(10, ',').take(9).collect::<Vec<_>>().join(",")).collect())
             .unwrap_or_default();
         all.extend(rows);
         let mut text = String::from("kind,engine,layer_or_oam,x,y,w,h,key,file\n");
