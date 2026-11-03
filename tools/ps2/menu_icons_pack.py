@@ -10,6 +10,8 @@ from the frame alone (the frame moves from one icon to another), the arrow from 
 --art     the folder with guide.svg, memo_big.png, goods_big.png, save_big.png, arrow_big.png (artifacts/2d-samples/redraw)
 --fonts   build/fonts (FiraSansExtraCondensed-Medium.ttf)
 --dumps   a folder with `index.csv` of `dump2d` on the menu frame, one per language (en, ru)
+--bodies  optional: a folder with guide_big.png, memo_big.png, save_big.png, goods_big.png (`icons_epx_art.py`); they replace
+          the redrawn bodies, the frame (guide.svg) and the arrow stay from --art
 --out     the pack folder: obj1_WxH_DATA_PALETTE.png files are written there
 """
 import argparse, csv, os, re, subprocess, tempfile
@@ -34,6 +36,12 @@ PUZZLE = {
     'ru': [('ЗАМЕТКИ', 102, 92, 5.6), ('ПОРТ', 153, 92, 6.5), ('ВЕЩИ', 204, 92, 7)],
 }
 
+# the menu before the GUIDE is found: MEMO, SAVE, GOODS only (OAM 26-41), cut by place like the puzzle's strip
+TRIO = {lang: [SETS[lang][1], SETS[lang][2], SETS[lang][3]] for lang in SETS}
+
+# labels over a busy body get a black band (DS x range, past the memo's holes, across the goods' cells)
+PLATE = {'MEMO': (83, 121), 'ЗАМЕТКИ': (83, 121), 'GOODS': (185, 223), 'ВЕЩИ': (185, 223)}
+
 
 def run(*a):
     subprocess.run(['magick', *map(str, a)], check=True)
@@ -48,6 +56,17 @@ def label(font, text, cap, out, tmp):
     run(tmp + '/l_back.png', tmp + '/l_front.png', '-gravity', 'center', '-composite', out)
 
 
+def put(base, lab, text, cx, cy, tmp):
+    """The label (on its band when it has one) onto `base`, centred at DS point (cx, cy)."""
+    w, h = size(lab)
+    if text in PLATE:
+        x0, x1 = PLATE[text]
+        bh = h - 16
+        run('-size', f'{(x1 - x0) * X}x{bh}', 'xc:black', tmp + '/band.png')
+        run(base, tmp + '/band.png', '-geometry', f'+{x0 * X}+{int(cy * X - bh / 2)}', '-composite', base)
+    run(base, lab, '-geometry', f'+{int(cx * X - w / 2)}+{int(cy * X - h / 2)}', '-composite', base)
+
+
 def size(path):
     return tuple(int(v) for v in subprocess.check_output(['magick', 'identify', '-format', '%w %h', path]).split())
 
@@ -58,11 +77,14 @@ def main():
     ap.add_argument('--fonts', required=True)
     ap.add_argument('--dumps', default='', help='en=DIR,ru=DIR (the case menu)')
     ap.add_argument('--puzzle-dumps', default='', help='en=DIR,ru=DIR: `dump2d` on the strip with PORT (a puzzle)')
+    ap.add_argument('--trio-dumps', default='', help='en=DIR,ru=DIR: `dump2d` on the menu without GUIDE (MEMO, SAVE, GOODS)')
+    ap.add_argument('--bodies', default='')
     ap.add_argument('--out', required=True)
     a = ap.parse_args()
     font = a.fonts + '/firasansextracondensed/FiraSansExtraCondensed-Medium.ttf'
     dumps = dict(p.split('=') for p in a.dumps.split(',') if p)
     pdumps = dict(p.split('=') for p in a.puzzle_dumps.split(',') if p)
+    tdumps = dict(p.split('=') for p in a.trio_dumps.split(',') if p)
     os.makedirs(a.out, exist_ok=True)
     tmp = tempfile.mkdtemp(prefix='menu_icons_')
     svg = open(a.art + '/guide.svg').read()
@@ -73,6 +95,8 @@ def main():
     for n in ('guide_body', 'guide_frame'):
         run('-background', 'none', '-density', 96 * X, tmp + f'/{n}.svg', tmp + f'/{n}.png')
     art = {'guide': tmp + '/guide_body.png', 'memo': a.art + '/memo_big.png', 'save': a.art + '/save_big.png', 'goods': a.art + '/goods_big.png'}
+    if a.bodies:
+        art = {k: f'{a.bodies}/{k}_big.png' for k in art}
     W, H = 256 * X, 192 * X
 
     def canvas(layers, out):
@@ -92,8 +116,7 @@ def main():
         for i, (t, cx, cy, cap) in enumerate(labels):
             lab = tmp + f'/lab_{lang}_{i}.png'
             label(font, t, cap, lab, tmp)
-            w, h = size(lab)
-            run(bodies, lab, '-geometry', f'+{int(cx * X - w / 2)}+{int(cy * X - h / 2)}', '-composite', bodies)
+            put(bodies, lab, t, cx, cy, tmp)
         with open(dumps[lang] + '/index.csv', newline='') as f:
             rows = [r for r in csv.DictReader(f) if r['kind'] == 'obj' and r['engine'] == '1']
         for r in rows:
@@ -115,16 +138,17 @@ def main():
                 if lang != done[name][0] and src == bodies:
                     print('note: key', name, 'shared by', done[name][0], 'and', lang)
             done[name] = (lang, src, x, y)
-    for lang, labels in PUZZLE.items():
+    jobs = [('puzzle', lang, labels, pdumps, ('memo', 'port', 'goods')) for lang, labels in PUZZLE.items()]
+    jobs += [('trio', lang, labels, tdumps, ('memo', 'save', 'goods')) for lang, labels in TRIO.items()]
+    for kind, lang, labels, pdumps, items in jobs:
         if lang not in pdumps:
             continue
-        strip = tmp + f'/strip_{lang}.png'
-        canvas([(art['memo'], POS['memo']), (a.art + '/port_big.png', POS['port']), (art['goods'], POS['goods'])], strip)
+        strip = tmp + f'/strip_{kind}_{lang}.png'
+        canvas([(a.art + '/port_big.png' if k == 'port' else art[k], POS[k]) for k in items], strip)
         for i, (t, cx, cy, cap) in enumerate(labels):
-            lab = tmp + f'/plab_{lang}_{i}.png'
+            lab = tmp + f'/plab_{kind}_{lang}_{i}.png'
             label(font, t, cap, lab, tmp)
-            w, h = size(lab)
-            run(strip, lab, '-geometry', f'+{int(cx * X - w / 2)}+{int(cy * X - h / 2)}', '-composite', strip)
+            put(strip, lab, t, cx, cy, tmp)
         with open(pdumps[lang] + '/index.csv', newline='') as f:
             rows = [r for r in csv.DictReader(f) if r['kind'] == 'obj' and r['engine'] == '1']
         for r in rows:
@@ -137,7 +161,7 @@ def main():
                 src = strip
             run(src, '-crop', f'{w * X}x{h * X}+{x * X}+{y * X}', '+repage', a.out + '/' + r['file'])
             done[r['file']] = (lang, src, x, y)
-        print('puzzle strip', lang, 'pieces:', len(rows))
+        print(kind, 'strip', lang, 'pieces:', len(rows))
     print('pieces:', len(done), '->', a.out)
 
 
