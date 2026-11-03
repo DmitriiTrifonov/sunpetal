@@ -29,6 +29,20 @@ jobs:
       - run: cargo build -p sunpetal-runtime --features gpu
       - run: cargo test -p sunpetal-runtime --features gpu --lib
 
+  # Стиль: пока код не отформатирован (1300+ правок fmt, ~100 замечаний clippy), шаг советует и не блокирует.
+  lint:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Linux packages (sound, pads)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
   tools:
     runs-on: ubuntu-latest
     steps:

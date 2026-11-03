@@ -1,5 +1,5 @@
 {
- "seq": 113,
+ "seq": 114,
  "tasks": [
   {
    "id": "K-001",
@@ -1236,6 +1236,16 @@
    "after": [
     "K-003"
    ]
+  },
+  {
+   "id": "K-114",
+   "t": "Форматирование и clippy: cargo fmt, clippy --fix, затем STRICT=1 в tools/verify.sh и CI без continue-on-error",
+   "col": "backlog",
+   "r": 3.0,
+   "i": 1.0,
+   "c": 0.8,
+   "e": 2.0,
+   "note": "2026-11-03; R/I/C/E выставлены ассистентом; 1300+ правок fmt, ~100 замечаний clippy; делать, когда нет открытых worktree исполнителей (конфликты); потом убрать continue-on-error у job lint в ci.yml и сделать STRICT=1 по умолчанию"
   }
  ]
 }
