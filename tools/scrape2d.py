@@ -36,9 +36,9 @@ def run_route(path, rom, save, lang, out, pack=None, variants=()):
     tmp = out + '.sav'
     shutil.copy(save, tmp)
     exe = os.path.join(ROOT, 'target/release/sunpetal-debug')
-    args = [exe, rom, '--save', tmp, '--autoplay', '--scale', str(SCALE), '--repl', '--lang', lang]
+    args = [exe, rom, '--save', tmp, '--scale', str(SCALE), '--repl', '--lang', lang]
     if goto:
-        args += ['--goto', goto]
+        args += ['--goto', goto, '--autoplay']
     if pack:
         args += ['--pack-2d', pack]
         for v in variants:

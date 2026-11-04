@@ -1,0 +1,8 @@
+# меню ходьбы (значки слева) 
+goto C02_01
+skip 100
+advance 20
+press START 3
+advance 40
+dump2d @OUT@/walkmenu
+shot @OUT@/walkmenu.png

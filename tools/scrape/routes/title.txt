@@ -1,0 +1,12 @@
+# титул и список Request (скилл screen-recon)
+advance 1500
+dump2d @OUT@/title
+shot @OUT@/title.png
+press START 3
+advance 120
+dump2d @OUT@/menu
+shot @OUT@/menu.png
+tap 190 80 4
+advance 60
+dump2d @OUT@/request
+shot @OUT@/request.png
