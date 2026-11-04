@@ -332,7 +332,8 @@ fn run(a: Args) -> Result<(), String> {
         sunpetal_runtime::nds::set_scale(n);
     }
     if let Some(p) = &a.pack_2d {
-        sunpetal_runtime::nds::set_pack_2d(Some(p))?;
+        let n = sunpetal_runtime::nds::set_pack_2d(Some(p))?;
+        eprintln!("2D pack: {n} pictures");
     }
     for v in &a.pack_variant {
         let (g, n) = v.split_once('=').ok_or_else(|| format!("--pack-variant wants GROUP=VARIANT, got {v}"))?;
