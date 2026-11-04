@@ -79,6 +79,9 @@ struct Args {
     /// A 2D pack (a folder of pictures or a data file with a 2D part) that replaces sprites and background layers.
     #[arg(long, value_name = "DIR|FILE")]
     pack_2d: Option<PathBuf>,
+    /// The variant of a 2D pack group to draw, `group=variant` (repeatable; `original` is the game's own sprites).
+    #[arg(long, value_name = "GROUP=VARIANT")]
+    pack_variant: Vec<String>,
     /// The 3D's internal resolution (1-8 times the DS's) for `--shot`.
     #[arg(long, value_name = "N")]
     scale: Option<usize>,
@@ -330,6 +333,10 @@ fn run(a: Args) -> Result<(), String> {
     }
     if let Some(p) = &a.pack_2d {
         sunpetal_runtime::nds::set_pack_2d(Some(p))?;
+    }
+    for v in &a.pack_variant {
+        let (g, n) = v.split_once('=').ok_or_else(|| format!("--pack-variant wants GROUP=VARIANT, got {v}"))?;
+        sunpetal_runtime::nds::set_pack_2d_variant(g, n);
     }
     let mut extras = sunpetal_runtime::nds::Extras::default();
     if let Some(v) = a.outline {
