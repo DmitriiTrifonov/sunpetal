@@ -1,0 +1,26 @@
+# к головоломке с диском (пока до экрана JACK; выбор порта Type-H не найден): второй слот сохранения автора (день 1), картина в номере, чемодан, JACK, порт Type-H.
+# Нужно сохранение со слотом «Data-02» (начало дня 1): --save build/user.sav (копия сохранения рядом с ROM).
+advance 1500
+tap 190 50 4
+advance 90
+tap 190 20 4
+advance 200
+@REPEAT 300 advance 5
+press UP 60
+advance 10
+press LEFT 40
+press UP 80
+advance 10
+press A 3
+advance 150
+@REPEAT 8 advance 5
+run 100
+tap 182 155 4
+run 600
+tap 153 93 4
+run 40
+dump2d @OUT@/jack_plaque
+shot @OUT@/jack_plaque.png
+run 120
+dump2d @OUT@/jack
+shot @OUT@/jack.png

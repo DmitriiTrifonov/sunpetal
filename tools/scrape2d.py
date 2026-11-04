@@ -30,6 +30,9 @@ def run_route(path, rom, save, lang, out, pack=None, variants=()):
             continue
         if line.startswith('goto ') and goto is None:
             goto = line.split()[1]
+        elif line.startswith('@REPEAT '):
+            _, n, rest = line.split(' ', 2)
+            cmds += [rest.replace('@OUT@', out)] * int(n)
         else:
             cmds.append(line.replace('@OUT@', out))
     cmds.append('quit')
