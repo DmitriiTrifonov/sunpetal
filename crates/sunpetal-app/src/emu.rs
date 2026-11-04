@@ -203,6 +203,27 @@ pub fn spawn(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) -> std:
     std::thread::Builder::new().name("machine".into()).stack_size(64 << 20).spawn(move || run(cfg, shared, audio)).expect("the machine's thread")
 }
 
+/// What changes when the 2D pack is rewritten: the number of files and the newest time (a folder), or the file's time and size.
+fn pack_stamp(path: &std::path::Path) -> (usize, Option<std::time::SystemTime>) {
+    let newest = |m: std::fs::Metadata| m.modified().ok();
+    if path.is_dir() {
+        let mut count = 0;
+        let mut newest_time: Option<std::time::SystemTime> = None;
+        for e in std::fs::read_dir(path).into_iter().flatten().flatten() {
+            if let Ok(m) = e.metadata() {
+                count += 1;
+                newest_time = newest_time.max(newest(m));
+            }
+        }
+        (count, newest_time)
+    } else {
+        match std::fs::metadata(path) {
+            Ok(m) => (m.len() as usize, newest(m)),
+            Err(_) => (0, None),
+        }
+    }
+}
+
 fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     // macOS throttles a thread of a window that was in the background (timers, low QoS) and may keep it slow after
     // the return: the machine's thread asks for the interactive class for good
@@ -219,6 +240,10 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         std::mem::forget(token);
     }
     *shared.status.lock().unwrap() = "booting".into();
+    // the 2D pack's folder or file is watched: pictures written by a generator show up without a restart
+    let watch_2d = cfg.pack_2d.clone();
+    let mut stamp_2d = watch_2d.as_deref().map(pack_stamp);
+    let mut stamp_pending = false;
     let goto = shared.goto.lock().unwrap().take();
     let booted = match goto {
         // through the menu of requests to the scene, as the debugger does; the session is kept (dropped, it would end the machine)
@@ -318,6 +343,23 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         // the window's 3D is drawn at scale x samples at most (`effects::MSAA_BUDGET`, the video card's is larger): more would not keep up
         extras.msaa = crate::effects::effective_msaa(shared.scale.load(Ordering::Relaxed) as u32, extras.msaa, shared.renderer.load(Ordering::Relaxed) == 1);
         nds::set_extras(extras);
+        if let (Some(path), true) = (&watch_2d, nds::vblanks().is_multiple_of(30)) {
+            let now = pack_stamp(path);
+            if Some(now) != stamp_2d {
+                // changed: reloaded when it holds still for the next look (a generator writes many files)
+                stamp_2d = Some(now);
+                stamp_pending = true;
+            } else if stamp_pending {
+                stamp_pending = false;
+                match nds::set_pack_2d(Some(path)) {
+                    Ok(n) => eprintln!("2D pack reloaded: {} pictures", n),
+                    Err(e) => eprintln!("2D pack not reloaded: {}", e),
+                }
+                showing_originals = false;
+                shared.originals.store(false, Ordering::Relaxed);
+                groups_told = false;
+            }
+        }
         if let Some(pack) = shared.pack_swap.lock().unwrap().take() {
             if let Err(e) = nds::set_texture_pack(pack.as_deref()) {
                 eprintln!("texture set: {}", e);

@@ -1048,7 +1048,12 @@ impl Default for Extras {
 /// Swaps the texture pack (a data file or a folder; `None`: the game's own pictures) between two frames. The
 /// pictures of the new pack are read as the game draws them; an error keeps the pack that was.
 pub fn set_texture_pack(path: Option<&std::path::Path>) -> Result<(), String> {
-    nds(|d| d.stash = None);
+    nds(|d| {
+        // a new texture pack ends the comparison with the originals: the 2D pack set aside comes back
+        if let Some((_, two_d)) = d.stash.take() {
+            d.gpu.pack = two_d;
+        }
+    });
     nds(|d| match path {
         Some(p) => d.load_pack(p),
         None => {
@@ -1068,7 +1073,10 @@ pub fn set_pack_2d(path: Option<&std::path::Path>) -> Result<usize, String> {
     };
     let n = pack.as_ref().map_or(0, |p| p.len());
     nds(|d| {
-        d.stash = None;
+        // a new 2D pack ends the comparison with the originals: the 3D pack set aside comes back
+        if let Some((tex, _)) = d.stash.take() {
+            d.texpack.pack = tex;
+        }
         d.gpu.pack = pack;
     });
     Ok(n)
