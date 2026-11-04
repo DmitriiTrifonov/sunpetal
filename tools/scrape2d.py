@@ -22,7 +22,7 @@ def pack_keys(pack):
     return keys
 
 
-def run_route(path, rom, save, lang, out, pack=None, variants=()):
+def run_route(path, rom, save, lang, out, pack=None, variants=(), data=None):
     cmds, goto = [], None
     for line in open(path):
         line = line.strip()
@@ -42,6 +42,8 @@ def run_route(path, rom, save, lang, out, pack=None, variants=()):
     args = [exe, rom, '--save', tmp, '--scale', str(SCALE), '--repl', '--lang', lang]
     if goto:
         args += ['--goto', goto, '--autoplay']
+    if data:
+        args += ['--data', data]
     if pack:
         args += ['--pack-2d', pack]
         for v in variants:
@@ -59,6 +61,7 @@ def main():
     ap.add_argument('--pack', default='build/2d-pack-case')
     ap.add_argument('--out', default='build/scrape2d')
     ap.add_argument('--variant', action='append', default=[], help='ГРУППА=ВАРИАНТ для прогона с пакетом (например digits=nunito)')
+    ap.add_argument('--data', help='sunpetal.data с переводом (для --lang ru)')
     ap.add_argument('--with-pack', action='store_true', help='ещё раз прогнать маршрут с --pack-2d: снимки *_pack.png рядом с обычными')
     a = ap.parse_args()
     names = a.routes or sorted(os.path.splitext(os.path.basename(p))[0] for p in glob.glob(os.path.join(ROOT, 'tools/scrape/routes/*.txt')))
@@ -67,12 +70,12 @@ def main():
         out = os.path.join(a.out, a.lang, name)
         shutil.rmtree(out, ignore_errors=True)
         os.makedirs(out)
-        run_route(os.path.join(ROOT, 'tools/scrape/routes', name + '.txt'), a.rom, a.save, a.lang, out)
+        run_route(os.path.join(ROOT, 'tools/scrape/routes', name + '.txt'), a.rom, a.save, a.lang, out, data=a.data)
         if a.with_pack:
             out2 = out + '_pack'
             shutil.rmtree(out2, ignore_errors=True)
             os.makedirs(out2)
-            run_route(os.path.join(ROOT, 'tools/scrape/routes', name + '.txt'), a.rom, a.save, a.lang, out2, a.pack, a.variant)
+            run_route(os.path.join(ROOT, 'tools/scrape/routes', name + '.txt'), a.rom, a.save, a.lang, out2, a.pack, a.variant, a.data)
             print(f'  с пакетом: {out2}')
         total = missing = 0
         for idx in glob.glob(os.path.join(out, '*', 'index.csv')):
