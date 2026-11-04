@@ -5,6 +5,7 @@
   kanban.py add "название" --r 6 --i 1 --c 0.8 --e 3 [--theme] [--p0] [--col backlog] [--note ...]
   (add ... --after K-001,K-002: не выше этих задач)
   kanban.py move ID колонка          (backlog|doing|check|blocked|done)
+  kanban.py verify ID [--off]        (нужна ручная проверка автора: E+1)
   kanban.py p0 ID                    (поднять в критичные)
 """
 import argparse, json, pathlib, datetime
@@ -27,8 +28,13 @@ def save(d):
     DB.write_text(json.dumps(d, ensure_ascii=False, indent=1))
 
 
+def eff_e(t):
+    """Трудоёмкость с проверкой автора: verify = +1 (время автора дороже всего)."""
+    return t["e"] + (1 if t.get("verify") else 0)
+
+
 def score(t):
-    s = t["r"] * t["i"] * t["c"] / t["e"]
+    s = t["r"] * t["i"] * t["c"] / eff_e(t)
     return s * (BOOST if t.get("theme") else 1)
 
 
@@ -56,7 +62,7 @@ def render():
          f"Обновлён {datetime.date.today()} (`python3 tools/kanban/kanban.py render`; данные — `tools/kanban/tasks.json`).", "",
          "## Правила", "",
          "- **Порядок.** Берём сверху «Очереди»: сначала критичные (P0), затем по убыванию RICE. Не в порядке — только по слову автора.",
-         "- **RICE = R·I·C / E.** R — охват 1–10 (доля игроков и сессий), I — влияние 0,25 / 0,5 / 1 / 2 / 3, C — уверенность 0,5–1, E — трудоёмкость из `roadmap.json` (1, 2, 3, 5, 8, 13).",
+         "- **RICE = R·I·C / E.** R — охват 1–10 (доля игроков и сессий), I — влияние 0,25 / 0,5 / 1 / 2 / 3, C — уверенность 0,5–1, E — трудоёмкость из `roadmap.json` (1, 2, 3, 5, 8, 13). Если нужна ручная проверка автора (`verify`), E увеличивается на 1 (в таблице «3+1»).",
          f"- **Приоритет менеджера:** PS2-ассеты, графика и шрифты (метка ★) получают ×{BOOST}.",
          "- **Критичное (P0):** падение, потеря сохранения, нельзя пройти игру, поломка сборки или CI. Встаёт выше всех, идёт перед очередью, остальное ждёт.",
          f"- **WIP ≤ {WIP}** в «В работе». «Проверка» не считается: ждёт окна/геймпада автора.",
@@ -75,7 +81,7 @@ def render():
         if col in ("backlog", "blocked"):
             L += ["| # | ID | Задача | P0 | ★ | R | I | C | E | RICE | Примечание |", "|--:|---|---|:-:|:-:|--:|--:|--:|--:|--:|---|"]
             for n, t in enumerate(items, 1):
-                L.append(f"| {n} | {t['id']} | {t['t']} | {'**P0**' if t.get('p0') else ''} | {'★' if t.get('theme') else ''} | {t['r']} | {t['i']} | {t['c']} | {t['e']} | {score(t):.2f}{waiting(t, by)} | {t.get('note','')} |")
+                L.append(f"| {n} | {t['id']} | {t['t']} | {'**P0**' if t.get('p0') else ''} | {'★' if t.get('theme') else ''} | {t['r']} | {t['i']} | {t['c']} | {str(t['e']) + '+1' if t.get('verify') else t['e']} | {score(t):.2f}{waiting(t, by)} | {t.get('note','')} |")
         else:
             for t in items:
                 L.append(f"- **{t['id']}** {t['t']}" + (f" — {t['note']}" if t.get("note") else ""))
@@ -92,9 +98,10 @@ def main():
     a.add_argument("title"); a.add_argument("--r", type=float, default=5); a.add_argument("--i", type=float, default=1)
     a.add_argument("--c", type=float, default=0.8); a.add_argument("--e", type=float, default=3)
     a.add_argument("--theme", action="store_true"); a.add_argument("--p0", action="store_true")
-    a.add_argument("--after", default=""); a.add_argument("--col", default="backlog"); a.add_argument("--note", default="")
+    a.add_argument("--after", default=""); a.add_argument("--col", default="backlog"); a.add_argument("--note", default=""); a.add_argument("--verify", action="store_true")
     m = sub.add_parser("move"); m.add_argument("id"); m.add_argument("col", choices=COLS)
     p = sub.add_parser("p0"); p.add_argument("id")
+    v = sub.add_parser("verify"); v.add_argument("id"); v.add_argument("--off", action="store_true")
     x = ap.parse_args()
     d = load()
     if x.cmd == "add":
@@ -102,8 +109,14 @@ def main():
         t = {"id": f"K-{d['seq']:03}", "t": x.title, "col": x.col, "r": x.r, "i": x.i, "c": x.c, "e": x.e, "note": x.note}
         if x.theme: t["theme"] = True
         if x.p0: t["p0"] = True
+        if x.verify: t["verify"] = True
         if x.after: t["after"] = x.after.split(",")
         d["tasks"].append(t); save(d); print(t["id"], f"RICE {score(t):.2f}")
+    elif x.cmd == "verify":
+        t = next(t for t in d["tasks"] if t["id"] == x.id)
+        if x.off: t.pop("verify", None)
+        else: t["verify"] = True
+        save(d)
     elif x.cmd in ("move", "p0"):
         t = next(t for t in d["tasks"] if t["id"] == x.id)
         if x.cmd == "move":
