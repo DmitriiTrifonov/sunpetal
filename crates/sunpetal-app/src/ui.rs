@@ -130,6 +130,7 @@ impl Menu {
         for (group, names) in &self.pack_groups {
             let label = match group.as_str() {
                 "digits" => tx("Device digits", "Цифры устройства"),
+                "labels" => tx("Device labels", "Надписи устройства"),
                 g => g.to_string(),
             };
             let shown = |v: &str| if v == "original" { tx("original (pixel)", "оригинал (пиксельные)") } else { variant_label(v) };
