@@ -4,7 +4,7 @@
 //!     sunpetal-app ROM.nds [--out DIR] [--save FILE] [--mute] [--res N] [--menu]
 //!                          [--dump-textures DIR] [--texture-pack DIR]
 //!
-//! F1 or Esc: the settings menu (video, sound, keys, profiles). Hotkeys: F2 changes the layout, F8 the game's menu in the single layout while the screen follows the game (START and the lower screen, B and back), else the screen shown (or the panel of the overlay layout), F9 saves the recording alone (the last 5 seconds), F3
+//! Esc (or the pad's Start): the short menu; F1: the full settings menu (video, sound, keys, profiles). Hotkeys: F2 changes the layout, F8 the game's menu in the single layout while the screen follows the game (START and the lower screen, B and back), else the screen shown (or the panel of the overlay layout), F9 saves the recording alone (the last 5 seconds), F3
 //! the filter, / (the key beside the right Shift), P or F10 writes the picture and its parts to `artifacts/shots` (for bug reports), F4 and F5 the 3D's internal resolution (1-8 times the DS's), F11 full screen, Tab
 //! (held) runs without waiting for the clock. The keys of the DS's buttons are set in the menu
 //! (default: arrows = D-pad, Z = A, X = B, S = X, A = Y, Q = L, W = R, Enter = START, Backspace =
@@ -494,14 +494,30 @@ impl App {
         }
     }
 
-    fn toggle_menu(&mut self) {
-        self.menu.short = !(self.settings.ui.full_menu || self.force_full);
+    /// F12: the game's own pictures instead of the packs (the 3D textures and the 2D pictures), and back.
+    fn toggle_originals(&mut self) {
+        let on = !self.shared.originals.load(Ordering::Relaxed);
+        self.shared.originals.store(on, Ordering::Relaxed);
+        let said = if on { "Оригинальная графика (F12 возвращает пакеты)" } else { "Пакеты графики вернулись" };
+        self.toast = Some((said.to_string(), std::time::Instant::now()));
+    }
+
+    /// Opens or closes the menu: the short one, or with `full` (F1) the full one for this opening.
+    fn toggle_menu_as(&mut self, full: bool) {
+        if !self.menu.open {
+            self.menu.forced_full = full;
+        }
+        self.menu.short = !(self.settings.ui.full_menu || self.force_full || self.menu.forced_full);
         self.menu.toggle();
         self.pen_down = false;
         self.shared.input.lock().unwrap().pen = None;
         if !self.menu.open {
             self.save();
         }
+    }
+
+    fn toggle_menu(&mut self) {
+        self.toggle_menu_as(false);
     }
 
     /// The pad's events since the last frame: the buttons (the game's, or the menus'), the sticks.
@@ -938,7 +954,7 @@ impl App {
                 // the line goes with the picture it was made for (empty when that picture has the game's own letters)
                 let vline = shared.dialogue_text.lock().unwrap().clone();
                 let vwide = *wide_now as f32;
-                menu.short = !(settings.ui.full_menu || *force_full);
+                menu.short = !(settings.ui.full_menu || *force_full || menu.forced_full);
                 if menu.open || pad_on || corner_on || stats_on || fade > 0.0 || vline.is_some() || cursor.is_some() || toast.is_some() {
                     let held = touch_held.clone();
                     let mut f = |ctx: &egui::Context| {
@@ -993,7 +1009,13 @@ impl App {
                         }
                         if menu.open {
                             menu.pack_groups = shared.pack_groups.lock().unwrap().clone();
+                            menu.originals = shared.originals.load(Ordering::Relaxed);
+                            menu.dump_2d_new = shared.dump_2d_new.load(Ordering::Relaxed);
+                            menu.dump_on_touch = shared.dump_on_touch.load(Ordering::Relaxed);
                             action = menu.show(ctx, settings, &names, internal);
+                            shared.originals.store(menu.originals, Ordering::Relaxed);
+                            shared.dump_2d_new.store(menu.dump_2d_new, Ordering::Relaxed);
+                            shared.dump_on_touch.store(menu.dump_on_touch, Ordering::Relaxed);
                         }
                         if let Some(msg) = &toast {
                             paint_toast(ctx, msg);
@@ -1188,7 +1210,8 @@ impl ApplicationHandler for App {
                     return;
                 }
                 match code {
-                    KeyCode::F1 | KeyCode::Escape => self.toggle_menu(),
+                    KeyCode::F1 => self.toggle_menu_as(true),
+                    KeyCode::Escape => self.toggle_menu_as(false),
                     KeyCode::Tab if self.settings.emulation.fast_key => self.shared.fast.store(true, Ordering::Relaxed),
                     KeyCode::F2 => self.cycle_layout(),
                     KeyCode::F8 => self.swap_screen(),
@@ -1204,6 +1227,7 @@ impl ApplicationHandler for App {
                     KeyCode::PageUp => self.scroll = (self.scroll - 96.0).max(0.0),
                     KeyCode::PageDown => self.scroll = (self.scroll + 96.0).min(192.0),
                     KeyCode::F11 => self.settings.video.fullscreen = !self.settings.video.fullscreen,
+                    KeyCode::F12 => self.toggle_originals(),
                     _ => {}
                 }
             }

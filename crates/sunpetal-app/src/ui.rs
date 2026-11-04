@@ -1,4 +1,4 @@
-//! The settings menu, drawn over the game with egui (F1, or Esc, opens and closes it). The text is
+//! The settings menu, drawn over the game with egui (Esc or Start: the short one; F1: the full one). The text is
 //! in the language of the system (or the one chosen in the menu): English and Russian, which
 //! egui's bundled Ubuntu font covers. More languages come with the translation packs (docs/PLAN.md,
 //! stage 9).
@@ -39,6 +39,13 @@ pub struct Menu {
     focus_style: bool,
     /// The 2D pack's groups of variant pictures and their variants (set by the window from the emulation).
     pub pack_groups: std::collections::BTreeMap<String, Vec<String>>,
+    /// The game's own pictures instead of the packs (F12; the window copies it from and back to the emulation).
+    pub originals: bool,
+    /// Debug: the 2D dumps (the window copies them from and back to the emulation).
+    pub dump_2d_new: bool,
+    pub dump_on_touch: bool,
+    /// Opened with F1: the full menu for this opening, whatever `[ui] full_menu` says.
+    pub forced_full: bool,
 }
 
 /// What the short menu holds, in order; everything else (effects, keys, profiles, debug...) is the full menu's.
@@ -68,6 +75,10 @@ impl Menu {
             main_ask: false,
             focus_style: false,
             pack_groups: Default::default(),
+            originals: false,
+            dump_2d_new: false,
+            dump_on_touch: false,
+            forced_full: false,
         }
     }
 
@@ -195,6 +206,7 @@ impl Menu {
                         });
                     ui.checkbox(&mut s.video.linear, tx("Smooth when stretched (linear filter)", "Сглаживание при растяжении (линейный фильтр)"));
                     self.variant_rows(ui, s, tx);
+                    ui.checkbox(&mut self.originals, tx("The game's own pictures instead of the packs (F12)", "Оригинальная графика вместо пакетов (F12)"));
                 }
                 Block::Saves => {
                     ui.heading(tx("Saves", "Сохранения"));
@@ -571,10 +583,12 @@ impl Menu {
             egui::CollapsingHeader::new(tx("Emulation", "Эмуляция")).default_open(true).show(ui, |ui| {
                 ui.checkbox(&mut s.emulation.pause_in_menu, tx("Pause while the menu is open", "Пауза, пока открыто меню"));
                 ui.checkbox(&mut s.emulation.click_skips_logos, tx("Click skips the studio logos at the start", "Клик пропускает логотипы студий в начале"));
-                ui.label(tx("F2 layout, F3 filter, F4/F5 3D resolution, F6 effects, F7 skip, F11 full screen, Tab fast forward, F1 or Esc menu.", "F2 раскладка, F3 фильтр, F4/F5 разрешение 3D, F6 эффекты, F7 пропуск, F11 полный экран, Tab ускорение, F1 или Esc меню."));
+                ui.label(tx("F2 layout, F3 filter, F4/F5 3D resolution, F6 effects, F7 skip, F11 full screen, Tab fast forward, F1 full menu, Esc short menu.", "F2 раскладка, F3 фильтр, F4/F5 разрешение 3D, F6 эффекты, F7 пропуск, F11 полный экран, Tab ускорение, F1 полное меню, Esc короткое."));
             });
             egui::CollapsingHeader::new(tx("Debug", "Отладка")).show(ui, |ui| {
                 ui.checkbox(&mut s.video.show_stats, tx("Show speed figures", "Показывать скорость"));
+                ui.checkbox(&mut self.dump_2d_new, tx("Write each new 2D picture with its key to artifacts/shots/new_2d", "Писать каждую новую 2D-картинку с ключом в artifacts/shots/new_2d"));
+                ui.checkbox(&mut self.dump_on_touch, tx("Write the frames after each touch to artifacts/shots/touch_N (the pressed knob)", "Писать кадры после каждого касания в artifacts/shots/touch_N (нажатая ручка)"));
                 ui.checkbox(&mut s.emulation.fast_key, tx("Tab fast-forwards while held", "Tab ускоряет, пока зажат"));
                 ui.checkbox(&mut s.emulation.fast_button, tx("Fast-forward button beside the menu button (phone, no on-screen buttons)", "Кнопка ускорения рядом с кнопкой меню (телефон, без экранных кнопок)"));
                 ui.checkbox(&mut s.emulation.skip_button, tx("Skip button beside them (the screen goes dark and the game races on until it waits for you)", "Кнопка пропуска рядом с ними (экран темнеет, игра мчится вперёд, пока не станет ждать тебя)"));
@@ -782,7 +796,7 @@ mod short_tests {
         for gone in ["Effects", "Debug", "Profiles", "Controls", "Emulation", "Reset all", "texture_pack"] {
             assert!(!body.contains(gone), "{} is for the full menu", gone);
         }
-        for kept in ["Volume", "Window size", "Screen layout", "3D resolution", "Dialogue font", "self.save_row", "Exit to the main menu"] {
+        for kept in ["Volume", "Window size", "Screen layout", "3D resolution", "Dialogue font", "self.originals", "self.save_row", "Exit to the main menu"] {
             assert!(body.contains(kept), "{}", kept);
         }
     }

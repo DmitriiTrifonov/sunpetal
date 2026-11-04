@@ -183,6 +183,8 @@ pub struct Nds {
     gx: gx::Gx,
     snd: sound::Sound,
     texpack: texpack::TexPack,
+    /// The packs set aside while the game's own pictures show (`set_originals`): the texture pack and the 2D pack.
+    stash: Option<(std::sync::Arc<texpack::Pack>, Option<std::sync::Arc<pack2d::Pack2d>>)>,
     /// The 3D picture the rendering engine drew last, 256x192 (`render3d`).
     frame3d: Vec<u32>,
     /// The 3D frame started and not yet finished (`settle_3d`).
@@ -273,6 +275,7 @@ impl Nds {
             gx: gx::Gx::new(),
             snd: sound::Sound::new(),
             texpack: texpack::TexPack::new(),
+            stash: None,
             frame3d: vec![0; 256 * 192],
             pending3d: None,
             frame3d_wide: 0,
@@ -1045,6 +1048,7 @@ impl Default for Extras {
 /// Swaps the texture pack (a data file or a folder; `None`: the game's own pictures) between two frames. The
 /// pictures of the new pack are read as the game draws them; an error keeps the pack that was.
 pub fn set_texture_pack(path: Option<&std::path::Path>) -> Result<(), String> {
+    nds(|d| d.stash = None);
     nds(|d| match path {
         Some(p) => d.load_pack(p),
         None => {
@@ -1063,8 +1067,25 @@ pub fn set_pack_2d(path: Option<&std::path::Path>) -> Result<usize, String> {
         None => None,
     };
     let n = pack.as_ref().map_or(0, |p| p.len());
-    nds(|d| d.gpu.pack = pack);
+    nds(|d| {
+        d.stash = None;
+        d.gpu.pack = pack;
+    });
     Ok(n)
+}
+
+/// Shows the game's own pictures (`true`) or brings the packs back (`false`), at once and without reading a file: the
+/// texture pack and the 2D pack are set aside as they are, so the switch is a swap. Loading another pack ends it.
+pub fn set_originals(on: bool) {
+    nds(|d| match (on, d.stash.take()) {
+        (true, None) => d.stash = Some((std::mem::replace(&mut d.texpack.pack, std::sync::Arc::new(texpack::Pack::empty())), d.gpu.pack.take())),
+        (true, stash) => d.stash = stash,
+        (false, Some((tex, two_d))) => {
+            d.texpack.pack = tex;
+            d.gpu.pack = two_d;
+        }
+        (false, None) => {}
+    })
 }
 
 /// The 2D pack's groups of variant pictures and the variants of each (`pack2d`: `…@group.variant.png`).

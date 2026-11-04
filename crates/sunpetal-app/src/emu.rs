@@ -95,6 +95,12 @@ pub struct Shared {
     pub fast: AtomicBool,
     /// Skip: run without waiting until the picture stops changing (the game waits for the player).
     pub skip: AtomicBool,
+    /// Show the game's own pictures instead of the packs (F12): the packs are set aside, not dropped.
+    pub originals: AtomicBool,
+    /// Debug menu: write the 2D pictures not seen before to artifacts/shots/new_2d (the same as SUNPETAL_DUMP_2D_NEW=1).
+    pub dump_2d_new: AtomicBool,
+    /// Debug menu: each touch of the lower screen writes the frames after it to artifacts/shots/touch_N (SUNPETAL_DUMP_ON_TOUCH=1).
+    pub dump_on_touch: AtomicBool,
     /// Write the picture and its parts to artifacts/shots (F10).
     pub dump: AtomicBool,
     /// What the window knows of the picture, as the inside of a JSON object, for the dump's file (set with `dump`).
@@ -171,6 +177,9 @@ impl Shared {
             wide_frame: Mutex::new(None),
             fast: AtomicBool::new(false),
             skip: AtomicBool::new(false),
+            originals: AtomicBool::new(false),
+            dump_2d_new: AtomicBool::new(std::env::var_os("SUNPETAL_DUMP_2D_NEW").is_some_and(|v| v != "0")),
+            dump_on_touch: AtomicBool::new(std::env::var_os("SUNPETAL_DUMP_ON_TOUCH").is_some_and(|v| v != "0")),
             dialogue: AtomicBool::new(false),
             dialogue_text: Mutex::new(None),
             crisp_text: AtomicBool::new(false),
@@ -234,12 +243,10 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     let pack_log = std::env::var_os("SUNPETAL_PACK_LOG").is_some();
     // SUNPETAL_DUMP_ON_TOUCH=1: each touch of the lower screen writes the picture and the 2D on show (with their keys) for
     // the frames right after it, to artifacts/shots/touch_N: what a press shows for a moment (the knob pressed) gets its keys
-    let touch_dump = std::env::var_os("SUNPETAL_DUMP_ON_TOUCH").is_some_and(|v| v != "0");
     let (mut pen_was, mut touch_frames) = (false, 0u32);
     // SUNPETAL_DUMP_2D_NEW=1: every frame drawn, the 2D pictures not seen before go to artifacts/shots/new_2d (with their
     // keys in index.csv): what shows only for a frame or two (the dial's digit turning) is caught whatever the input
     let mut groups_told = false;
-    let dump_new = std::env::var_os("SUNPETAL_DUMP_2D_NEW").is_some_and(|v| v != "0");
     let mut last_placed = usize::MAX;
     let (mut dry, mut partial) = (0u32, 0u32);
     // the side of the dialogue portrait and the panel's middle, last seen (the window draws the text with them)
@@ -255,6 +262,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     let mut prev_t = nds::timing();
     let mut last_flush = Instant::now();
     nds::track_script();
+    let mut showing_originals = false;
     let (mut still, mut skipped, mut last_print, mut idle_for, mut wait_for) = (0u32, 0u32, 0u64, 0u32, 0u32);
     let (mut step, mut no_step) = ((0u32, 0u32), 0u32);
     let mut racing;
@@ -288,7 +296,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         {
             let i = shared.input.lock().unwrap();
             nds::set_input(i.keys, i.pen);
-            if touch_dump && i.pen.is_some() && !pen_was {
+            if shared.dump_on_touch.load(Ordering::Relaxed) && i.pen.is_some() && !pen_was {
                 touch_frames = 8;
             }
             pen_was = i.pen.is_some();
@@ -314,6 +322,14 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             if let Err(e) = nds::set_texture_pack(pack.as_deref()) {
                 eprintln!("texture set: {}", e);
             }
+            // a pack chosen in the menu ends the comparison with the originals
+            shared.originals.store(false, Ordering::Relaxed);
+            showing_originals = false;
+        }
+        let want_originals = shared.originals.load(Ordering::Relaxed);
+        if want_originals != showing_originals {
+            nds::set_originals(want_originals);
+            showing_originals = want_originals;
         }
         nds::set_draw(draw);
         let t0 = Instant::now();
@@ -361,7 +377,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             let n = nds::dump_2d(&std::path::PathBuf::from(format!("{}_2d", stem.display())));
             eprintln!("touch dump: {} ({} 2D images)", stem.display(), n);
         }
-        if dump_new && draw {
+        if shared.dump_2d_new.load(Ordering::Relaxed) && draw {
             let n = nds::dump_2d(std::path::Path::new("artifacts/shots/new_2d"));
             if n > 0 {
                 eprintln!("new 2D: vblank {}, {} pictures", nds::vblanks(), n);
