@@ -147,6 +147,34 @@ impl Menu {
         }
     }
 
+    /// The graphics level: the game's own pictures, the packs, or (later) the packs with the PS2 models. `originals` is
+    /// what the machine reads (F12 swaps it for the session); the choice is kept in `video.graphics`.
+    fn graphics_row(&mut self, ui: &mut egui::Ui, s: &mut Settings, tx: &dyn Fn(&'static str, &'static str) -> String) {
+        let now = if self.originals {
+            "standard"
+        } else if s.video.graphics == "ultimate" {
+            "ultimate"
+        } else {
+            "enhanced"
+        };
+        let name = |v: &str| match v {
+            "standard" => tx("Standard DS", "Стандартный DS"),
+            "ultimate" => tx("Ultimate", "Ультимативный"),
+            _ => tx("Enhanced", "Улучшенный"),
+        };
+        let mut pick = now.to_string();
+        egui::ComboBox::from_label(tx("Graphics (F12: standard / enhanced)", "Графика (F12: стандартный / улучшенный)")).selected_text(name(now)).show_ui(ui, |ui| {
+            ui.selectable_value(&mut pick, "standard".to_string(), name("standard"));
+            ui.selectable_value(&mut pick, "enhanced".to_string(), name("enhanced"));
+            // the PS2 models are not made yet (K-110, K-111): the entry is shown, not offered
+            ui.add_enabled_ui(false, |ui| ui.selectable_label(false, format!("{} ({})", name("ultimate"), tx("PS2 models: later", "модели PS2: позже"))));
+        });
+        if pick != now {
+            self.originals = pick == "standard";
+            s.video.graphics = pick;
+        }
+    }
+
     #[cfg(any(target_os = "android", target_os = "ios"))]
     fn save_row(&mut self, _: &mut egui::Ui, _: &dyn Fn(&'static str, &'static str) -> String, _: &mut Option<Action>) {}
 
@@ -207,7 +235,7 @@ impl Menu {
                         });
                     ui.checkbox(&mut s.video.linear, tx("Smooth when stretched (linear filter)", "Сглаживание при растяжении (линейный фильтр)"));
                     self.variant_rows(ui, s, tx);
-                    ui.checkbox(&mut self.originals, tx("The game's own pictures instead of the packs (F12)", "Оригинальная графика вместо пакетов (F12)"));
+                    self.graphics_row(ui, s, tx);
                 }
                 Block::Saves => {
                     ui.heading(tx("Saves", "Сохранения"));
@@ -797,7 +825,7 @@ mod short_tests {
         for gone in ["Effects", "Debug", "Profiles", "Controls", "Emulation", "Reset all", "texture_pack"] {
             assert!(!body.contains(gone), "{} is for the full menu", gone);
         }
-        for kept in ["Volume", "Window size", "Screen layout", "3D resolution", "Dialogue font", "self.originals", "self.save_row", "Exit to the main menu"] {
+        for kept in ["Volume", "Window size", "Screen layout", "3D resolution", "Dialogue font", "self.graphics_row", "self.save_row", "Exit to the main menu"] {
             assert!(body.contains(kept), "{}", kept);
         }
     }

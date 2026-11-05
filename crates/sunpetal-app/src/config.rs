@@ -69,6 +69,10 @@ pub struct Video {
     /// The variant drawn for each group of the 2D pack's variant pictures (`digits`: the dial's digits; `original`:
     /// the game's own sprites); a group left out draws its default. Last: a table.
     pub pack_variants: BTreeMap<String, String>,
+    /// The graphics level chosen in the short menu: `standard` (the game's own pictures: no packs), `enhanced` (the
+    /// packs: PS2 textures and the redrawn 2D) or `ultimate` (the same and the PS2 models, K-111: not made yet, so it
+    /// draws as `enhanced`). F12 swaps `standard` and `enhanced` for the session.
+    pub graphics: String,
 }
 
 /// The engine a fresh setting names: the graphics card everywhere (faster in every measured setting
@@ -115,6 +119,7 @@ impl Default for Video {
             renderer: default_renderer().into(),
             window: [512, 768],
             pack_variants: BTreeMap::new(),
+            graphics: "enhanced".into(),
         }
     }
 }
@@ -551,6 +556,18 @@ pub fn shape_name(size: [u32; 2]) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
+    /// The graphics level is `enhanced` unless the settings file says otherwise, and it survives the file.
+    #[test]
+    fn the_graphics_level_defaults_to_enhanced_and_is_kept() {
+        assert_eq!(Settings::default().video.graphics, "enhanced");
+        let mut s = Settings::default();
+        s.video.graphics = "standard".into();
+        let back: Settings = toml::from_str(&toml::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back.video.graphics, "standard");
+        let old: Settings = toml::from_str("[video]\nres = 2\n").unwrap();
+        assert_eq!(old.video.graphics, "enhanced");
+    }
+
     /// The internal size follows `res` alone; the window scales it without bending a pixel (the
     /// screen keeps 4:3 at every `res` and window), and `res` is held to 1-8.
     #[test]

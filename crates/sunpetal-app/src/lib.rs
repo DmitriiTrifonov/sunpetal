@@ -1488,6 +1488,7 @@ fn prepare(o: Options, scripted: bool) -> (App, Arc<Shared>, Option<cpal::Stream
     shared.pipeline.store(settings.emulation.pipeline, Ordering::Relaxed);
     *shared.extras.lock().unwrap() = settings.effects.extras();
     apply_variants(&settings.video.pack_variants);
+    shared.originals.store(settings.video.graphics == "standard", Ordering::Relaxed);
     // the stream must outlive the machine's use of the ring
     let (ring, stream) = if o.mute || scripted {
         (None, None)
