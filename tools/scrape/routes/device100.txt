@@ -1,0 +1,10 @@
+# устройство Катарины (чемодан): циферблат сверху; скилл screen-recon
+goto C02_01
+skip 100
+advance 20
+press START 3
+advance 40
+tap 25 43 4
+advance 100
+dump2d @OUT@/d100
+shot @OUT@/d100.png

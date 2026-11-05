@@ -1,0 +1,114 @@
+# головоломка с диском: второй слот сохранения автора (день 1), картина в номере, чемодан, JACK, порт Type-H.
+# Нужно сохранение со слотом «Data-02» (начало дня 1): --save build/user.sav (копия сохранения рядом с ROM).
+advance 1500
+tap 190 50 4
+advance 90
+tap 190 20 4
+advance 200
+@REPEAT 300 advance 5
+press UP 60
+advance 10
+press LEFT 40
+press UP 80
+advance 10
+press A 3
+advance 150
+@REPEAT 8 advance 5
+run 100
+tap 182 155 4
+run 600
+tap 153 93 4
+run 40
+dump2d @OUT@/jack_plaque
+shot @OUT@/jack_plaque.png
+run 160
+dump2d @OUT@/jack
+shot @OUT@/jack.png
+tap 242 90 6
+run 60
+press A+LEFT 100
+press A+LEFT 100
+press A+DOWN 30
+press A+LEFT 60
+run 100
+dump2d @OUT@/t00
+press DOWN 1
+dump2d @OUT@/t01
+press DOWN 1
+dump2d @OUT@/t02
+press DOWN 1
+dump2d @OUT@/t03
+press DOWN 1
+dump2d @OUT@/t04
+press DOWN 1
+dump2d @OUT@/t05
+press DOWN 1
+dump2d @OUT@/t06
+press DOWN 1
+dump2d @OUT@/t07
+press DOWN 1
+dump2d @OUT@/t08
+press DOWN 1
+dump2d @OUT@/t09
+press DOWN 1
+dump2d @OUT@/t10
+press DOWN 1
+dump2d @OUT@/t11
+press DOWN 1
+dump2d @OUT@/t12
+press DOWN 1
+dump2d @OUT@/t13
+press DOWN 1
+dump2d @OUT@/t14
+press DOWN 1
+dump2d @OUT@/t15
+press DOWN 1
+dump2d @OUT@/t16
+press DOWN 1
+dump2d @OUT@/t17
+press DOWN 1
+dump2d @OUT@/t18
+press DOWN 1
+dump2d @OUT@/t19
+press DOWN 1
+dump2d @OUT@/t20
+press DOWN 1
+dump2d @OUT@/t21
+press DOWN 1
+dump2d @OUT@/t22
+press DOWN 1
+dump2d @OUT@/t23
+press DOWN 1
+dump2d @OUT@/t24
+press DOWN 1
+dump2d @OUT@/t25
+press DOWN 1
+dump2d @OUT@/t26
+press DOWN 1
+dump2d @OUT@/t27
+press DOWN 1
+dump2d @OUT@/t28
+press DOWN 1
+dump2d @OUT@/t29
+press DOWN 1
+dump2d @OUT@/t30
+press DOWN 1
+dump2d @OUT@/t31
+press DOWN 1
+dump2d @OUT@/t32
+press DOWN 1
+dump2d @OUT@/t33
+press DOWN 1
+dump2d @OUT@/t34
+press DOWN 1
+dump2d @OUT@/t35
+press DOWN 1
+dump2d @OUT@/t36
+press DOWN 1
+dump2d @OUT@/t37
+press DOWN 1
+dump2d @OUT@/t38
+press DOWN 1
+dump2d @OUT@/t39
+press DOWN 1
+dump2d @OUT@/t40

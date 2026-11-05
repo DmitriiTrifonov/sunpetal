@@ -262,6 +262,27 @@ impl Session {
         r
     }
 
+    /// The pen moves in a straight line from (x0, y0) to (x1, y1) over `frames` frames (a swipe), then lifts.
+    pub fn drag(&mut self, from: (i32, i32), to: (i32, i32), frames: u64) -> Result<(), String> {
+        for (x, y) in [from, to] {
+            if !(0..256).contains(&x) || !(0..192).contains(&y) {
+                return Err(format!("drag {} {}: the lower screen is 256 x 192", x, y));
+            }
+        }
+        let n = frames.max(1);
+        let mut r = Ok(());
+        for i in 0..n {
+            let t = if n > 1 { i as f64 / (n - 1) as f64 } else { 1.0 };
+            self.pen = Some((from.0 + ((to.0 - from.0) as f64 * t).round() as i32, from.1 + ((to.1 - from.1) as f64 * t).round() as i32));
+            r = self.run(1);
+            if r.is_err() {
+                break;
+            }
+        }
+        self.pen = None;
+        r
+    }
+
     /// Both screens of the next frame (it is run: only such frames are drawn) as a PNG.
     pub fn shot(&mut self, path: &Path) -> Result<(), String> {
         nds::set_draw(true);

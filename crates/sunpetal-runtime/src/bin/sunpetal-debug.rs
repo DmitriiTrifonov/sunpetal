@@ -181,6 +181,11 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             s.tap(number(w.first(), "X", None)?, number(w.get(1), "Y", None)?, number(w.get(2), "FRAMES", Some(9))?)?;
             done(json!({}))
         }
+        "drag" => {
+            let c = |i, n: &str| number::<i32>(w.get(i), n, None);
+            s.drag((c(0, "X0")?, c(1, "Y0")?), (c(2, "X1")?, c(3, "Y1")?), number(w.get(4), "FRAMES", Some(20))?)?;
+            done(json!({}))
+        }
         "shot" => {
             s.shot(std::path::Path::new(w.first().ok_or("shot FILE")?))?;
             done(json!({}))
