@@ -99,6 +99,10 @@ impl Session {
         (cfg.data, cfg.language) = data.map_or((None, None), |(d, l)| (Some(d), Some(l)));
         cfg.save = save;
         cfg.save_size = 65536;
+        // K-001: every 3D texture the game uses goes to DIR as a PNG with index.csv (like `sunpetal-headless --dump-textures`)
+        cfg.dump_textures = std::env::var_os("SUNPETAL_DUMP_TEXTURES").map(PathBuf::from);
+        // K-001: a texture pack (folder or .spdata) to look at the game with it, no window needed
+        cfg.texture_pack = std::env::var_os("SUNPETAL_TEXTURE_PACK").map(PathBuf::from);
         Session::open_cfg(cfg)
     }
 

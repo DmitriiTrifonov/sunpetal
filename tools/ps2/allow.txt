@@ -83,3 +83,6 @@
 32x32_5_f52b577cc022a8f9_81a5fddfe2b957b3.png  # radio
 32x32_5_f52b577cc022a8f9_8b649814193dfc61.png  # radio
 32x32_5_fd29a7acc8728d4d_e8d7d81df86a253e.png  # jukebox
+
+# third pass (2026-11-05, K-001a): same chain-link fence by eye (mae 12.8, edges 0.29)
+64x64_5_3782e3c56dfcbe2b_815d117186fa3e4d.png  # chain-link fence, A11
