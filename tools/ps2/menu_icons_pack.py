@@ -27,10 +27,10 @@ SETS = {
     'en': [('GUIDE\nBOOK', 51, 91, 8), ('MEMO', 102, 92, 8.5), ('SAVE', 153, 96, 8.5), ('GOODS', 204, 92, 8.5)],
     'ru': [('ГИД', 51, 92, 7), ('ЗАМЕТКИ', 102, 92, 5.6), ('ЗАПИСЬ', 153, 96, 6), ('ВЕЩИ', 204, 92, 7)],
     # K-005: the game's own languages (the firmware's language, SUNPETAL_FW_LANG); the captions as the DS draws them
-    'fr': [('GUIDE', 51, 91, 8), ('NOTES', 102, 92, 8), ('SAUVE\nGARDE', 153, 96, 7.5), ('OBJETS', 204, 92, 7.5)],
-    'de': [('REISE-\nFÜHRER', 51, 91, 7), ('NOTIZ', 102, 92, 8), ('SPEI-\nCHERN', 153, 96, 7.5), ('WAREN', 204, 92, 8)],
+    'fr': [('GUIDE', 51, 91, 8), ('NOTES', 102, 92, 8), ('SAUVE\nGARDE', 154.5, 98.5, 5.6), ('OBJETS', 204, 92, 7.5)],
+    'de': [('REISE-\nFÜHRER', 51, 91, 7), ('NOTIZ', 102, 92, 8), ('SPEI-\nCHERN', 154.5, 98.5, 5.6), ('WAREN', 204, 92, 8)],
     'it': [('GUIDA', 51, 91, 8), ('NOTE', 102, 92, 8.5), ('SALVA', 153, 96, 8), ('OGGETTI', 204, 92, 7)],
-    'es': [('GUÍA', 51, 91, 8), ('MEMO\nRANDO', 102, 92, 6.5), ('GUAR\nDAR', 153, 96, 7.5), ('OBJETOS', 204, 92, 7)],
+    'es': [('GUÍA', 51, 91, 8), ('MEMO\nRANDO', 102, 92, 6.5), ('GUAR\nDAR', 154.5, 98.5, 5.6), ('OBJETOS', 204, 92, 7)],
 }
 
 
@@ -103,7 +103,8 @@ def main():
         run('-background', 'none', '-density', 96 * X, tmp + f'/{n}.svg', tmp + f'/{n}.png')
     art = {'guide': tmp + '/guide_body.png', 'memo': a.art + '/memo_big.png', 'save': a.art + '/save_big.png', 'goods': a.art + '/goods_big.png'}
     if a.bodies:
-        art = {k: f'{a.bodies}/{k}_big.png' for k in art}
+        # a body missing from the folder stays the redrawn one (the card of GUIDE is the svg's)
+        art = {k: (f'{a.bodies}/{k}_big.png' if os.path.exists(f'{a.bodies}/{k}_big.png') else v) for k, v in art.items()}
     W, H = 256 * X, 192 * X
 
     def canvas(layers, out):
