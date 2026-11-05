@@ -26,6 +26,11 @@ ARROW = (0, 1)
 SETS = {
     'en': [('GUIDE\nBOOK', 51, 91, 8), ('MEMO', 102, 92, 8.5), ('SAVE', 153, 96, 8.5), ('GOODS', 204, 92, 8.5)],
     'ru': [('ГИД', 51, 92, 7), ('ЗАМЕТКИ', 102, 92, 5.6), ('ЗАПИСЬ', 153, 96, 6), ('ВЕЩИ', 204, 92, 7)],
+    # K-005: the game's own languages (the firmware's language, SUNPETAL_FW_LANG); the captions as the DS draws them
+    'fr': [('GUIDE', 51, 91, 8), ('NOTES', 102, 92, 8), ('SAUVE\nGARDE', 153, 96, 7.5), ('OBJETS', 204, 92, 7.5)],
+    'de': [('REISE-\nFÜHRER', 51, 91, 7), ('NOTIZ', 102, 92, 8), ('SPEI-\nCHERN', 153, 96, 7.5), ('WAREN', 204, 92, 8)],
+    'it': [('GUIDA', 51, 91, 8), ('NOTE', 102, 92, 8.5), ('SALVA', 153, 96, 8), ('OGGETTI', 204, 92, 7)],
+    'es': [('GUÍA', 51, 91, 8), ('MEMO\nRANDO', 102, 92, 6.5), ('GUAR\nDAR', 153, 96, 7.5), ('OBJETOS', 204, 92, 7)],
 }
 
 
@@ -40,7 +45,9 @@ PUZZLE = {
 TRIO = {lang: [SETS[lang][1], SETS[lang][2], SETS[lang][3]] for lang in SETS}
 
 # labels over a busy body get a black band (DS x range, past the memo's holes, across the goods' cells)
-PLATE = {'MEMO': (83, 121), 'ЗАМЕТКИ': (83, 121), 'GOODS': (185, 223), 'ВЕЩИ': (185, 223)}
+PLATE = {'MEMO': (83, 121), 'ЗАМЕТКИ': (83, 121), 'GOODS': (185, 223), 'ВЕЩИ': (185, 223),
+         'NOTES': (83, 121), 'NOTIZ': (83, 121), 'NOTE': (83, 121), 'MEMO\nRANDO': (83, 121),
+         'OBJETS': (185, 223), 'WAREN': (185, 223), 'OGGETTI': (185, 223), 'OBJETOS': (185, 223)}
 
 
 def run(*a):

@@ -52,7 +52,16 @@ fn make_firmware() -> Vec<u8> {
     put16(&mut u[0x60..], 0x0BF0);
     u[0x62] = 0xFF;
     u[0x63] = 0xBF;
-    put16(&mut u[0x64..], 0x0031); // English, backlight at its highest
+    // the language (bits 0-2: 0 JP, 1 EN, 2 FR, 3 DE, 4 IT, 5 ES) and the backlight at its highest; SUNPETAL_FW_LANG=fr|de|it|es
+    // makes the game start in that language (K-005: keys of the pictures per language), English otherwise
+    let lang = match std::env::var("SUNPETAL_FW_LANG").as_deref() {
+        Ok("fr") => 2,
+        Ok("de") => 3,
+        Ok("it") => 4,
+        Ok("es") => 5,
+        _ => 1,
+    };
+    put16(&mut u[0x64..], 0x0030 | lang);
     put16(&mut u[0x70..], 0); // update counter
     let c = crc16(0xFFFF, &u[..0x70]);
     put16(&mut u[0x72..], c);
