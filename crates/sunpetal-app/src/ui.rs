@@ -12,6 +12,8 @@ pub enum Action {
     Quit,
     /// Start the program anew (the settings saved, the game's backup memory written first).
     Restart,
+    /// Ask the Android launcher to show the file picker the next time the app starts.
+    PickGame,
     /// A copy of the game's save to this file.
     ExportSave(std::path::PathBuf),
     /// This file replaces the game's save, and the game starts anew.
@@ -251,6 +253,10 @@ impl Menu {
                             *action = Some(Action::Restart);
                         }
                         self.restart_ask = !ask;
+                    }
+                    #[cfg(target_os = "android")]
+                    if ui.button(tx("Change the game file…", "Сменить файл игры…")).clicked() {
+                        *action = Some(Action::PickGame);
                     }
                 }
                 Block::Leave => {

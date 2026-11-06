@@ -8,13 +8,13 @@
   kanban.py verify ID [--off]        (нужна ручная проверка автора: E+1)
   kanban.py p0 ID                    (поднять в критичные)
 """
-import argparse, json, pathlib, datetime
+import argparse, json, os, pathlib, datetime
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 DB = pathlib.Path(__file__).with_name("tasks.json")
 OUT = ROOT / "docs" / "KANBAN.md"
 BOOST = 1.5
-WIP = 3
+WIP = int(os.environ.get("KANBAN_WIP", "12"))  # временно до ~19:00 (слово автора 2026-11-05): 12; вернуть "3"
 COLS = ["doing", "check", "backlog", "blocked", "done"]
 TITLE = {"doing": "В работе", "check": "Проверка (ручная, нужен автор)", "backlog": "Очередь (по RICE)",
          "blocked": "Ждёт слова автора / отложено", "done": "Сделано"}

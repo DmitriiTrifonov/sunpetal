@@ -22,3 +22,10 @@ pub fn redirect_stderr() {
         });
     }
 }
+
+/// Asks the launcher activity (`PickerActivity`) to show the file picker the next time the app
+/// starts: writes the marker `pick.next` into the app's files folder (the launcher deletes it and
+/// opens the picker). The writing itself lives in `locate::mark_pick_next`, so it is testable on the host.
+pub fn ask_for_game(dir: &std::path::Path) -> std::io::Result<()> {
+    crate::locate::mark_pick_next(dir)
+}

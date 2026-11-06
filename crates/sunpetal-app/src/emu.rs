@@ -82,6 +82,8 @@ pub struct Shared {
     /// A click (a tap) came while the logos were on: run on, without waiting or sound, until they end.
     pub logo_click: AtomicBool,
     pub quit: AtomicBool,
+    /// Whether the machine thread was started (false: the window shows a start error, no machine).
+    pub machine_started: AtomicBool,
     /// How many DS pixels the 3D view is widened by each side (the window's shape asks, 0: none),
     /// and the upper screen so widened with its scale and that width (set by the emulation with the
     /// picture, `None` when the 3D is not on it).
@@ -109,6 +111,8 @@ pub struct Shared {
     pub dialogue: AtomicBool,
     /// The text of the dialogue line the game has begun to draw (set with the picture, `None` when the window shows none).
     pub dialogue_text: Mutex<Option<(String, Option<f32>)>>,
+    /// The script file the game read last (`nds::script_scene`, e.g. `C19_01`): the window's START policy goes by it (`start.rs`).
+    pub scene: Mutex<Option<String>>,
     /// The window draws the dialogue text itself (set by the window each frame): the game's raster text is hidden.
     pub crisp_text: AtomicBool,
     /// The command line of the program to start once the machine has stopped (a restart was asked for).
@@ -169,6 +173,7 @@ impl Shared {
             pack_swap: Mutex::new(None),
             logo_click: AtomicBool::new(false),
             quit: AtomicBool::new(false),
+            machine_started: AtomicBool::new(false),
             vblank: AtomicU64::new(0),
             ds_state: Mutex::new(String::new()),
             wide_px: AtomicUsize::new(0),
@@ -182,6 +187,7 @@ impl Shared {
             dump_on_touch: AtomicBool::new(std::env::var_os("SUNPETAL_DUMP_ON_TOUCH").is_some_and(|v| v != "0")),
             dialogue: AtomicBool::new(false),
             dialogue_text: Mutex::new(None),
+            scene: Mutex::new(None),
             crisp_text: AtomicBool::new(false),
             restart: Mutex::new(None),
             marks: AtomicBool::new(false),
@@ -200,7 +206,28 @@ impl Shared {
 }
 
 pub fn spawn(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) -> std::thread::JoinHandle<()> {
-    std::thread::Builder::new().name("machine".into()).stack_size(64 << 20).spawn(move || run(cfg, shared, audio)).expect("the machine's thread")
+    std::thread::Builder::new()
+        .name("machine".into())
+        .stack_size(64 << 20)
+        .spawn(move || {
+            shared.machine_started.store(true, Ordering::Relaxed);
+            let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(cfg, shared.clone(), audio)));
+            if let Err(p) = ran {
+                *shared.stopped.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(format!("the machine failed: {}", panic_message(&p)));
+            }
+        })
+        .expect("the machine's thread")
+}
+
+/// The message of a panic payload: its text for `&str` and `String`, else "unknown".
+fn panic_message(p: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = p.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = p.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown".to_string()
+    }
 }
 
 /// What changes when the 2D pack is rewritten: the number of files and the newest time (a folder), or the file's time and size.
@@ -440,7 +467,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
                 let _ = nds::dump_2d(&std::path::PathBuf::from(format!("{}_2d", stem.display())));
             }
             let json = format!(
-                "{{\"vblank\":{},\"scene\":{},\"script\":{{\"idle\":{},\"waits\":{},\"mark\":{},\"step\":{}}},\"frame_scale\":{},{}}}\n",
+                "{{\"vblank\":{},\"scene\":{},\"script\":{{\"idle\":{},\"waits\":{},\"mark\":{},\"step\":{}}},\"frame_scale\":{},\"pack_2d\":{},{}}}\n",
                 nds::vblanks(),
                 nds::script_scene().map_or("null".to_string(), |v| format!("{:?}", v)),
                 json_opt(nds::script_idle()),
@@ -448,6 +475,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
                 json_opt(nds::script_mark()),
                 json_opt(nds::script_step().map(|(a, b)| [a, b])),
                 shared.scale.load(Ordering::Relaxed),
+                watch_2d.as_ref().map_or("null".to_string(), |p| format!("{:?}", p.display().to_string())),
                 shared.dump_meta.lock().unwrap()
             );
             let _ = std::fs::write(format!("{}.json", stem.display()), json);
@@ -455,6 +483,13 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         let t1 = Instant::now();
         let skipping = shared.skip.load(Ordering::Relaxed);
         let idle = nds::script_idle();
+        {
+            let now = nds::script_scene();
+            let mut slot = shared.scene.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if *slot != now {
+                *slot = now;
+            }
+        }
         shared.marks.store(idle.is_some(), Ordering::Relaxed);
         shared.idle.store(idle == Some(true), Ordering::Relaxed);
         let waits = nds::script_waits() == Some(true);
@@ -477,7 +512,8 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             hide_now = shared.crisp_text.load(Ordering::Relaxed) && dialogue.as_ref().is_some_and(|d| d.coming);
             nds::hide_dialogue_raster(hide_now);
             // the wipe that opens and closes the panel covers the text in the game; ours waits for it to pass
-            let wiped = crate::layout::wipe_over_row(picture.0, &picture.1, middle.unwrap_or(168.0));
+            let lines = dialogue.as_ref().map_or(1, |d| d.text.split('\n').count());
+            let wiped = crate::layout::wipe_over_block(picture.0, &picture.1, middle.unwrap_or(168.0), lines);
             let dialogue_line = dialogue.filter(|d| d.drawn && rendered_hidden && !wiped).map(|d| (d.text, middle));
             if skipping {
                 let print = fingerprint(&picture.1);
@@ -600,15 +636,21 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     *shared.stopped.lock().unwrap() = Some(why.to_string());
     nds::report();
     nds::finish();
-    // the process ends here, so the restart is started here too (the window thread would be too late)
-    if let Some(args) = shared.restart.lock().unwrap().take() {
+    // a restart is started here (the window thread would be too late); the process ends with it
+    let restart = shared.restart.lock().unwrap().take();
+    let restart_asked = restart.is_some();
+    if let Some(args) = restart {
         match std::env::current_exe().and_then(|exe| std::process::Command::new(exe).args(args).spawn()) {
             Ok(_) => {}
             Err(e) => eprintln!("restart: {}", e),
         }
     }
-    // the guest threads' coroutines are parked: do not unwind them
-    std::process::exit(0);
+    if shared.quit.load(Ordering::Relaxed) || restart_asked {
+        // the guest threads' coroutines are parked: do not unwind them
+        std::process::exit(0);
+    }
+    // the window shows why the machine stopped; the coroutines are forgotten on drop
+    // (crates/sunpetal-runtime/src/sched.rs Thread::drop leaks a suspended coroutine)
 }
 
 #[allow(dead_code)]
@@ -660,6 +702,17 @@ mod tests {
         // a second of the game's time still, and never more than five minutes
         assert_eq!(STILL_FRAMES, 60);
         assert_eq!(SKIP_LIMIT / 60, 300);
+    }
+
+    #[test]
+    fn a_panic_message_is_the_payload_text_or_unknown() {
+        let p = std::panic::catch_unwind(|| panic!("boom")).unwrap_err();
+        assert_eq!(panic_message(&*p), "boom");
+        let s = String::from("boom");
+        let p = std::panic::catch_unwind(|| panic!("{}", s)).unwrap_err();
+        assert_eq!(panic_message(&*p), "boom");
+        let p = std::panic::catch_unwind(|| std::panic::panic_any(7u32)).unwrap_err();
+        assert_eq!(panic_message(&*p), "unknown");
     }
 }
 

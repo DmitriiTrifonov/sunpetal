@@ -32,6 +32,7 @@ mod post;
 mod rec;
 pub mod screen_report;
 mod script;
+mod start;
 mod touchpad;
 mod ui;
 mod uitext;
@@ -51,6 +52,11 @@ use winit::window::{Fullscreen, Window, WindowId};
 
 use config::Settings;
 use emu::Shared;
+
+/// The Android app's files folder (where `rom.nds` and `sunpetal.data` live), set by `android_main`
+/// so the menu's "change the game file" can point the launcher at it.
+#[cfg(target_os = "android")]
+static ANDROID_FILES_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
 fn bit(name: &str) -> u32 {
     sunpetal_runtime::nds::KEY_NAMES.iter().position(|n| *n == name).map(|i| 1 << i).unwrap_or(0)
@@ -128,6 +134,41 @@ fn paint_toast(ctx: &egui::Context, text: &str) {
     p.rect_filled(rect, 4.0, egui::Color32::from_black_alpha(200));
     p.rect_stroke(rect, 4.0, egui::Stroke::new(1.0, egui::Color32::from_gray(90)), egui::StrokeKind::Inside);
     p.galley(at, galley, egui::Color32::WHITE);
+}
+
+/// The title and the closing hint of the stopped notice, in the interface language.
+fn stopped_notice(lang: config::Lang) -> (&'static str, &'static str) {
+    match lang {
+        config::Lang::Ru => ("Игра остановлена", "Esc — закрыть"),
+        config::Lang::En => ("The game stopped", "Esc — close"),
+    }
+}
+
+/// The reason the game did not start or stopped, over the black screens in a dark panel: a title,
+/// the message wrapped to the window's width, and the hint that Esc closes the app.
+fn paint_stopped(ctx: &egui::Context, lang: config::Lang, message: &str) {
+    let (title, hint) = stopped_notice(lang);
+    let rect = ctx.content_rect();
+    let pad = 16.0;
+    let wrap = (rect.width() - 2.0 * pad).max(60.0);
+    let title_id = egui::FontId::proportional(22.0);
+    let body_id = egui::FontId::proportional(16.0);
+    let hint_id = egui::FontId::proportional(14.0);
+    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("stopped")));
+    let title_g = p.layout_no_wrap(title.to_string(), title_id.clone(), egui::Color32::WHITE);
+    let body_g = p.layout(message.to_string(), body_id.clone(), egui::Color32::from_rgb(230, 230, 230), wrap);
+    let hint_g = p.layout_no_wrap(hint.to_string(), hint_id, egui::Color32::from_gray(160));
+    let h = 2.0 * pad + title_g.size().y + 8.0 + body_g.size().y + 12.0 + hint_g.size().y;
+    let w = (wrap + 2.0 * pad).min(rect.width());
+    let panel = egui::Rect::from_center_size(rect.center(), egui::vec2(w, h));
+    p.rect_filled(panel, 8.0, egui::Color32::from_black_alpha(200));
+    p.rect_stroke(panel, 8.0, egui::Stroke::new(1.0, egui::Color32::from_gray(90)), egui::StrokeKind::Inside);
+    let mut y = panel.top() + pad;
+    p.galley(egui::pos2(panel.left() + pad, y), title_g.clone(), egui::Color32::WHITE);
+    y += title_g.size().y + 8.0;
+    p.galley(egui::pos2(panel.left() + pad, y), body_g.clone(), egui::Color32::from_rgb(230, 230, 230));
+    y += body_g.size().y + 12.0;
+    p.galley(egui::pos2(panel.left() + pad, y), hint_g, egui::Color32::from_gray(160));
 }
 
 fn next_hold(hold: Option<Hold>, wants: bool, settled: bool) -> Option<Hold> {
@@ -223,6 +264,8 @@ struct App {
     puzzle_hold: u32,
     /// For this puzzle the panel would cover the LED digits: both screens side by side (`layout::led_under_panel`).
     puzzle_side: bool,
+    /// The frame is Catherine's device (`layout::device_in`).
+    device_seen: bool,
     /// The collection's list is on (`layout::collection_in`), and whether its card (the upper screen) is the one shown.
     coll_seen: bool,
     coll_card: std::cell::Cell<bool>,
@@ -247,6 +290,9 @@ struct App {
     title_menu: bool,
     /// The title's "Press START" box has been seen at least once (before that, START is the game's, not the app's menu).
     title_seen: bool,
+    /// Защёлка титула: поднята, пока виден «Press START» (или сцена C19_01), сброшена, когда игра
+    /// прочитала другую сцену (`start::latch`). Держит START игровым на меню титула без плашки (B-18).
+    on_title: bool,
     /// A page of paper over both screens is shown (`layout::paper_in`, settled), and how far it is scrolled.
     paper: bool,
     scroll: f32,
@@ -283,6 +329,7 @@ impl App {
             hint_seen: self.hint_seen,
             both: self.puzzle_hold > 0,
             both_side: self.puzzle_side,
+            device: self.device_seen,
             collection: self.coll_seen.then(|| self.coll_card.get()),
             lower: self.auto_lower || self.hold.is_some(),
             edo: self.edo_seen,
@@ -517,6 +564,10 @@ impl App {
     }
 
     fn toggle_menu(&mut self) {
+        // the game did not start or stopped: the menu stays closed, Esc or Enter closes the app
+        if self.stopped_msg.is_some() && !self.menu.open {
+            return;
+        }
         self.toggle_menu_as(false);
     }
 
@@ -597,7 +648,10 @@ impl App {
             b,
             pad::Ctx {
                 menu_open: self.menu.open,
-                start_to_game: start_to_game(self.prompt.is_some() || self.prompt_off < PROMPT_HOLD, self.title_seen, self.title_menu),
+                start_to_game: start::start_to_game(
+                    self.shared.scene.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_deref(),
+                    start_to_game(self.prompt.is_some() || self.prompt_off < PROMPT_HOLD, self.title_seen, self.title_menu) || self.on_title,
+                ),
                 game_menu_up: self.auto_lower && self.puzzle_hold == 0 && !self.dial_scene,
             },
         );
@@ -732,19 +786,17 @@ impl App {
     }
 
     /// One frame of the window: the picture taken from the machine, what it shows worked out, drawn (into the
-    /// window, or off screen). False when the program is to end (the machine stopped, Quit, a restart).
+    /// window, or off screen). False when the program is to end (Quit, a restart).
     fn redraw(&mut self) -> bool {
         self.poll_pads();
-        // the machine stopped (a failed boot, a fatal error): say so, do not sit black
-        let stopped = self.shared.stopped.lock().unwrap().clone();
+        // the machine stopped (a failed boot, a fatal error, a panic): say so once, keep the window
+        let stopped = self.shared.stopped.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
         if let Some(why) = stopped {
-            eprintln!("stopped: {}", why);
-            self.save();
-            if !self.settings.touch_controls_on() && !cfg!(target_os = "android") {
-                return false;
+            if self.stopped_msg.is_none() {
+                eprintln!("stopped: {}", why);
+                self.save();
+                self.stopped_msg = Some(why);
             }
-            // on a phone the window stays, with the reason
-            self.stopped_msg = Some(why);
         }
         if self.tap.1 > 0 {
             self.tap.1 -= 1;
@@ -755,9 +807,9 @@ impl App {
         }
         // the picture and its wide partner, taken together (the emulation writes them so)
         let (frame, wide_pair) = {
-            let mut slot = self.shared.frame.lock().unwrap();
+            let mut slot = self.shared.frame.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let f = slot.take();
-            let w = if f.is_some() { self.shared.wide_frame.lock().unwrap().take() } else { None };
+            let w = if f.is_some() { self.shared.wide_frame.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() } else { None };
             (f, w)
         };
         if let Some((scale, rgba)) = &frame {
@@ -779,6 +831,7 @@ impl App {
             }
             // the digits' place is known once they are there; the layout then stays till the puzzle is done
             self.puzzle_side = self.puzzle_hold > 0 && (self.puzzle_side || layout::led_under_panel(*scale, rgba));
+            self.device_seen = layout::device_in(*scale, rgba);
             self.counter_seen = layout::counter_in(*scale, rgba);
             self.hint_seen = layout::hint_in(*scale, rgba);
             let coll = layout::collection_in(*scale, rgba);
@@ -799,6 +852,8 @@ impl App {
             self.prompt = layout::prompt_box(*scale, rgba);
             self.prompt_off = if self.prompt.is_some() { 0 } else { self.prompt_off.saturating_add(1) };
             self.title_seen |= self.prompt.is_some();
+            let scene = self.shared.scene.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+            self.on_title = start::latch(self.on_title, self.prompt.is_some(), scene.as_deref());
             self.title_menu = layout::title_menu_in(*scale, rgba);
             if let Some(left) = layout::portrait_left(*scale, rgba) {
                 self.portrait_left = left;
@@ -884,6 +939,7 @@ impl App {
                 hint_seen,
                 puzzle_hold,
                 puzzle_side,
+                device_seen,
                 coll_seen,
                 coll_card,
                 pending_capture,
@@ -904,6 +960,7 @@ impl App {
                 hint_seen: *hint_seen,
                 both: *puzzle_hold > 0,
                 both_side: *puzzle_side,
+                device: *device_seen,
                 collection: coll_seen.then(|| coll_card.get()),
                 lower: *auto_lower || hold.is_some(),
                 edo: *edo_seen,
@@ -954,8 +1011,9 @@ impl App {
                 // the line goes with the picture it was made for (empty when that picture has the game's own letters)
                 let vline = shared.dialogue_text.lock().unwrap().clone();
                 let vwide = *wide_now as f32;
+                let lang = config::Lang::resolve(&settings.interface.language);
                 menu.short = !(settings.ui.full_menu || *force_full || menu.forced_full);
-                if menu.open || pad_on || corner_on || stats_on || fade > 0.0 || vline.is_some() || cursor.is_some() || toast.is_some() {
+                if menu.open || pad_on || corner_on || stats_on || fade > 0.0 || vline.is_some() || cursor.is_some() || toast.is_some() || stopped_msg.is_some() {
                     let held = touch_held.clone();
                     let mut f = |ctx: &egui::Context| {
                         if fade > 0.0 {
@@ -1020,6 +1078,9 @@ impl App {
                         if let Some(msg) = &toast {
                             paint_toast(ctx, msg);
                         }
+                        if let Some(msg) = stopped_msg.as_deref() {
+                            paint_stopped(ctx, lang, msg);
+                        }
                     };
                     g.draw(&layout, &fx, Some(&mut f));
                 } else {
@@ -1066,6 +1127,19 @@ impl App {
             self.restart = true;
             *self.shared.restart.lock().unwrap() = Some(restart_args(std::env::args_os().skip(1).collect(), &self.settings.video.texture_pack));
             return false;
+        }
+        if action == Some(ui::Action::PickGame) {
+            self.save();
+            #[cfg(target_os = "android")]
+            {
+                match ANDROID_FILES_DIR.get() {
+                    Some(dir) => match android::ask_for_game(dir) {
+                        Ok(()) => return false,
+                        Err(e) => self.menu.say(e.to_string()),
+                    },
+                    None => self.menu.say("cannot ask for the game file: no files folder".to_string()),
+                }
+            }
         }
         if self.settings != self.applied {
             let layout_changed = self.settings.video.layout != self.applied.video.layout
@@ -1179,6 +1253,14 @@ impl ApplicationHandler for App {
             WindowEvent::KeyboardInput { event, .. } => {
                 let PhysicalKey::Code(code) = event.physical_key else { return };
                 let down = event.state == ElementState::Pressed;
+                // the game did not start or stopped: Esc or Enter closes, nothing else goes to the game or the menu
+                if self.stopped_msg.is_some() {
+                    if down && !event.repeat && matches!(code, KeyCode::Escape | KeyCode::Enter) {
+                        self.save();
+                        el.exit();
+                    }
+                    return;
+                }
                 // a page of paper scrolled over both screens: up and down move it, the game does not get them
                 if self.live().scroll.is_some() && !self.menu.open && matches!(code, KeyCode::ArrowUp | KeyCode::ArrowDown) {
                     if down {
@@ -1367,6 +1449,9 @@ pub struct Options {
     pub pipeline: bool,
     /// `--goto Cnn_yy` (with `--script`): the machine plays to that scene through the menu of requests first.
     pub goto: Option<String>,
+    /// Why the game cannot start (a missing or wrong ROM, a damaged data file): the window shows it
+    /// instead of the game, and the machine is not started. None: start as usual.
+    pub error: Option<String>,
 }
 
 /// Runs the game in a window until it closes.
@@ -1380,6 +1465,9 @@ pub fn run(o: Options, el: EventLoop<()>) {
 /// The window is closed (or the script done): stop the machine (its thread saves the backup memory and exits).
 fn stop_machine(shared: &Shared) {
     shared.quit.store(true, Ordering::Relaxed);
+    if !shared.machine_started.load(Ordering::Relaxed) {
+        return;
+    }
     for _ in 0..100 {
         if shared.stopped.lock().unwrap().is_some() {
             break;
@@ -1395,6 +1483,7 @@ fn stop_machine(shared: &Shared) {
 /// The settings read and put over by the options, the machine started, the app made (no window yet). `scripted`:
 /// no sound, no pads, the settings never saved.
 fn prepare(o: Options, scripted: bool) -> (App, Arc<Shared>, Option<cpal::Stream>) {
+    let mut error = o.error;
     let rom = o.rom;
     let mut settings = config::load();
     if let Some(r) = o.res {
@@ -1449,17 +1538,25 @@ fn prepare(o: Options, scripted: bool) -> (App, Arc<Shared>, Option<cpal::Stream
     });
     // a data file is checked whole before the game starts from it: a damaged one is no game, and
     // beside a ROM it is only left out
-    if let Some(p) = cfg.texture_pack.clone().filter(|p| p.is_file()) {
-        // damaged, or made from another ROM than the one beside it (a ROM kept inside the file is
-        // checked against its `META` when the game boots, and the window says so)
-        let checked = locate::check_data(&p).and_then(|_| if rom.as_os_str().is_empty() { Ok(()) } else { locate::check_pair(&p, &rom) });
-        if let Err(e) = checked {
-            if rom.as_os_str().is_empty() {
-                locate::tell(&e);
-                std::process::exit(2);
+    if error.is_none() {
+        if let Some(p) = cfg.texture_pack.clone().filter(|p| p.is_file()) {
+            // damaged, or made from another ROM than the one beside it (a ROM kept inside the file is
+            // checked against its `META` when the game boots, and the window says so)
+            let checked = locate::check_data(&p).and_then(|_| if rom.as_os_str().is_empty() { Ok(()) } else { locate::check_pair(&p, &rom) });
+            if let Err(e) = checked {
+                if rom.as_os_str().is_empty() {
+                    // scripts and CI read the exit code: keep the message box and the exit for them
+                    if scripted {
+                        locate::tell(&e);
+                        std::process::exit(2);
+                    }
+                    error = Some(e);
+                    cfg.texture_pack = None;
+                } else {
+                    locate::tell(&format!("{}\n\nThe game starts from the ROM without the data file.", e));
+                    cfg.texture_pack = None;
+                }
             }
-            locate::tell(&format!("{}\n\nThe game starts from the ROM without the data file.", e));
-            cfg.texture_pack = None;
         }
     }
     if cfg.pack_2d.is_none() {
@@ -1502,7 +1599,9 @@ fn prepare(o: Options, scripted: bool) -> (App, Arc<Shared>, Option<cpal::Stream
         }
     };
     *shared.goto.lock().unwrap() = o.goto.clone();
-    emu::spawn(cfg, shared.clone(), ring.clone());
+    if error.is_none() {
+        emu::spawn(cfg, shared.clone(), ring.clone());
+    }
     let app = App {
         shared: shared.clone(),
         ring,
@@ -1539,7 +1638,7 @@ fn prepare(o: Options, scripted: bool) -> (App, Arc<Shared>, Option<cpal::Stream
         skip_fade: 0.0,
         pad_touches: HashMap::new(),
         touch_held: Vec::new(),
-        stopped_msg: None,
+        stopped_msg: error,
         kb: 0,
         pad: 0,
         pads: if scripted { None } else { gilrs::Gilrs::new().map_err(|e| eprintln!("no pads: {}", e)).ok() },
@@ -1558,6 +1657,7 @@ fn prepare(o: Options, scripted: bool) -> (App, Arc<Shared>, Option<cpal::Stream
         hint_seen: false,
         puzzle_hold: 0,
         puzzle_side: false,
+        device_seen: false,
         coll_seen: false,
         coll_card: std::cell::Cell::new(false),
         pending_capture: std::cell::Cell::new(None),
@@ -1574,6 +1674,7 @@ fn prepare(o: Options, scripted: bool) -> (App, Arc<Shared>, Option<cpal::Stream
         prompt: None,
         title_menu: false,
         title_seen: false,
+        on_title: false,
         wide_now: 0,
         bar_color: None,
         want: (false, 0),
@@ -1630,6 +1731,7 @@ mod save_command_tests {
             renderer: None,
             pipeline: false,
             goto: None,
+            error: None,
         }
     }
 
@@ -1753,6 +1855,7 @@ pub fn desktop_main() {
         renderer: None,
         pipeline: false,
         goto: None,
+        error: None,
     };
     // the save file out to a copy, or a copy in (`--export-save FILE`, `--import-save FILE`): done with no window
     let (mut export_save, mut import_save): (Option<PathBuf>, Option<PathBuf>) = (None, None);
@@ -1805,15 +1908,19 @@ pub fn desktop_main() {
     }
     let rom = match rom {
         Some(rom) => {
-            if !rom.is_file() {
-                eprintln!("{}: not a file (the ROM's path: sunpetal-app ROM.nds)", rom.display());
-                std::process::exit(2);
+            let checked = if !rom.is_file() { Some(format!("{}: not a file (the ROM's path: sunpetal-app ROM.nds)", rom.display())) } else { locate::check_rom(&rom).err() };
+            match checked {
+                // scripts and CI read the exit code; a window shows the reason instead
+                Some(e) if script.is_some() => {
+                    eprintln!("{}", e);
+                    std::process::exit(2);
+                }
+                Some(e) => {
+                    o.error = Some(e);
+                    rom
+                }
+                None => rom,
             }
-            if let Err(e) = locate::check_rom(&rom) {
-                eprintln!("{}", e);
-                std::process::exit(2);
-            }
-            rom
         }
         // no ROM file: the image kept in the data file (the one named, the settings', or one found)
         None => {
@@ -1925,30 +2032,14 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
     let dir = app.external_data_path().unwrap_or_else(|| private.clone());
     std::env::set_var("SUNPETAL_CONFIG", private.join("config"));
     eprintln!("sunpetal: files folder {}", dir.display());
+    let _ = ANDROID_FILES_DIR.set(dir.clone());
     let el = EventLoop::builder().with_android_app(app).build().expect("an event loop");
-    // the game in the app's folder. A data file that holds the ROM is the whole game (the ROM in it
-    // is the one its pictures and translations were made for) and goes first; else `rom.nds`, or any
-    // other ROM of the supported dump, with a data file beside it if there is one
+    // the game in the app's folder: a data file that holds the ROM, else `rom.nds` or another
+    // supported ROM (locate::find_game); the reason of a failed start goes to the window
     let dirs = [dir.clone()];
-    let data = locate::find_data(&dirs);
-    let whole = data.clone().filter(|p| sunpetal_data::dsrom::has_rom(p));
-    let (rom, pack) = if let Some(data) = whole {
-        match locate::check_data(&data) {
-            Ok(()) => (PathBuf::new(), Some(data)),
-            Err(e) => {
-                eprintln!("{}", e);
-                return;
-            }
-        }
-    } else {
-        let named = dir.join("rom.nds");
-        match Some(named).filter(|r| r.is_file() && locate::check_rom(r).is_ok()).or_else(|| locate::find_rom(&dirs)) {
-            Some(rom) => (rom, data.filter(|p| locate::check_data(p).is_ok())),
-            None => {
-                eprintln!("{}", locate::no_game(&dirs));
-                return;
-            }
-        }
+    let (rom, pack, error) = match locate::find_game(&dirs) {
+        Ok((rom, pack)) => (rom, pack, None),
+        Err(e) => (PathBuf::new(), None, Some(e)),
     };
     // once, the first time a data file starts the game: its translation in the system's language
     // is the game's language (as the desktop's file dialog does); the menu changes it after
@@ -1966,7 +2057,26 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
             let _ = std::fs::write(&marker, b"");
         }
     }
-    run(Options { rom, out: Some(dir), save: None, mute: false, res: Some(1), menu: false, dump: None, pack, lang: None, wide: None, renderer: None, pipeline: false }, el);
+    run(
+        Options {
+            rom,
+            out: Some(dir),
+            save: None,
+            mute: false,
+            res: Some(1),
+            menu: false,
+            full_menu: false,
+            goto: None,
+            dump: None,
+            pack,
+            lang: None,
+            wide: None,
+            renderer: None,
+            pipeline: false,
+            error,
+        },
+        el,
+    );
 }
 
 #[cfg(target_os = "android")]
@@ -2020,6 +2130,18 @@ mod start_tests {
         assert!(start_to_game(true, true, false));
         // the title's menu (the two keys): the game's, even though the title has been seen
         assert!(start_to_game(false, true, true));
+    }
+}
+
+#[cfg(test)]
+mod stopped_tests {
+    use super::stopped_notice;
+    use crate::config::Lang;
+
+    #[test]
+    fn the_stopped_notice_follows_the_language() {
+        assert_eq!(stopped_notice(Lang::Ru), ("Игра остановлена", "Esc — закрыть"));
+        assert_eq!(stopped_notice(Lang::En), ("The game stopped", "Esc — close"));
     }
 }
 

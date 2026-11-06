@@ -166,7 +166,8 @@ pub fn portrait_left(scale: usize, rgba: &[u8]) -> Option<bool> {
 /// line is at 144 in the usual box, lower in the narrow one for two lines) and the panel runs to the screen's foot.
 pub fn dialogue_panel_middle(scale: usize, rgba: &[u8]) -> Option<f32> {
     let w = 256 * scale;
-    for y in 140..190usize {
+    // a row is the line's when 8 samples in 10 across it are red
+    let red_row = |y: usize| -> Option<bool> {
         let (mut n, mut red) = (0, 0);
         for x in (20..236usize).step_by(4) {
             let o = (y * scale * w + x * scale) * 4;
@@ -174,8 +175,12 @@ pub fn dialogue_panel_middle(scale: usize, rgba: &[u8]) -> Option<f32> {
             n += 1;
             red += (p[0] > 200 && p[1] < 60 && p[2] < 60) as usize;
         }
-        if red * 10 >= n * 8 {
-            return Some((y as f32 + 2.0 + 192.0) / 2.0);
+        Some(red * 10 >= n * 8)
+    };
+    for y in 140..190usize {
+        if red_row(y)? {
+            // the line is a row or two thick; a band that goes on for rows is the wipe, not the panel's edge
+            return if red_row(y + 5)? { None } else { Some((y as f32 + 2.0 + 192.0) / 2.0) };
         }
     }
     None
@@ -194,6 +199,13 @@ pub fn wipe_over_row(scale: usize, rgba: &[u8], y: f32) -> bool {
         red += (p[0] > 200 && p[1] < 60 && p[2] < 60) as usize;
     }
     red * 10 >= n
+}
+
+/// Whether the wipe covers any row of a block of `lines` lines of text centred on `middle` (the lines are 14 DS pixels
+/// apart): a band over the block's top or foot hides the letters as much as one over its middle.
+pub fn wipe_over_block(scale: usize, rgba: &[u8], middle: f32, lines: usize) -> bool {
+    let half = lines.max(1) as f32 * 7.0;
+    [middle - half + 3.0, middle, middle + half - 3.0].into_iter().any(|y| wipe_over_row(scale, rgba, y.clamp(0.0, 191.0)))
 }
 
 /// Whether the picture is the collection's list: a black header band on the upper screen (the card above) and the list's
@@ -501,6 +513,8 @@ pub struct Live {
     pub both: bool,
     /// ... and its LED digits are where the panel would be (`led_under_panel`), so both go side by side.
     pub both_side: bool,
+    /// Catherine's device is on (`device_in`): the upper screen's dial panel and the lower screen's case menu, both shown (the PS2's way).
+    pub device: bool,
     /// The collection's list is on: `Some(true)` with its card (the upper screen) opened, `Some(false)` on the list.
     pub collection: Option<bool>,
     /// The lower screen is the one to show (`lower_wanted`, settled).
@@ -549,6 +563,28 @@ pub fn scrolled(scroll: f32) -> Layout {
     Layout { name: "single", size: (256.0, 192.0), screens: [None, None], patches, fit: Fit::default() }
 }
 
+/// Whether the frame is Catherine's device: the upper screen is its green panel (the dial, the
+/// buttons) and the lower one carries its green strip (the readings, the case menu).
+pub fn device_in(scale: usize, rgba: &[u8]) -> bool {
+    let (w, top) = (256 * scale, 192 * scale);
+    if rgba.len() < w * top * 2 * 4 {
+        return false;
+    }
+    let green = |base: usize| {
+        let (mut n, mut g) = (0usize, 0usize);
+        for y in (0..192).step_by(4) {
+            for x in (0..256).step_by(4) {
+                let o = (((base + y * scale) * w) + x * scale) * 4;
+                let (r, gr, b) = (rgba[o] as i32, rgba[o + 1] as i32, rgba[o + 2] as i32);
+                n += 1;
+                g += (gr > r + 25 && gr > b + 40 && gr > 110) as usize;
+            }
+        }
+        g * 100 / n
+    };
+    green(0) >= 15 && green(top) >= 8
+}
+
 /// Which screen the game wants the player at, from the lower screen's picture: the lower, when it
 /// has something on it that is not the map (a menu, a list, the case, a puzzle: the lower screen
 /// is the touch screen); the upper, when it shows the map with the counter (a scene, a walk, a
@@ -594,6 +630,10 @@ fn pick(layouts: &[Layout], v: &crate::config::Video, live: &Live) -> Layout {
     // the collection on one screen: the list, then the card of the item taken (A), back to the list (B)
     if let (Some(card), "single", true) = (live.collection, v.layout.as_str(), v.auto) {
         return single(!card);
+    }
+    // Catherine's device (the case menu, SELECT): the upper screen whole, the lower one a panel, as on the PS2
+    if live.device && v.auto && matches!(v.layout.as_str(), "single" | "overlay") {
+        return puzzle_panel();
     }
     // a puzzle read on the upper screen and worked on the lower one: both (the PS2's way, the lower as a panel, or side by side)
     if live.both && v.auto && matches!(v.layout.as_str(), "single" | "overlay") {
@@ -810,6 +850,32 @@ mod tests {
         Some(buf[..info.buffer_size()].chunks(ch).flat_map(|p| [p[0], p[1], p[2], 255]).collect())
     }
 
+    /// The device's frames are told from the others (the title, a book, a walk, the logos); skipped without the folder.
+    #[test]
+    fn the_device_is_told_from_the_other_screens() {
+        let dir = std::env::var("SUNPETAL_SCREENS").unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../../artifacts/screens").into());
+        let dir = std::path::Path::new(&dir);
+        let device = ["c0.png", "c1.png", "case_guide.png", "memo_back.png"];
+        let others = ["badge2.png", "c2.png", "goods.png", "memo.png", "t1.png", "rq_a.png", "save.png", "vid1.png"];
+        for (list, want) in [(&device[..], true), (&others[..], false)] {
+            for file in list {
+                let Some(rgba) = load_rgba(&dir.join(file)) else { continue };
+                assert_eq!(device_in(1, &rgba), want, "{}", file);
+            }
+        }
+    }
+
+    /// The device on one screen: the upper screen whole, the lower a panel in the corner (the settings' puzzle mode does not matter).
+    #[test]
+    fn the_device_is_the_upper_screen_with_the_lower_as_a_panel() {
+        let layouts = all();
+        let v = crate::config::Video { layout: "single".into(), auto: true, puzzle: "side".into(), ..Default::default() };
+        let l = pick(&layouts, &v, &Live { device: true, ..Default::default() });
+        assert_eq!(l.screens, puzzle_panel().screens);
+        let l = pick(&layouts, &v, &Live::default());
+        assert_ne!(l.screens, puzzle_panel().screens);
+    }
+
     /// The screens recorded for 8b (`artifacts/screens`, not in git): which screen the rule picks on
     /// each. Skipped when the folder is not there; `SUNPETAL_SCREENS` names another.
     #[test]
@@ -843,6 +909,42 @@ mod tests {
         assert!(wrong.is_empty(), "{:#?}", wrong);
     }
     #[test]
+    fn the_wipe_over_the_blocks_top_or_foot_hides_the_text() {
+        let band = |y0: usize, y1: usize| {
+            let mut px = vec![150u8; 256 * 192 * 4];
+            for y in y0..y1 {
+                for x in 0..256 {
+                    px[(y * 256 + x) * 4..][..3].copy_from_slice(&[255, 0, 0]);
+                }
+            }
+            px
+        };
+        // three lines centred on 168 run from 147 to 189: a band near the top (150) or the foot (186) covers them
+        assert!(super::wipe_over_block(1, &band(148, 152), 168.0, 3), "the top");
+        assert!(super::wipe_over_block(1, &band(184, 188), 168.0, 3), "the foot");
+        assert!(super::wipe_over_block(1, &band(166, 170), 168.0, 3), "the middle");
+        assert!(!super::wipe_over_block(1, &band(100, 110), 168.0, 3), "a band above the block");
+        // one line is only 14 rows: a band at 185 is outside it
+        assert!(!super::wipe_over_block(1, &band(185, 188), 168.0, 1));
+    }
+
+    #[test]
+    fn the_panels_edge_is_a_thin_line_and_the_wipe_is_not() {
+        let rows = |y0: usize, y1: usize| {
+            let mut px = vec![150u8; 256 * 192 * 4];
+            for y in y0..y1 {
+                for x in 0..256 {
+                    px[(y * 256 + x) * 4..][..3].copy_from_slice(&[255, 0, 0]);
+                }
+            }
+            px
+        };
+        assert_eq!(super::dialogue_panel_middle(1, &rows(144, 146)), Some((144.0 + 2.0 + 192.0) / 2.0));
+        assert_eq!(super::dialogue_panel_middle(1, &rows(150, 170)), None, "a wipe band is no edge");
+        assert_eq!(super::dialogue_panel_middle(1, &rows(100, 110)), None, "nothing in the panel's rows");
+    }
+
+    #[test]
     fn the_wipe_is_a_red_band_not_the_panels_red_lines() {
         let paint = |from: usize, to: usize| {
             let mut px = vec![150u8; 256 * 192 * 4];
@@ -875,7 +977,20 @@ mod tests {
     }
 
     fn live(vblank: u64, counter_seen: bool) -> Live {
-        Live { vblank, counter_seen, hint_seen: false, both: false, both_side: false, collection: None, lower: false, edo: false, prompt: None, wide: 0.0, scroll: None }
+        Live {
+            vblank,
+            counter_seen,
+            hint_seen: false,
+            both: false,
+            both_side: false,
+            device: false,
+            collection: None,
+            lower: false,
+            edo: false,
+            prompt: None,
+            wide: 0.0,
+            scroll: None,
+        }
     }
 
     #[test]

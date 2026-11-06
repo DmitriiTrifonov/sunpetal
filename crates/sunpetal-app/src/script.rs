@@ -228,7 +228,7 @@ fn command(app: &mut App, words: &[&str]) -> Result<String, String> {
             let text = app.shared.dialogue_text.lock().unwrap().as_ref().map_or("null".to_string(), |t| format!("{:?}", t.0));
             let (w, h) = app.gfx.as_ref().map_or((0.0, 0.0), |g| g.window_size());
             Ok(format!(
-                "\"vblank\":{},\"layout\":{:?},\"lower\":{},\"window\":[{},{}],\"dialogue\":{},\"idle\":{},\"crisp\":{}",
+                "\"vblank\":{},\"layout\":{:?},\"lower\":{},\"window\":[{},{}],\"dialogue\":{},\"idle\":{},\"crisp\":{},\"scene\":{}",
                 app.shared.vblank.load(Ordering::Relaxed),
                 app.layout().name,
                 app.auto_lower || app.hold.is_some(),
@@ -236,7 +236,8 @@ fn command(app: &mut App, words: &[&str]) -> Result<String, String> {
                 h,
                 text,
                 app.shared.idle.load(Ordering::Relaxed),
-                app.shared.crisp_text.load(Ordering::Relaxed)
+                app.shared.crisp_text.load(Ordering::Relaxed),
+                app.shared.scene.lock().unwrap().as_ref().map_or("null".to_string(), |v| format!("{:?}", v))
             ))
         }
         other => Err(format!("no command {:?}", other)),

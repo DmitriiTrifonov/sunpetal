@@ -9,6 +9,7 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -32,11 +33,16 @@ public class PickerActivity extends Activity {
     }
 
     private static final byte[] DATA_MAGIC = {'S', 'P', 'D', 'A', 'T', 'A', 0, 1};
+    private static final byte[] GAME_CODE = {'Y', 'H', 'N', 'P'};
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
-        if (new File(dir(), "rom.nds").isFile() || new File(dir(), "sunpetal.data").isFile()) {
+        // the game asked for a different file: show the picker even though a game file exists
+        File pick = new File(dir(), "pick.next");
+        boolean force = pick.isFile();
+        if (force) pick.delete();
+        if (!force && (new File(dir(), "rom.nds").isFile() || new File(dir(), "sunpetal.data").isFile())) {
             start();
             return;
         }
@@ -85,8 +91,9 @@ public class PickerActivity extends Activity {
                         if (err == null) {
                             start();
                         } else {
-                            text.setText("Could not copy the file: " + err);
                             button.setEnabled(true);
+                            Toast.makeText(PickerActivity.this, err, Toast.LENGTH_LONG).show();
+                            pick();
                         }
                     }
                 });
@@ -104,11 +111,11 @@ public class PickerActivity extends Activity {
             if (in == null) return "cannot open it";
             OutputStream os = new FileOutputStream(tmp);
             byte[] buf = new byte[1 << 16];
-            byte[] head = new byte[8];
+            byte[] head = new byte[0x10];
             long n = 0;
             int k;
             while ((k = in.read(buf)) > 0) {
-                if (n < 8) System.arraycopy(buf, 0, head, (int) n, (int) Math.min(k, 8 - n));
+                if (n < head.length) System.arraycopy(buf, 0, head, (int) n, (int) Math.min(k, head.length - n));
                 os.write(buf, 0, k);
                 n += k;
             }
@@ -118,8 +125,30 @@ public class PickerActivity extends Activity {
                 tmp.delete();
                 return "that is not a DS ROM or a data file (too small)";
             }
-            File out = new File(folder, java.util.Arrays.equals(head, DATA_MAGIC) ? "sunpetal.data" : "rom.nds");
+            boolean data = true;
+            for (int i = 0; i < DATA_MAGIC.length; i++) {
+                if (head[i] != DATA_MAGIC[i]) {
+                    data = false;
+                    break;
+                }
+            }
+            if (!data) {
+                for (int i = 0; i < GAME_CODE.length; i++) {
+                    if (head[0xC + i] != GAME_CODE[i]) {
+                        tmp.delete();
+                        return "not the supported ROM (the game code must be YHNP)";
+                    }
+                }
+            }
+            File out = new File(folder, data ? "sunpetal.data" : "rom.nds");
             if (!tmp.renameTo(out)) return "cannot save it";
+            // a data file holding a ROM goes before rom.nds: a ROM picked now must not be shadowed by an old one.
+            // A data file picked now keeps rom.nds (a data file without a ROM inside needs it).
+            if (!data) new File(folder, "sunpetal.data").delete();
+            // keep the player's save: move it to the new game's name if the new one has none
+            File oldSave = new File(folder, data ? "rom.sav" : "sunpetal.sav");
+            File newSave = new File(folder, data ? "sunpetal.sav" : "rom.sav");
+            if (!newSave.isFile() && oldSave.isFile()) oldSave.renameTo(newSave);
             return null;
         } catch (Exception e) {
             tmp.delete();

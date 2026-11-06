@@ -110,6 +110,14 @@ pub fn find_rom(dirs: &[PathBuf]) -> Option<PathBuf> {
     })
 }
 
+/// The Android launcher's cue: when it starts and sees `pick.next` in the files folder, it deletes
+/// the marker and shows the file picker instead of starting the game. The pure, host-independent
+/// part of `android::ask_for_game`.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub fn mark_pick_next(dir: &Path) -> std::io::Result<()> {
+    fs::write(dir.join("pick.next"), b"")
+}
+
 /// The message for a start with no ROM to play.
 pub fn no_game(dirs: &[PathBuf]) -> String {
     let places: Vec<String> = dirs.iter().map(|d| d.display().to_string()).collect();
@@ -119,6 +127,31 @@ pub fn no_game(dirs: &[PathBuf]) -> String {
         DATA_NAME,
         places.join(", ")
     )
+}
+
+/// The game in the app's files folder, as the Android entry point chooses it: a data file that
+/// holds the ROM is the whole game (the ROM in it is the one its pictures and translations were
+/// made for) and goes first; else `rom.nds`, or any other ROM of the supported dump, with a data
+/// file beside it if there is one. The error names the folder and `rom.nds` when there is none.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub fn find_game(dirs: &[PathBuf]) -> Result<(PathBuf, Option<PathBuf>), String> {
+    let data = find_data(dirs);
+    if let Some(data) = data.clone().filter(|p| sunpetal_data::dsrom::has_rom(p)) {
+        check_data(&data)?;
+        return Ok((PathBuf::new(), Some(data)));
+    }
+    let named = dirs.first().map(|d| d.join("rom.nds")).filter(|r| r.is_file());
+    let named_bad = named.as_ref().and_then(|r| check_rom(r).err());
+    if let Some(rom) = named.as_ref().filter(|r| check_rom(r).is_ok()).cloned() {
+        return Ok((rom, data.filter(|p| check_data(p).is_ok())));
+    }
+    if let Some(rom) = find_rom(dirs) {
+        return Ok((rom, data.filter(|p| check_data(p).is_ok())));
+    }
+    Err(named_bad.unwrap_or_else(|| {
+        let places: Vec<String> = dirs.iter().map(|d| d.display().to_string()).collect();
+        format!("no game to play: put rom.nds (a .nds of the European release) in {}, or a {} that holds the game (made by sunpetal-pack-rom)", places.join(", "), DATA_NAME)
+    }))
 }
 
 #[cfg(test)]
@@ -248,5 +281,49 @@ mod tests {
         assert_eq!(find_data(&[a.clone(), b.clone()]), Some(b.join(DATA_NAME)));
         fs::remove_dir_all(&a).unwrap();
         fs::remove_dir_all(&b).unwrap();
+    }
+
+    #[test]
+    fn it_marks_the_picker_for_the_next_launch() {
+        let d = dir("pick");
+        assert!(!d.join("pick.next").is_file());
+        mark_pick_next(&d).unwrap();
+        assert!(d.join("pick.next").is_file());
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn find_game_names_the_folder_and_rom_nds_when_the_folder_is_empty() {
+        let d = dir("find-empty");
+        let e = find_game(std::slice::from_ref(&d)).unwrap_err();
+        assert!(e.contains("rom.nds") && e.contains(&d.display().to_string()), "{}", e);
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn find_game_refuses_a_damaged_data_file_that_holds_the_rom() {
+        let d = dir("find-data");
+        let mut image = rom(b"YHNP");
+        image.resize(0x400, 0);
+        let mut c = sunpetal_data::container::Container::new();
+        c.add(sunpetal_data::dsrom::TAG, sunpetal_data::dsrom::pack(&image).unwrap());
+        c.set_rom(*b"YHNP", 1);
+        let f = d.join(DATA_NAME);
+        c.write(&f).unwrap();
+        let mut b = fs::read(&f).unwrap();
+        let last = b.len() - 1;
+        b[last] ^= 1;
+        fs::write(&f, b).unwrap();
+        assert!(find_game(std::slice::from_ref(&d)).unwrap_err().contains("damaged"));
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn find_game_names_the_code_of_a_rom_that_is_not_the_supported_one() {
+        let d = dir("find-rom");
+        fs::write(d.join("rom.nds"), rom(b"ABCD")).unwrap();
+        let e = find_game(std::slice::from_ref(&d)).unwrap_err();
+        assert!(e.contains("ABCD"), "{}", e);
+        fs::remove_dir_all(&d).unwrap();
     }
 }
