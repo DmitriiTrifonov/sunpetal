@@ -80,3 +80,23 @@
 **Следующий шаг (нужна динамика).** Трасса на запуске сцены: по `script_step()` и текущему адресу команды (`0x02075988`) записывать пары «номер тега → адрес вызванной функции игры». Для этого нужен инструмент в `sunpetal-debug` или скрипт REPL по скиллу `screen-recon`; он покажет по каждой команде, какие функции она вызывает (камера, персонажи, звук), и даст карту «опкод → функция ARM → подсистема».
 
 **Как воспроизвести.** Читать строки UTF-16 из ARM9 ROM по смещению `0x4000` (длина `0x6E258`) и искать массив подряд идущих указателей на строки `<…>` (в репозиторий этот скрипт пока не добавлен).
+
+## 8. Карта движка: код → обработчик → подсистема (K-161)
+
+Статически (`tools/script/dispatch_map.py`): таблица переходов шага `0x02045BC4` → первый `bl` в ветке case = обработчик. Полная таблица с размером (строк C) и вызываемыми функциями — `docs/native-script-dispatch.csv`. Коды 1–132 все имеют обработчик, повторов нет; код 0 `<R>` обрабатывается в цикле шага.
+
+Обработчики — тонкие: основная часть 2–35 строк C (запись параметров в структуру/вызов общей функции). Исключение: `<END>` (399 строк, развилка по состоянию) и `<TEXT>`-семейство. Общие функции: `0x020245B0` (поиск персонажа по ID), `0x020192EC/0x0201929C` (разбор вектора/интерполяция камеры и позиций), `0x0202BFB4/0x0202BFA4` (создание эффекта-объекта); пары `D_*` — удаление эффекта.
+
+| Подсистема | Команд | Обработчики (суммарно строк C) | Команды |
+|---|---|---|---|
+| эффекты (шейдер/частицы) | 39 | 960 | <JUMPFILE> <JUMPFILELABEL> <SETIMAGE> <PUTIMAGE> <REMOVEIMAGE> <REMOVEIMAGEALL> <WAITFRAME> <SETNEXTBG> <TRANSBG> <SHOOT_SETUP> <SHOOT_START> <EXPLODE> <D_EXPLODE> <PAPER> <D_PAPER> <EYEBEAM> <EXPLODE2> <D_EXPLODE2> <RADIATE> <D_RADIATE> <RING> <GOTTU> <F_S_R> <DEATHBALL> <D_DEATHBALL> <SMOKE> <LIGHTER> <D_LIGHTER> <D_EYEBEAM> <EXPLODE3> <D_EXPLODE3> <EXPLODE4> <D_EXPLODE4> <SPLASH> <D_SPLASH> <SR_START> <SR_END> <SR_OPEN> <SR_CLOSE> |
+| камера | 24 | 892 | <SETCAMPOS> <SETCAMTARGET> <MOVECAMERA> <SETCAMPOS2> <MOVECAMERA2> <SETCAMTARGET2> <SETCAMPOS3> <MOVECAMERA3> <SETCAMSPD_EXP> <SETCAMSPD_LINEAR> <MOVECAMTARGET> <MOVECAMTARGET2> <CAMTARGET_LOCKON> <START_SHAKE> <STOP_SHAKE> <PARALLELCAMERA_ON> <PARALLELCAMERA_OFF> <SETFOVY> <CAM_FANTASISTA> <CAMERAMOTION> <AUTOCAMERA> <ADD_AUTOCAMERA> <STOPCAMMOTION> <PLAYCAMMOTION> |
+| персонажи | 19 | 1520 | <SETFACE> <SETCHARPOS> <SETMOTION> <CHARLOOKAT> <SETACTION> <WALKTO> <SETCHARPOS2> <SETFACE2> <CHARFOCUS> <CHARFOCUS_MOVE> <SETCHARPOS3> <SETDIRECTION> <CHARFOCUS2> <CHARFOCUS2_MOVE> <STOPMOTION> <PLAYMOTION> <SETEQUIP> <ROTHEAD> <WINK> |
+| текст/окна | 17 | 286 | <TEXT> <TEXTPOS> <TEXTCOL> <NEXTPAGE> <SUBTEXT> <SUBTEXTPOS> <SUBTEXTCOL> <SUBTEXTCLEAR> <CHOICE> <TEXT_EX> <SP_TEXT_ON> <SP_TEXT_OFF> <HIDEWINDOW> <SHOWWINDOW> <ED_TEXT_START> <ED_TEXT_OPEN> <ED_TEXT_CLOSE> |
+| поток/переменные | 11 | 556 | <WAIT> <LABEL> <JUMP> <END> <SETVALUE> <ADDVALUE> <CHANGEBYVALUE> <CALLKATHARINE> <CLOSE_CHAPTER> <CHANGEPLAYER> <CHANGE_SUMIO> |
+| карта/сцена | 9 | 294 | <CHANGEMAP> <PUTEVENT> <REMOVEEVENT> <SETCOLLISION> <STAGEANIMATION> <SETSCREEN> <ACTSCREEN> <ELEVATOR> <CHANGEMAP2> |
+| звук | 7 | 249 | <PLAYSE> <PLAYBGM> <LOAD_POEM_SE> <STOPSE> <CHAPTER_BGM> <BGM_PAUSE> <SE_PAUSE> |
+| экран/видео | 6 | 160 | <FADE_OUT> <FADE_IN> <PLAYMOVIE> <START_TEXMOVIE> <STOP_TEXMOVIE> <ED_WIPE> |
+| служебный | 1 | 0 | <R> |
+
+Оценка для нативного движка: поток/переменные, текст, звук, камера, персонажи — ядро (часть команд 1–2 строки, переносятся в таблицу параметров); эффекты (EXPLODE/RING/SMOKE…, ~40 команд) — по одной функции-спавнеру, реализация в рендерере/шейдере, самое трудоёмкое и можно оставить на ARM до последнего (гибрид). Следующий шаг (K-166): интерфейс «команда → подсистема» и границы гибрида.
