@@ -1439,6 +1439,8 @@ pub struct Options {
     pub full_menu: bool,
     pub dump: Option<PathBuf>,
     pub pack: Option<PathBuf>,
+    /// The data file for the translation for this run (`--data FILE`), over the setting `[game] data`.
+    pub data: Option<PathBuf>,
     /// The game language for this run (`--lang ru`; `--lang none`: the ROM's own text), over the setting.
     pub lang: Option<String>,
     /// The widened 3D view for this run (`--wide on|off`), over the setting.
@@ -1566,16 +1568,27 @@ fn prepare(o: Options, scripted: bool) -> (App, Arc<Shared>, Option<cpal::Stream
     if let Some(p) = cfg.texture_pack.as_ref().filter(|p| p.is_file()) {
         settings.video.texture_pack = p.display().to_string();
     }
-    // the data file (`sunpetal.data`) is the texture setting's file; its translation is put in
-    if cfg.texture_pack.as_ref().is_some_and(|p| p.is_file()) && !settings.game.language.is_empty() {
+    // the translation's file: `--data`, then `[game] data`, then (older configs) the texture setting's file; the
+    // texture setting is only the pictures
+    let named_data = o.data.clone().or_else(|| Some(PathBuf::from(&settings.game.data)).filter(|p| !p.as_os_str().is_empty()));
+    if let Some(d) = &named_data {
+        if !d.is_file() {
+            eprintln!("data file {}: no such file, ignored", d.display());
+        }
+    }
+    if let Some(d) = named_data.filter(|d| d.is_file()) {
+        cfg.data = Some(d);
+    } else if cfg.texture_pack.as_ref().is_some_and(|p| p.is_file()) {
         cfg.data = cfg.texture_pack.clone();
+    }
+    if cfg.data.is_some() && !settings.game.language.is_empty() {
         cfg.language = Some(settings.game.language.clone());
     }
     if rom.as_os_str().is_empty() {
         cfg.data = cfg.texture_pack.clone();
     } else if cfg.data.is_none() && !settings.game.language.is_empty() {
         eprintln!(
-            "the game language `{}` is set, but there is no data file to take it from (the texture setting or --texture-pack); the ROM's own text is used",
+            "the game language `{}` is set, but there is no data file to take it from (`--data`, `[game] data`, or the texture setting); the ROM's own text is used",
             settings.game.language
         );
     }
@@ -1726,6 +1739,7 @@ mod save_command_tests {
             full_menu: false,
             dump: None,
             pack: None,
+            data: None,
             lang: None,
             wide: None,
             renderer: None,
@@ -1850,6 +1864,7 @@ pub fn desktop_main() {
         full_menu: false,
         dump: None,
         pack: None,
+        data: None,
         lang: None,
         wide: None,
         renderer: None,
@@ -1881,6 +1896,7 @@ pub fn desktop_main() {
             }
             "--dump-textures" => o.dump = args.next().map(PathBuf::from),
             "--texture-pack" => o.pack = args.next().map(PathBuf::from),
+            "--data" => o.data = args.next().map(PathBuf::from),
             "--lang" => o.lang = args.next(),
             "--wide" => o.wide = args.next().map(|v| !matches!(v.as_str(), "off" | "0" | "no")),
             "--pipeline" => o.pipeline = true,
@@ -1961,7 +1977,7 @@ pub fn desktop_main() {
                         }
                         return;
                     }
-                    eprintln!("usage: sunpetal-app [ROM.nds] [--out DIR] [--save FILE] [--export-save FILE] [--import-save FILE] [--mute] [--res N] [--menu] [--texture-pack FILE] [--lang ru|none] [--renderer software|gpu] [--pipeline]");
+                    eprintln!("usage: sunpetal-app [ROM.nds] [--out DIR] [--save FILE] [--export-save FILE] [--import-save FILE] [--mute] [--res N] [--menu] [--texture-pack FILE] [--data FILE] [--lang ru|none] [--renderer software|gpu] [--pipeline]");
                     eprintln!("{}", locate::no_game(&dirs));
                     std::process::exit(2);
                 }

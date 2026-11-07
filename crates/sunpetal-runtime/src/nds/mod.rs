@@ -110,15 +110,16 @@ pub fn overlay_files(cfg: &Config, rom: &[u8]) -> Result<Vec<(String, Vec<u8>)>,
             meta.check_rom(sunpetal_data::delta::crc32(rom)).map_err(|e| format!("{}: {}", data.display(), e))?;
         }
         let all: Vec<_> = c.all(b"TRAN").filter_map(|s| sunpetal_data::translate::Translation::from_bytes(&s.data).ok()).collect();
-        let t = all.iter().find(|t| &t.lang == lang).ok_or_else(|| {
-            let have: Vec<&str> = all.iter().map(|t| t.lang.as_str()).collect();
-            if have.is_empty() {
-                format!("{} has no translations (it holds only textures); play without a language", data.display())
-            } else {
+        if all.is_empty() {
+            // a file of pictures only is no reason to stop the game: the ROM's own text is played
+            note(&format!("warning: {} holds no translations; the ROM's own text is used", data.display()));
+        } else {
+            let t = all.iter().find(|t| &t.lang == lang).ok_or_else(|| {
+                let have: Vec<&str> = all.iter().map(|t| t.lang.as_str()).collect();
                 format!("{} has no translation `{}`; it has: {}", data.display(), lang, have.join(", "))
-            }
-        })?;
-        files.extend(t.overlay(rom)?);
+            })?;
+            files.extend(t.overlay(rom)?);
+        }
     }
     if let Some(dir) = &cfg.overlay {
         files.extend(crate::nitrofs::read_overlay_dir(dir)?);
@@ -1634,3 +1635,30 @@ pub(crate) fn fatal(msg: String) -> ! {
 
 #[allow(dead_code)]
 const _: u32 = SEG_PROGRAM;
+
+#[cfg(test)]
+mod overlay_tests {
+    use super::*;
+
+    /// A data file of pictures only (no `TRAN`) with a language asked for: the ROM's own text is played, no error
+    /// (B-18); a file with translations but not that language is still an error.
+    #[test]
+    fn a_data_file_without_translations_is_no_reason_to_stop() {
+        let dir = std::env::temp_dir().join(format!("sunpetal-overlay-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("pictures.data");
+        let mut c = sunpetal_data::container::Container::new();
+        c.add(b"TXTR", vec![1, 2, 3]);
+        c.write(&path).unwrap();
+        let mut cfg = Config::new("rom.nds");
+        cfg.data = Some(path.clone());
+        cfg.language = Some("ru".into());
+        assert!(overlay_files(&cfg, &[0u8; 16]).unwrap().is_empty());
+        cfg.language = None;
+        assert!(overlay_files(&cfg, &[0u8; 16]).unwrap().is_empty());
+        cfg.data = None;
+        cfg.language = Some("ru".into());
+        assert!(overlay_files(&cfg, &[0u8; 16]).is_err(), "a language without any data file stays an error");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}

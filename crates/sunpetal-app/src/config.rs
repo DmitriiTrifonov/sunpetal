@@ -235,6 +235,9 @@ pub struct Game {
     /// The language of the translation in the data file to play with (`ru`); empty: the ROM's own
     /// text. Read when the game starts.
     pub language: String,
+    /// The data file (`sunpetal.data`) the translation is taken from; empty: the texture setting's file when it is
+    /// one (older configs), else none. A file without a translation is not an error: the ROM's text is played.
+    pub data: String,
 }
 
 /// The languages the interface has.

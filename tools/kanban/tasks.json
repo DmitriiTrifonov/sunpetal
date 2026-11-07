@@ -1761,7 +1761,7 @@
   {
    "id": "K-158",
    "t": "Развязать video.texture_pack и перевод: game.data / --data для sunpetal.data, пакет без TRAN не останавливает игру",
-   "col": "backlog",
+   "col": "check",
    "r": 6.0,
    "i": 2.0,
    "c": 0.8,
