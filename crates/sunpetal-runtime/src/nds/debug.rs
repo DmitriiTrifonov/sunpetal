@@ -145,6 +145,8 @@ pub struct WriteEvent {
     pub addr: u32,
     pub size: u8,
     pub value: u32,
+    /// A load (`watch_writes` with `reads`), not a store.
+    pub read: bool,
     /// The ARM9 function entered last and the return address it was entered with (the store is in it or in what it called).
     pub func: u32,
     pub func_lr: u32,
@@ -153,6 +155,7 @@ pub struct WriteEvent {
 }
 
 static WRITES_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static READS_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 thread_local! {
     static WRITES: RefCell<(u32, u32, usize, Vec<WriteEvent>)> = const { RefCell::new((0, 0, 0, Vec::new())) };
@@ -160,7 +163,8 @@ thread_local! {
 
 /// Records the ARM9's stores into `[addr, addr + len)` (at most `cap` of them, then the oldest are kept) until
 /// `stop_writes`. Turns on the entry trace (slow) so the writer's function is known.
-pub fn watch_writes(addr: u32, len: u32, cap: usize) {
+pub fn watch_writes(addr: u32, len: u32, cap: usize, reads: bool) {
+    READS_ON.store(reads, std::sync::atomic::Ordering::Relaxed);
     WRITES.with(|w| *w.borrow_mut() = (addr, len, cap, Vec::new()));
     machine(|m| m.set_write_range(addr, len));
     WRITES_ON.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -169,6 +173,7 @@ pub fn watch_writes(addr: u32, len: u32, cap: usize) {
 
 /// Stops the write watch; the stores seen so far stay for `take_writes`.
 pub fn stop_writes() {
+    READS_ON.store(false, std::sync::atomic::Ordering::Relaxed);
     WRITES_ON.store(false, std::sync::atomic::Ordering::Relaxed);
     machine(|m| m.set_write_range(0, 0));
 }
@@ -188,7 +193,22 @@ pub(crate) fn on_write(c: &Cpu, a: u32, v: u32, size: usize) {
         let mut w = w.borrow_mut();
         let (lo, len, cap) = (w.0, w.1, w.2);
         if a.wrapping_sub(lo) < len && w.3.len() < cap {
-            w.3.push(WriteEvent { vblank: super::vblanks(), addr: a, size: size as u8, value: v, func, func_lr, lr: c.r[14] });
+            w.3.push(WriteEvent { vblank: super::vblanks(), addr: a, size: size as u8, value: v, read: false, func, func_lr, lr: c.r[14] });
+        }
+    });
+}
+
+/// `services::slow_read`'s call: a load of the ARM9 from the watched range (only with `reads`).
+pub(crate) fn on_read(c: &Cpu, a: u32, v: u32, size: usize) {
+    if !READS_ON.load(std::sync::atomic::Ordering::Relaxed) || c.cpu != 9 {
+        return;
+    }
+    let (func, func_lr) = LAST_ENTER.with(|l| l.get());
+    WRITES.with(|w| {
+        let mut w = w.borrow_mut();
+        let (lo, len, cap) = (w.0, w.1, w.2);
+        if a.wrapping_sub(lo) < len && w.3.len() < cap {
+            w.3.push(WriteEvent { vblank: super::vblanks(), addr: a, size: size as u8, value: v, read: true, func, func_lr, lr: c.r[14] });
         }
     });
 }

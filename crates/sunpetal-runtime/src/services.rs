@@ -16,15 +16,20 @@ pub static mut g_arm_trace: c_int = 0;
 unsafe fn slow_read(c: *mut Cpu, a: u32, size: usize) -> u32 {
     let cpu = (*c).cpu;
     if let Some(v) = machine(|m| m.read_mem(cpu, a, size)) {
+        #[cfg(feature = "debug-tools")]
+        crate::nds::debug::on_read(&*c, a, v, size);
         return v;
     }
     let hw = machine(|m| m.hw_ptr());
     let v = (*hw).read(cpu, a, size as u32);
-    match size {
+    let v = match size {
         1 => v & 0xFF,
         2 => v & 0xFFFF,
         _ => v,
-    }
+    };
+    #[cfg(feature = "debug-tools")]
+    crate::nds::debug::on_read(&*c, a, v, size);
+    v
 }
 
 unsafe fn slow_write(c: *mut Cpu, a: u32, v: u32, size: usize) {
