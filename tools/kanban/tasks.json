@@ -1890,7 +1890,7 @@
   {
    "id": "K-168",
    "t": "Эпик Нативный скриптовый движок: разведка чемодана PS2 и DS — сравнение действий и данных, форма семантической модели интерфейса",
-   "col": "backlog",
+   "col": "check",
    "r": 10.0,
    "i": 2.0,
    "c": 0.8,
@@ -1943,7 +1943,7 @@
   {
    "id": "K-172",
    "t": "CI: test (windows-latest) красный — savefile::tests::a_running_game_holds_the_lock_and_a_dead_ones_lock_is_taken_over (мёртвый процесс держит замок)",
-   "col": "backlog",
+   "col": "done",
    "r": 6.0,
    "i": 2.0,
    "c": 0.8,
