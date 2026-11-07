@@ -355,7 +355,7 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
                 })
                 .collect();
             let r = s.check_script(number(w.first(), "FRAMES", None)?, &by_key)?;
-            done(json!({"scene": r.scene, "agreed": r.agreed, "total": r.total, "ended": r.ended, "mismatch": r.mismatch.map(|(v, e)| format!("vblank {}: {}", v, e))}))
+            done(json!({"scenes": r.scenes, "agreed": r.agreed, "total": r.total, "ended": r.ended, "mismatch": r.mismatch.map(|(v, e)| format!("vblank {}: {}", v, e))}))
         }
         "glyphs" => {
             // the canvases the game draws glyphs into (`020338E0`, first argument), summed from the first call of this command

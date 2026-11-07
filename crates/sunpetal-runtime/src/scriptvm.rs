@@ -2,6 +2,7 @@
 //! (`Cnn_yy.txt`) and follows the game's own runner command by command, saying where the game's order differs
 //! from what the text says. Nothing here runs the game: the runner stays ARM code.
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use crate::script::{self, Command};
 
@@ -36,14 +37,17 @@ pub fn parse(src: &str) -> Script {
 }
 
 /// Where the interpreter says the game is, and what it has seen.
+#[derive(Clone)]
 pub struct Follower {
-    script: Script,
+    script: Rc<Script>,
     /// Tags the game has a handler for: others (a tag the game does not know) are skipped, the game skips them too.
     known: HashSet<String>,
     pub pc: usize,
     /// The variables as the game's `SETVALUE`/`ADDVALUE` have set them since the frame began (over the game's own).
     vars: HashMap<usize, i32>,
     pub seen: usize,
+    /// How many times the script has run again from its start after its end.
+    pub runs: usize,
 }
 
 fn num(s: Option<&String>) -> Option<i32> {
@@ -52,12 +56,30 @@ fn num(s: Option<&String>) -> Option<i32> {
 
 impl Follower {
     pub fn new(script: Script, known: HashSet<String>) -> Follower {
-        Follower { script, known, pc: 0, vars: HashMap::new(), seen: 0 }
+        Follower { script: Rc::new(script), known, pc: 0, vars: HashMap::new(), seen: 0, runs: 0 }
     }
 
     /// The script's commands.
     pub fn commands(&self) -> usize {
         self.script.cmds.len()
+    }
+
+    /// The followers that could be where the game is, given the commands it ran in a row (`run`): one at each place
+    /// of the script whose commands go as `run` does, or at each command of the first tag if none does. A game that
+    /// came into a script by a label (a branch before the follower looked) could be at any of them.
+    pub fn candidates(&self, run: &[&str]) -> Vec<Follower> {
+        let known: Vec<(usize, &str)> = self.script.cmds.iter().enumerate().filter(|(_, c)| self.known.contains(&c.tag)).map(|(i, c)| (i, c.tag.as_str())).collect();
+        let mut at: Vec<usize> = (0..known.len()).filter(|&k| run.iter().enumerate().all(|(j, t)| known.get(k + j).is_some_and(|(_, x)| x == t))).map(|k| known[k].0).collect();
+        if at.is_empty() {
+            at = self.script.cmds.iter().enumerate().filter(|(_, c)| run.first() == Some(&c.tag.as_str())).map(|(i, _)| i).collect();
+        }
+        at.into_iter()
+            .map(|pc| {
+                let mut f = self.clone();
+                f.pc = pc;
+                f
+            })
+            .collect()
     }
 
     /// A new frame: the game's variables are read afresh.
@@ -76,8 +98,13 @@ impl Follower {
         while self.script.cmds.get(self.pc).is_some_and(|c| !self.known.contains(&c.tag) && c.tag != tag) {
             self.pc += 1;
         }
+        if self.pc >= self.script.cmds.len() && !self.script.cmds.is_empty() {
+            // an event's script runs again from its start: the file is not read again
+            self.pc = 0;
+            self.runs += 1;
+        }
         let Some(cmd) = self.script.cmds.get(self.pc).cloned() else {
-            return Err(format!("the script has ended at {}, the game runs <{}>", self.pc, tag));
+            return Err(format!("the script is empty, the game runs <{}>", tag));
         };
         if cmd.tag != tag {
             return Err(format!("at {}: the script says <{}>, the game runs <{}>", self.pc, cmd.tag, tag));
@@ -94,7 +121,11 @@ impl Follower {
                     let (max, label) = (w.next()?.parse::<i32>().ok()?, w.next()?);
                     (v <= max).then(|| label.to_string())
                 });
-                branch.and_then(|l| self.script.labels.get(&l).copied())
+                // a value above every limit takes no branch: the script goes on with the next command
+                match branch {
+                    Some(l) => self.script.labels.get(&l).copied(),
+                    None => Some(self.pc + 1),
+                }
             }
             "SETVALUE" => {
                 if let (Some(n), Some(v)) = (num(cmd.params.first()), num(cmd.params.get(1))) {
@@ -136,6 +167,52 @@ mod tests {
         f.observe("FADE_IN", &vars).unwrap();
         f.observe("END", &vars).unwrap();
         assert_eq!(f.expected(), None);
+    }
+
+    #[test]
+    fn candidates_are_every_place_the_run_could_be_and_the_game_rules_them_out() {
+        let f = Follower::new(
+            parse(
+                "<PLAYSE>
+</PLAYSE>
+<WAIT>
+</WAIT>
+<FADE_IN>
+</FADE_IN>
+<PLAYSE>
+</PLAYSE>
+<WAIT>
+</WAIT>
+<END>
+</END>
+",
+            ),
+            known(&["PLAYSE", "WAIT", "FADE_IN", "END"]),
+        );
+        let mut c = f.candidates(&["PLAYSE", "WAIT"]);
+        assert_eq!(c.len(), 2);
+        c.retain_mut(|f| f.observe("PLAYSE", &|_| 0).is_ok());
+        c.retain_mut(|f| f.observe("WAIT", &|_| 0).is_ok());
+        c.retain_mut(|f| f.observe("END", &|_| 0).is_ok());
+        assert_eq!(c.len(), 1);
+    }
+
+    #[test]
+    fn a_script_that_ends_runs_again_from_its_start() {
+        let mut f = Follower::new(
+            parse(
+                "<PLAYSE>
+</PLAYSE>
+<END>
+</END>
+",
+            ),
+            known(&["PLAYSE", "END"]),
+        );
+        for t in ["PLAYSE", "END", "PLAYSE", "END"] {
+            f.observe(t, &|_| 0).unwrap();
+        }
+        assert_eq!(f.runs, 1);
     }
 
     #[test]
