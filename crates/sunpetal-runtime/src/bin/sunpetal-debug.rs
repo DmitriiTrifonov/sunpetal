@@ -346,16 +346,18 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             // scriptcheck FRAMES [DISPATCH_CSV]: the native interpreter follows the game's script (K-162)
             let csv = w.get(1).copied().unwrap_or("docs/native-script-dispatch.csv");
             let text = std::fs::read_to_string(csv).map_err(|e| format!("{}: {}", csv, e))?;
-            let by_key: std::collections::HashMap<u32, String> = text
-                .lines()
-                .skip(1)
-                .filter_map(|l| {
-                    let f: Vec<&str> = l.split(',').collect();
-                    Some((u32::from_str_radix(f.get(3)?, 16).ok()? | 1, f.get(1)?.trim_matches(|c| c == '<' || c == '>').to_string()))
-                })
-                .collect();
+            let by_key = sunpetal_runtime::scriptvm::handlers(&text);
             let r = s.check_script(number(w.first(), "FRAMES", None)?, &by_key)?;
             done(json!({"scenes": r.scenes, "agreed": r.agreed, "total": r.total, "ended": r.ended, "mismatch": r.mismatch.map(|(v, e)| format!("vblank {}: {}", v, e))}))
+        }
+        "scriptlive" => {
+            // scriptlive FRAMES: the observer the app runs (nds::script_observer_*), A pressed on its own (K-162)
+            let n = number(w.first(), "FRAMES", None)?;
+            if !sunpetal_runtime::nds::script_observer_start() {
+                return Err("the observer needs the European dump".into());
+            }
+            s.observe_live(n)?;
+            done(json!({"observer": sunpetal_runtime::nds::script_observer_summary()}))
         }
         "glyphs" => {
             // the canvases the game draws glyphs into (`020338E0`, first argument), summed from the first call of this command

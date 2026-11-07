@@ -314,6 +314,8 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     let mut prev_t = nds::timing();
     let mut last_flush = Instant::now();
     nds::track_script();
+    // SUNPETAL_SCRIPT_OBSERVER=1: the native script interpreter beside the game's runner (K-162), mismatches to stderr
+    let observing = std::env::var_os("SUNPETAL_SCRIPT_OBSERVER").is_some_and(|v| v != "0") && nds::script_observer_start();
     let mut showing_originals = false;
     let (mut still, mut skipped, mut last_print, mut idle_for, mut wait_for) = (0u32, 0u32, 0u64, 0u32, 0u32);
     let (mut step, mut no_step) = ((0u32, 0u32), 0u32);
@@ -404,6 +406,12 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         let t0 = Instant::now();
         if !nds::run_frame() {
             break;
+        }
+        if observing {
+            nds::script_observer_frame();
+            if nds::vblanks().is_multiple_of(1800) {
+                eprintln!("script observer: {}", nds::script_observer_summary().unwrap_or_default());
+            }
         }
         if !groups_told {
             // the pack is in by the first frame: the menu's choices of variant pictures

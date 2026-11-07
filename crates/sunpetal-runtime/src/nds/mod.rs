@@ -1391,6 +1391,90 @@ pub fn script_scene() -> Option<String> {
     None
 }
 
+/// The script text of a scene (`Chapter/Pack/Cnn/<scene>.txt.z`) from the cartridge's file system.
+#[cfg(feature = "debug-tools")]
+fn script_text(scene: &str) -> Result<String, String> {
+    let chapter: u32 = scene.get(1..3).and_then(|c| c.parse().ok()).ok_or("not a scene: Cnn_yy")?;
+    let path = format!("Chapter/Pack/C{:02}/{}.txt.z", chapter, scene);
+    let z = SCENE.with(|s| {
+        let s = s.borrow();
+        let fs = s.0.as_ref()?;
+        nds(|n| fs.file(&n.cart.rom, &path).map(<[u8]>::to_vec))
+    });
+    let z = z.ok_or_else(|| format!("{}: not in the cartridge", path))?;
+    Ok(crate::script::utf16le(&crate::script::lz10(&z).ok_or("the script is not LZ10")?))
+}
+
+#[cfg(feature = "debug-tools")]
+struct LiveObserver {
+    observer: crate::scriptvm::Observer,
+    queue: std::rc::Rc<std::cell::RefCell<Vec<(u64, &'static str)>>>,
+    reported: usize,
+    /// The game's variables as the last frame ended: where this frame began.
+    vars: Vec<i32>,
+}
+
+#[cfg(feature = "debug-tools")]
+thread_local! {
+    static LIVE: std::cell::RefCell<Option<LiveObserver>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Puts the native script interpreter beside the game's runner (K-162, `docs/NATIVE-SCRIPT.md` п. 9): from now on
+/// `script_observer_frame` checks each frame that the commands the game runs are the ones the script's text says.
+/// Costs a hash lookup per function entry of the guest (`track_script` is on anyway). `false` for a game that is
+/// not the European dump (the handlers' addresses are its own).
+#[cfg(feature = "debug-tools")]
+pub fn script_observer_start() -> bool {
+    if !nds(|n| n.cart.rom.get(0xC..0x10) == Some(b"YHNP".as_slice())) {
+        return false;
+    }
+    let by_key = crate::scriptvm::handlers(include_str!("../../../../docs/native-script-dispatch.csv"));
+    let queue: std::rc::Rc<std::cell::RefCell<Vec<(u64, &'static str)>>> = Default::default();
+    // the names live as long as the observer: leaked once
+    for (key, name) in &by_key {
+        let (q, name): (_, &'static str) = (queue.clone(), Box::leak(name.clone().into_boxed_str()));
+        debug::watch(9, *key, move |_| q.borrow_mut().push((vblanks(), name)));
+    }
+    let observer = crate::scriptvm::Observer::new(by_key.values().cloned().collect());
+    LIVE.with(|l| *l.borrow_mut() = Some(LiveObserver { observer, queue, reported: 0, vars: Vec::new() }));
+    true
+}
+
+/// After a frame: the commands the game ran in it go to the interpreter. A mismatch is written to stderr as it
+/// is found (the first twenty).
+#[cfg(feature = "debug-tools")]
+pub fn script_observer_frame() {
+    let scene = script_scene();
+    LIVE.with(|l| {
+        let mut l = l.borrow_mut();
+        let Some(live) = l.as_mut() else { return };
+        let run: Vec<(u64, &'static str)> = std::mem::take(&mut *live.queue.borrow_mut());
+        // a branch is read against the variables as the frame began: the last frame's end
+        live.observer.frame(&run, &live.vars, scene.as_deref(), &script_text);
+        let mut raw = [0u8; 1024];
+        live.vars = match crate::machine::machine(|m| m.mem.read_bytes(9, 0x0207_42EC, &mut raw)) {
+            true => raw.as_chunks::<4>().0.iter().map(|w| i32::from_le_bytes(*w)).collect(),
+            false => Vec::new(),
+        };
+        for (v, what) in live.observer.mismatches.iter().skip(live.reported) {
+            eprintln!("script observer: vblank {}: {}", v, what);
+        }
+        live.reported = live.observer.mismatches.len();
+    });
+}
+
+/// What the interpreter has found: the scene followed, the place in its script, the commands that agreed and the
+/// mismatches (count). `None` while the observer is off.
+#[cfg(feature = "debug-tools")]
+pub fn script_observer_summary() -> Option<String> {
+    LIVE.with(|l| {
+        let l = l.borrow();
+        let o = &l.as_ref()?.observer;
+        let at = o.position().map_or("-".to_string(), |(s, pc)| format!("{}@{}", s, pc));
+        Some(format!("at {}, {} commands agreed in {} scripts, {} mismatches", at, o.agreed_now(), o.scripts, o.mismatch_count))
+    })
+}
+
 pub fn script_idle() -> Option<bool> {
     // a running script holds -1 or the count of a wait (a few hundred at most); -2 is idle; anything else is
     // what an old scene left behind (the title after a reset shows `000047C4`): no script runs

@@ -336,25 +336,13 @@ pub struct ScriptCheck {
 }
 
 impl Session {
-    /// The native interpreter on the script of `scene` (`Chapter/Pack/Cnn/<scene>.txt.z`).
-    fn follower(&self, scene: &str, tags: &std::collections::HashSet<String>) -> Result<crate::scriptvm::Follower, String> {
-        let chapter: u32 = scene.get(1..3).and_then(|c| c.parse().ok()).ok_or("not a scene: Cnn_yy")?;
-        let z = self.file(&format!("Chapter/Pack/C{:02}/{}.txt.z", chapter, scene))?;
-        let text = crate::script::utf16le(&crate::script::lz10(&z).ok_or("the script is not LZ10")?);
-        Ok(crate::scriptvm::Follower::new(crate::scriptvm::parse(&text), tags.clone()))
-    }
-
     /// Runs `n` frames with the native interpreter following the game's script (K-162): every handler the game's
-    /// step enters (`by_key`: key with the Thumb bit → tag) must be the command the script's text says is next.
-    /// When the game reads another scene's script the interpreter takes that one. The game is already in the first
-    /// script (it may have taken a label): the interpreter keeps every place it could be at until the game's own
-    /// commands rule all but the right ones out.
+    /// step enters (`by_key`: key with the Thumb bit → tag) must be the command the script's text says is next
+    /// (`scriptvm::Observer`). Stops at the first mismatch.
     pub fn check_script(&mut self, n: u64, by_key: &HashMap<u32, String>) -> Result<ScriptCheck, String> {
-        let tags: std::collections::HashSet<String> = by_key.values().cloned().collect();
-        let mut scene = self.scene().ok_or("no scene yet: goto one first")?.to_string();
-        let mut fs = vec![self.follower(&scene, &tags)?];
-        let mut joining = true;
-        let mut out = ScriptCheck { scenes: vec![scene.clone()], agreed: 0, total: fs[0].commands(), ended: false, mismatch: None };
+        let mut ob = crate::scriptvm::Observer::new(by_key.values().cloned().collect());
+        self.scene().ok_or("no scene yet: goto one first")?;
+        let mut scenes: Vec<String> = Vec::new();
         let a = buttons("A")?;
         for i in 0..n {
             // A for two frames in every 20 answers each `WAIT` of a dialogue
@@ -365,50 +353,38 @@ impl Session {
             let seq: Vec<_> = debug::take_calls().into_iter().filter(|c| c.cpu == 9 && by_key.contains_key(&c.key)).collect();
             debug::log_calls(0);
             r?;
-            if let Some(now) = self.scene().filter(|s| **s != scene).map(str::to_string) {
-                out.agreed += fs[0].seen;
-                fs = vec![self.follower(&now, &tags)?];
-                joining = false;
-                out.total += fs[0].commands();
-                out.scenes.push(now.clone());
-                scene = now;
+            let run: Vec<(u64, &str)> = seq.iter().map(|c| (c.vblank, by_key[&c.key].as_str())).collect();
+            let scene = self.scene().map(str::to_string);
+            let load = |name: &str| -> Result<String, String> {
+                let chapter: u32 = name.get(1..3).and_then(|c| c.parse().ok()).ok_or("not a scene: Cnn_yy")?;
+                let z = self.file(&format!("Chapter/Pack/C{:02}/{}.txt.z", chapter, name))?;
+                Ok(crate::script::utf16le(&crate::script::lz10(&z).ok_or("the script is not LZ10")?))
+            };
+            ob.frame(&run, &vals, scene.as_deref(), &load);
+            if let Some(s) = scene.filter(|s| scenes.last() != Some(s)) {
+                scenes.push(s);
             }
-            if joining && !seq.is_empty() {
-                let run: Vec<&str> = seq.iter().map(|c| by_key[&c.key].as_str()).collect();
-                fs = fs[0].candidates(&run);
-                joining = false;
-                if fs.is_empty() {
-                    out.mismatch = Some((seq[0].vblank, format!("{}: the game's first commands are nowhere in the script", scene)));
-                    break;
-                }
-            }
-            for f in &mut fs {
-                f.frame();
-            }
-            for c in seq {
-                let mut first_error = None;
-                fs.retain_mut(|f| match f.observe(&by_key[&c.key], &|i| vals.get(i).copied().unwrap_or(0)) {
-                    Ok(()) => true,
-                    Err(e) => {
-                        first_error.get_or_insert(e);
-                        false
-                    }
-                });
-                if fs.is_empty() {
-                    out.mismatch = Some((c.vblank, format!("{}: {}", scene, first_error.unwrap_or_default())));
-                    break;
-                }
-            }
-            if out.mismatch.is_some() {
+            if !ob.mismatches.is_empty() {
                 break;
             }
         }
         self.keys = 0;
-        if let Some(f) = fs.first() {
-            out.agreed += f.seen;
-            out.ended = f.expected().is_none();
+        Ok(ScriptCheck { scenes, agreed: ob.agreed_now(), total: ob.total, ended: ob.ended(), mismatch: ob.mismatches.first().cloned() })
+    }
+}
+
+impl Session {
+    /// `n` frames with the observer the app runs (`nds::script_observer_start` is called already), A pressed for
+    /// two frames in every 20.
+    pub fn observe_live(&mut self, n: u64) -> Result<(), String> {
+        let a = buttons("A")?;
+        for i in 0..n {
+            self.keys = if i % 20 < 2 { a } else { 0 };
+            self.run(1)?;
+            nds::script_observer_frame();
         }
-        Ok(out)
+        self.keys = 0;
+        Ok(())
     }
 }
 
