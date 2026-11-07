@@ -324,6 +324,39 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             std::fs::write(path, text).map_err(|e| format!("{}: {}", path, e))?;
             done(json!({"functions": rows.len()}))
         }
+        "scriptseq" => {
+            // scriptseq FRAMES OUT [DISPATCH_CSV]: the script step's handlers entered, in order (K-162)
+            let csv = w.get(2).copied().unwrap_or("docs/native-script-dispatch.csv");
+            let text = std::fs::read_to_string(csv).map_err(|e| format!("{}: {}", csv, e))?;
+            let mut by_key = std::collections::HashMap::new();
+            for l in text.lines().skip(1) {
+                let f: Vec<&str> = l.split(',').collect();
+                if let (Some(code), Some(h)) = (f.first().and_then(|c| c.parse::<u32>().ok()), f.get(3).and_then(|h| u32::from_str_radix(h, 16).ok())) {
+                    by_key.insert(h | 1, (code, f.get(1).copied().unwrap_or("").to_string()));
+                }
+            }
+            let keys = by_key.keys().copied().collect();
+            let seq = s.calls_in_order(number(w.first(), "FRAMES", None)?, &keys)?;
+            let path = w.get(1).ok_or("scriptseq FRAMES OUT [CSV]")?;
+            let out: String = seq.iter().map(|(v, k, a)| format!("{}\t{}\t{}\t{:08X}\n", v, by_key[k].0, by_key[k].1, a)).collect();
+            std::fs::write(path, out).map_err(|e| format!("{}: {}", path, e))?;
+            done(json!({"entries": seq.len()}))
+        }
+        "scriptcheck" => {
+            // scriptcheck FRAMES [DISPATCH_CSV]: the native interpreter follows the game's script (K-162)
+            let csv = w.get(1).copied().unwrap_or("docs/native-script-dispatch.csv");
+            let text = std::fs::read_to_string(csv).map_err(|e| format!("{}: {}", csv, e))?;
+            let by_key: std::collections::HashMap<u32, String> = text
+                .lines()
+                .skip(1)
+                .filter_map(|l| {
+                    let f: Vec<&str> = l.split(',').collect();
+                    Some((u32::from_str_radix(f.get(3)?, 16).ok()? | 1, f.get(1)?.trim_matches(|c| c == '<' || c == '>').to_string()))
+                })
+                .collect();
+            let r = s.check_script(number(w.first(), "FRAMES", None)?, &by_key)?;
+            done(json!({"scene": r.scene, "agreed": r.agreed, "total": r.total, "ended": r.ended, "mismatch": r.mismatch.map(|(v, e)| format!("vblank {}: {}", v, e))}))
+        }
         "glyphs" => {
             // the canvases the game draws glyphs into (`020338E0`, first argument), summed from the first call of this command
             thread_local! { static SEEN: std::rc::Rc<std::cell::RefCell<std::collections::BTreeMap<u32, u64>>> = Default::default(); static ON: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }

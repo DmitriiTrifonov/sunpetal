@@ -321,6 +321,71 @@ impl Session {
     }
 }
 
+/// What `Session::check_script` found.
+#[derive(Debug)]
+pub struct ScriptCheck {
+    pub scene: String,
+    /// Commands the game ran that the native interpreter had expected.
+    pub agreed: usize,
+    /// The script's commands, and whether the game got to its end.
+    pub total: usize,
+    pub ended: bool,
+    /// The first place the two parted: the frame and what differs.
+    pub mismatch: Option<(u64, String)>,
+}
+
+impl Session {
+    /// Runs `n` frames with the native interpreter following the game's script (K-162): every handler the game's
+    /// step enters (`by_key`: key with the Thumb bit → tag) must be the command the script's text says is next.
+    pub fn check_script(&mut self, n: u64, by_key: &HashMap<u32, String>) -> Result<ScriptCheck, String> {
+        let scene = self.scene().ok_or("no scene yet: goto one first")?.to_string();
+        let chapter: u32 = scene.get(1..3).and_then(|c| c.parse().ok()).ok_or("not a scene: Cnn_yy")?;
+        let z = self.file(&format!("Chapter/Pack/C{:02}/{}.txt.z", chapter, scene))?;
+        let text = crate::script::utf16le(&crate::script::lz10(&z).ok_or("the script is not LZ10")?);
+        let mut f = crate::scriptvm::Follower::new(crate::scriptvm::parse(&text), by_key.values().cloned().collect());
+        let mut mismatch = None;
+        let a = buttons("A")?;
+        for i in 0..n {
+            // A for two frames in every 20 answers each `WAIT` of a dialogue
+            self.keys = if i % 20 < 2 { a } else { 0 };
+            f.frame();
+            let vals: Vec<i32> = (0..256).map(|i| self.value(i).unwrap_or(0)).collect();
+            debug::log_calls(4_000_000);
+            let r = self.run(1);
+            let seq: Vec<_> = debug::take_calls().into_iter().filter(|c| c.cpu == 9 && by_key.contains_key(&c.key)).collect();
+            debug::log_calls(0);
+            r?;
+            for c in seq {
+                if let Err(e) = f.observe(&by_key[&c.key], &|i| vals.get(i).copied().unwrap_or(0)) {
+                    mismatch = Some((c.vblank, e));
+                    break;
+                }
+            }
+            if mismatch.is_some() {
+                break;
+            }
+        }
+        self.keys = 0;
+        Ok(ScriptCheck { scene, agreed: f.seen, total: f.commands(), ended: f.expected().is_none(), mismatch })
+    }
+}
+
+impl Session {
+    /// The ARM9 entries of the next `n` frames into the functions of `keys` (Thumb bit set), in the order they
+    /// happened: (vblank, key, first argument). For the script step's handlers (K-162).
+    pub fn calls_in_order(&mut self, n: u64, keys: &std::collections::HashSet<u32>) -> Result<Vec<(u64, u32, u32)>, String> {
+        let mut seq = Vec::new();
+        for _ in 0..n {
+            debug::log_calls(4_000_000);
+            let r = self.run(1);
+            seq.extend(debug::take_calls().into_iter().filter(|c| c.cpu == 9 && keys.contains(&c.key)).map(|c| (c.vblank, c.key, c.args[0])));
+            debug::log_calls(0);
+            r?;
+        }
+        Ok(seq)
+    }
+}
+
 impl Session {
     /// The function entries of the next `n` frames that have a value of `value` among their four arguments
     /// (`names` held for the first 9 frames), in order.

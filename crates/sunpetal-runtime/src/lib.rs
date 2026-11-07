@@ -13,6 +13,8 @@ pub mod savefile;
 pub mod sched;
 #[cfg(feature = "debug-tools")]
 pub mod script;
+#[cfg(feature = "debug-tools")]
+pub mod scriptvm;
 pub mod selftest;
 pub mod services;
 pub use sunpetal_data::nitrofs;
