@@ -30,6 +30,7 @@ mod pad;
 mod post;
 #[allow(dead_code)]
 mod rec;
+mod scenes;
 pub mod screen_report;
 mod script;
 mod start;
