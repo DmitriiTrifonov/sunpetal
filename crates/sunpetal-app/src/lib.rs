@@ -2085,6 +2085,7 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
             goto: None,
             dump: None,
             pack,
+            data: None,
             lang: None,
             wide: None,
             renderer: None,
