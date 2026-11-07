@@ -127,7 +127,7 @@ pub fn lock_path(save: &Path) -> PathBuf {
     PathBuf::from(n)
 }
 
-/// Whether a process with this number is alive (`kill -0`; where that is missing, it is taken to be).
+/// Whether a process with this number is alive (`kill -0` on unix, `tasklist` on Windows; elsewhere it is taken to be).
 fn alive(pid: u32) -> bool {
     if pid == std::process::id() {
         return true;
@@ -140,6 +140,17 @@ fn alive(pid: u32) -> bool {
             .stderr(std::process::Stdio::null())
             .status()
             .map(|s| s.success())
+            .unwrap_or(true);
+    }
+    #[cfg(windows)]
+    {
+        // `tasklist` prints the process row (`"name","PID",...`) when it exists, else an INFO line.
+        let want = format!("\"{}\"", pid);
+        return std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {}", pid), "/NH", "/FO", "CSV"])
+            .stderr(std::process::Stdio::null())
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.contains(&format!(",{},", want))))
             .unwrap_or(true);
     }
     #[allow(unreachable_code)]
