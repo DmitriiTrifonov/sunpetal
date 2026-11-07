@@ -215,6 +215,32 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             let bytes = debug::peek(addr, len).ok_or_else(|| format!("{:08X}: not memory", addr))?;
             done(json!({"addr": format!("{:08X}", addr), "hex": bytes.iter().map(|b| format!("{:02X}", b)).collect::<String>()}))
         }
+        "watchw" => {
+            // watchw ADDR LEN [CAP]: record the ARM9's stores into [ADDR, ADDR+LEN) until `unwatchw`; `writes` reads them
+            let addr = address(w.first().ok_or("watchw ADDR LEN [CAP]")?)?;
+            debug::watch_writes(addr, number(w.get(1), "LEN", Some(4))?, number(w.get(2), "CAP", Some(100_000))?);
+            done(json!({}))
+        }
+        "unwatchw" => {
+            debug::stop_writes();
+            done(json!({}))
+        }
+        "writes" => {
+            // the stores since the last call, grouped by writer (function entered last, its caller, link register)
+            let mut by: std::collections::BTreeMap<(u32, u32, u32), (u64, Vec<String>)> = Default::default();
+            for e in debug::take_writes() {
+                let g = by.entry((e.func, e.func_lr, e.lr)).or_default();
+                g.0 += 1;
+                if g.1.len() < 6 {
+                    g.1.push(format!("{:08X}:{}={:08X}@{}", e.addr, e.size, e.value, e.vblank));
+                }
+            }
+            let rows: Vec<Value> = by
+                .iter()
+                .map(|((f, flr, lr), (n, s))| json!({"fn": format!("{:08X}", f), "fn_lr": format!("{:08X}", flr), "lr": format!("{:08X}", lr), "stores": n, "first": s}))
+                .collect();
+            done(json!({"writers": rows}))
+        }
         "poke" => {
             let addr = address(w.first().ok_or("poke ADDR VALUE")?)?;
             let value: u32 = number(w.get(1), "VALUE", None)?;

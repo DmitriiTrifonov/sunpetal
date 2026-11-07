@@ -304,6 +304,20 @@ impl Machine {
         }
     }
 
+    /// Sends the ARM9's stores into `[lo, lo + len)` through the slow path (`mem_write*`), where a write watch sees
+    /// them (`nds::debug::watch_writes`); `len` 0 takes the range away. The overlay area keeps its own slow path.
+    pub fn set_write_range(&mut self, lo: u32, len: u32) {
+        let (olo, olen) = (self.ovl[0].lo, self.ovl[0].len);
+        let (a, b) = match (olen > 0, len > 0) {
+            (false, false) => (0, 0),
+            (true, false) => (olo, olo + olen),
+            (false, true) => (lo, lo + len),
+            (true, true) => (olo.min(lo), (olo + olen).max(lo + len)),
+        };
+        self.mem.map.ovl_lo[0] = a;
+        self.mem.map.ovl_len[0] = b - a;
+    }
+
     /// The hardware, for calls made with no borrow of the machine held.
     pub fn hw_ptr(&mut self) -> *mut dyn Hardware {
         &mut *self.hw as *mut dyn Hardware

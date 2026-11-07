@@ -134,7 +134,7 @@ python3 tools/debug/check_log.py out/c04.jsonl --scene C04_16 --s patched/Chapte
 
 `skip [FRAMES]` (как F7 в приложении: без нажатий, до команды `WAIT` скрипта или до свободной ходьбы; ответ `stopped`: waits/idle/limit) | `request N` | `setvalue I V` | `value I` | `teleport X Y Z` | `changemap MAP X Y Z` (приложение обработчика: действует только внутри идущего скрипта) | `run N` | `press KEYS [FRAMES]` | `tap X Y [FRAMES]` | `shot FILE` | `log FILE|off` | `advance [FRAMES]` | `walk N [FRAMES]` | `shown` | `quit`.
 
-Кнопки: `A B SELECT START RIGHT LEFT UP DOWN R L X Y`, через `+`. `peek` и `dump` читают и регистры, палитры, VRAM, OAM (`04…07`), как их видит ARM9. Остальные команды (`peek`, `find`, `findhex`, `slots`, `calls`, `callsarg`, `callsstr`) — разведка движка, не часть схемы.
+Кнопки: `A B SELECT START RIGHT LEFT UP DOWN R L X Y`, через `+`. `peek` и `dump` читают и регистры, палитры, VRAM, OAM (`04…07`), как их видит ARM9. Остальные команды (`peek`, `find`, `findhex`, `slots`, `calls`, `callsarg`, `callsstr`) — разведка движка, не часть схемы. `watchw ADDR LEN [CAP]` — наблюдение за записью ARM9 в `[ADDR, ADDR+LEN)` (K-173): запись идёт по медленному пути, входы в функции включены (медленнее); `writes` — записи с прошлого вызова, сгруппированные по писателю (`fn` — последняя вошедшая функция, `fn_lr` — её вызывающий, `lr` — r14 в момент записи; писатель — `fn` или то, что она вызвала), `unwatchw` выключает. Пример: `watchw 0228FC18 12`, `press RIGHT 12`, `writes` — кто двигает героя (`docs/NATIVE-INPUT.md`).
 
 ## Тесты
 

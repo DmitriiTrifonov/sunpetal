@@ -29,6 +29,7 @@ unsafe fn slow_read(c: *mut Cpu, a: u32, size: usize) -> u32 {
 
 unsafe fn slow_write(c: *mut Cpu, a: u32, v: u32, size: usize) {
     let cpu = (*c).cpu;
+    crate::nds::debug::on_write(&*c, a, v, size);
     if machine(|m| m.write_mem(cpu, a, v, size)) {
         return;
     }

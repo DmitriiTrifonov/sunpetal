@@ -138,6 +138,61 @@ pub fn clip_callers() -> Vec<(u32, u64)> {
     v
 }
 
+/// One store of the ARM9 into the watched range (`watch_writes`).
+#[derive(Clone, Debug)]
+pub struct WriteEvent {
+    pub vblank: u64,
+    pub addr: u32,
+    pub size: u8,
+    pub value: u32,
+    /// The ARM9 function entered last and the return address it was entered with (the store is in it or in what it called).
+    pub func: u32,
+    pub func_lr: u32,
+    /// The link register at the store (a leaf function's caller).
+    pub lr: u32,
+}
+
+static WRITES_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+thread_local! {
+    static WRITES: RefCell<(u32, u32, usize, Vec<WriteEvent>)> = const { RefCell::new((0, 0, 0, Vec::new())) };
+}
+
+/// Records the ARM9's stores into `[addr, addr + len)` (at most `cap` of them, then the oldest are kept) until
+/// `stop_writes`. Turns on the entry trace (slow) so the writer's function is known.
+pub fn watch_writes(addr: u32, len: u32, cap: usize) {
+    WRITES.with(|w| *w.borrow_mut() = (addr, len, cap, Vec::new()));
+    machine(|m| m.set_write_range(addr, len));
+    WRITES_ON.store(true, std::sync::atomic::Ordering::Relaxed);
+    trace_on(true);
+}
+
+/// Stops the write watch; the stores seen so far stay for `take_writes`.
+pub fn stop_writes() {
+    WRITES_ON.store(false, std::sync::atomic::Ordering::Relaxed);
+    machine(|m| m.set_write_range(0, 0));
+}
+
+/// The stores seen since the last call.
+pub fn take_writes() -> Vec<WriteEvent> {
+    WRITES.with(|w| std::mem::take(&mut w.borrow_mut().3))
+}
+
+/// `services::slow_write`'s call: a store of the ARM9 (the watch is checked there, cheaply).
+pub(crate) fn on_write(c: &Cpu, a: u32, v: u32, size: usize) {
+    if !WRITES_ON.load(std::sync::atomic::Ordering::Relaxed) || c.cpu != 9 {
+        return;
+    }
+    let (func, func_lr) = LAST_ENTER.with(|l| l.get());
+    WRITES.with(|w| {
+        let mut w = w.borrow_mut();
+        let (lo, len, cap) = (w.0, w.1, w.2);
+        if a.wrapping_sub(lo) < len && w.3.len() < cap {
+            w.3.push(WriteEvent { vblank: super::vblanks(), addr: a, size: size as u8, value: v, func, func_lr, lr: c.r[14] });
+        }
+    });
+}
+
 /// `ARM_ENTER`'s service (`services::arm_trace_enter`).
 pub(crate) fn on_enter(c: &mut Cpu, key: u32) {
     if c.cpu == 9 {
