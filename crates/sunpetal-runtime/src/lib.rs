@@ -11,6 +11,7 @@ pub mod interp;
 pub mod machine;
 pub mod nativedialog;
 pub mod nativedraw;
+pub mod nativeinput;
 pub mod nds;
 pub mod savefile;
 pub mod sched;
