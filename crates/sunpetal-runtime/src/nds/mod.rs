@@ -470,6 +470,9 @@ pub fn boot(cfg: Config) -> Result<(), String> {
         sched::start(cpu, entries[ci(cpu)]);
         crate::bios::direct_boot_cpu(cpu, entries[ci(cpu)]);
     }
+    if crate::nativedialog::wanted() {
+        note(&format!("native dialogue: {} handlers", crate::nativedialog::install()?));
+    }
     Ok(())
 }
 

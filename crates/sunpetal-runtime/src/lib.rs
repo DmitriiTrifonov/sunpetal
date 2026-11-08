@@ -9,6 +9,7 @@ pub mod dialogue;
 pub mod evn;
 pub mod interp;
 pub mod machine;
+pub mod nativedialog;
 pub mod nds;
 pub mod savefile;
 pub mod sched;
