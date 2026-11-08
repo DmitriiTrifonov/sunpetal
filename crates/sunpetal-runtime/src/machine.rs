@@ -428,6 +428,13 @@ impl Machine {
     /// for calls, jumps and thread starts, and must return to `lr` as recompiled code does.
     pub fn override_fn(&mut self, cpu: i32, key: u32, f: ArmFunc) {
         self.overrides.insert((cpu, key), f);
+        // direct calls of the recompiled code ask at the function's entry (`ARM_ENTER`)
+        unsafe { crate::services::g_arm_hooks = 1 };
+    }
+
+    /// The replacement of the function at `key` of `cpu`, if the host has one.
+    pub fn override_at(&self, cpu: i32, key: u32) -> Option<ArmFunc> {
+        self.overrides.get(&(cpu, key)).copied()
     }
 
     /// A return that went to a landing: a saved context was loaded.

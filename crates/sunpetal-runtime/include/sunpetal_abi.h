@@ -270,8 +270,11 @@ void     arm_interpret(Cpu* c, uint32_t key);
 // At each function's entry: when the runtime traces calls (a debugging aid),
 // it is told; otherwise one predictable branch.
 extern int g_arm_trace;
-void arm_trace_enter(Cpu* c, uint32_t key);
-#define ARM_ENTER(c, k) do { if (ARM_UNLIKELY(g_arm_trace)) arm_trace_enter(c, k); } while (0)
+// Nonzero while the host replaces guest functions (`Machine::override_fn`): the entry asks whether this one is
+// replaced, and if so the replacement has run and the function returns at once (direct calls included).
+extern int g_arm_hooks;
+int arm_trace_enter(Cpu* c, uint32_t key);
+#define ARM_ENTER(c, k) do { if (ARM_UNLIKELY(g_arm_trace | g_arm_hooks)) { if (arm_trace_enter(c, k)) return; } } while (0)
 // After a call: the callee's return must have come back here. If it did not,
 // arm_bad_return decides (see there); coming back means an unwind in progress.
 #define ARM_RET(c, a) do { if (ARM_UNLIKELY((c)->pc != (a))) { arm_bad_return(c, a); return; } } while (0)

@@ -287,11 +287,26 @@ pub unsafe extern "C" fn arm_interpret(c: *mut Cpu, key: u32) {
     crate::interp::interpret(&mut *c, key)
 }
 
+/// Nonzero while some guest function is replaced by the host (see the header).
 #[no_mangle]
-pub unsafe extern "C" fn arm_trace_enter(_c: *mut Cpu, _key: u32) {
-    crate::nds::note_enter(&*_c, _key);
-    #[cfg(feature = "debug-tools")]
-    crate::nds::debug::on_enter(&mut *_c, _key);
+pub static mut g_arm_hooks: c_int = 0;
+
+/// At a function's entry while calls are traced or functions replaced: 1 if the host's replacement of this one ran
+/// (the function must return: the replacement set `pc`), else 0.
+#[no_mangle]
+pub unsafe extern "C" fn arm_trace_enter(c: *mut Cpu, key: u32) -> c_int {
+    if g_arm_hooks != 0 {
+        if let Some(f) = machine(|m| m.override_at((*c).cpu, key)) {
+            f(c);
+            return 1;
+        }
+    }
+    if g_arm_trace != 0 {
+        crate::nds::note_enter(&*c, key);
+        #[cfg(feature = "debug-tools")]
+        crate::nds::debug::on_enter(&mut *c, key);
+    }
+    0
 }
 
 // ---- CP15 ------------------------------------------------------------------------------------

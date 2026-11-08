@@ -78,7 +78,9 @@ unsafe fn run(c: *mut Cpu, i: usize) {
             }
         }
     }
-    (*c).pc = (*c).r[14];
+    // as `bx lr` of the recompiled code (`arm_iw`)
+    let lr = (*c).r[14];
+    (*c).pc = if lr & 1 != 0 { lr } else { lr & !3 };
 }
 
 macro_rules! slots {

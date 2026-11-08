@@ -324,6 +324,21 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             std::fs::write(path, text).map_err(|e| format!("{}: {}", path, e))?;
             done(json!({"functions": rows.len()}))
         }
+        "callstrace" => {
+            // callstrace FRAMES OUT KEY[,KEY...]: every ARM9 entry into these functions (hex, bit 0 for Thumb), in order (K-189)
+            let keys = w
+                .get(2)
+                .ok_or("callstrace FRAMES OUT KEY[,KEY...]")?
+                .split(',')
+                .map(|k| u32::from_str_radix(k.trim_start_matches("0x"), 16).map_err(|_| format!("bad key {}", k)))
+                .collect::<Result<_, _>>()?;
+            let found = s.calls_trace(number(w.first(), "FRAMES", None)?, &keys)?;
+            let path = w.get(1).ok_or("callstrace FRAMES OUT KEY")?;
+            let text: String =
+                found.iter().map(|c| format!("{}\t{:08X}\t{:08X}\t{:08X} {:08X} {:08X} {:08X}\n", c.vblank, c.key, c.lr, c.args[0], c.args[1], c.args[2], c.args[3])).collect();
+            std::fs::write(path, text).map_err(|e| format!("{}: {}", path, e))?;
+            done(json!({"entries": found.len()}))
+        }
         "scriptseq" => {
             // scriptseq FRAMES OUT [DISPATCH_CSV]: the script step's handlers entered, in order (K-162)
             let csv = w.get(2).copied().unwrap_or("docs/native-script-dispatch.csv");

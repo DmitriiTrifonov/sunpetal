@@ -402,6 +402,23 @@ impl Session {
         }
         Ok(seq)
     }
+
+    /// Every entry of ARM9 into one of `keys` in the next `n` frames, in order, with the registers at the entry (K-189);
+    /// A is pressed two frames in twenty, as the dialogue checks do.
+    pub fn calls_trace(&mut self, n: u64, keys: &std::collections::HashSet<u32>) -> Result<Vec<debug::Call>, String> {
+        let a = buttons("A")?;
+        let mut out = Vec::new();
+        for i in 0..n {
+            self.keys = if i % 20 < 2 { a } else { 0 };
+            debug::log_calls(4_000_000);
+            let r = self.run(1);
+            out.extend(debug::take_calls().into_iter().filter(|c| c.cpu == 9 && keys.contains(&c.key)));
+            debug::log_calls(0);
+            r?;
+        }
+        self.keys = 0;
+        Ok(out)
+    }
 }
 
 impl Session {
