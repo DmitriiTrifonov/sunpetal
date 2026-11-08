@@ -23,7 +23,7 @@
 
 ## Пилот нативного диалога (K-164, итог 2026-11-08)
 
-Флаг `SUNPETAL_NATIVE_DIALOG=1`: тонкие обработчики диалога (`TEXT_EX`, `SHOWWINDOW`, `HIDEWINDOW`, `NEXTPAGE`) исполняет Rust по таблице `docs/native-dialog-hooks.csv`; кадры и состояние побайтно равны ARM на главах 1–18 (`tools/script/dialog_blind.sh`), автор проверил в окне. Умолчание без флага. Рисует и ждёт A по-прежнему ARM; вариант Б не пробовали. Итог и мнение для go/no-go (K-165): `docs/NATIVE-SCRIPT.md` §10.
+Флаг `SUNPETAL_NATIVE_DIALOG=1`: тонкие обработчики диалога (`TEXT_EX`, `SHOWWINDOW`, `HIDEWINDOW`, `NEXTPAGE`) исполняет Rust по таблице `docs/native-dialog-hooks.csv`; кадры и состояние побайтно равны ARM на главах 1–18 (`tools/script/dialog_blind.sh`), автор проверил в окне. Умолчание без флага. Рисует и ждёт A по-прежнему ARM; вариант Б не пробовали. Итог для go/no-go: `docs/NATIVE-SCRIPT.md` §10. **Решение автора 2026-11-08 (K-165): полное go** (порты 3DS/Thor пока не нужны), план — `docs/NATIVE-ENGINE-PLAN.md`.
 
 ## Этап 7, пакеты текстур (2026-10-24)
 
