@@ -342,6 +342,14 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             std::fs::write(path, out).map_err(|e| format!("{}: {}", path, e))?;
             done(json!({"entries": seq.len()}))
         }
+        "dialogmodel" => {
+            // dialogmodel FRAMES [CSV [TRACE]]: the native dialogue model beside the game, words compared each frame (K-177)
+            let csv = w.get(1).copied().unwrap_or("docs/native-script-dispatch.csv");
+            let by_key = sunpetal_runtime::scriptvm::handlers(&std::fs::read_to_string(csv).map_err(|e| format!("{}: {}", csv, e))?);
+            let trace = w.get(2).map(std::path::Path::new);
+            let r = s.dialog_model_check(number(w.first(), "FRAMES", None)?, &by_key, trace)?;
+            done(serde_json::to_value(&r).map_err(|e| e.to_string())?)
+        }
         "dialogref" => {
             // dialogref FRAMES OUT: per frame the scene, the hash of both screens and the dialogue state words (K-176)
             let path = w.get(1).ok_or("dialogref FRAMES OUT")?;

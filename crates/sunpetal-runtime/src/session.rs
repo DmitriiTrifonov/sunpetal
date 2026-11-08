@@ -1055,6 +1055,114 @@ impl Session {
     }
 }
 
+/// The answer of `dialog_model_check`.
+#[derive(Debug, Serialize)]
+pub struct ModelCheck {
+    pub frames: u64,
+    /// Frames where a word of the model differed from the game's, and the first of them.
+    pub mismatches: u64,
+    pub first: Vec<String>,
+    /// How many times the model ran `TEXT_EX` and how many times the game's text pointer changed.
+    pub texts_model: u64,
+    pub texts_game: u64,
+    /// Steps where the model took the mark from the game, because a command it does not know ran.
+    pub resyncs: u64,
+    /// Per command the model does not know: (steps it ran in, steps where the mark was not what the model
+    /// expected after it). A command with no second number leaves the mark alone (a step with several is counted for each).
+    pub others: std::collections::BTreeMap<String, (u64, u64)>,
+}
+
+/// The script step (Thumb bit set): it runs once per logic step of the game.
+const STEP_KEY: u32 = 0x0204_5BC5;
+/// The button word `0x0202C374` fills each vblank (bit 0 = A pressed in this frame), read by the step.
+const PAD_WORD: u32 = 0x0206_CA72;
+
+impl Session {
+    /// `n` frames of the game (A for two in every 20) with the native dialogue model (`dialogmodel`) beside it: the
+    /// commands the game ran in each logic step and the A button go to the model, and its words are compared with the
+    /// game's after every frame (K-177). `handlers`: key with the Thumb bit -> tag.
+    pub fn dialog_model_check(&mut self, n: u64, handlers: &HashMap<u32, String>, trace: Option<&Path>) -> Result<ModelCheck, String> {
+        let mut log = String::new();
+        let word = |a: u32| debug::peek(a, 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+        let state = || -> Option<crate::dialogmodel::State> {
+            let [f48, f4c, mark, window] = DIALOG_STATE.iter().filter(|d| ["mark", "f48", "f4c", "window"].contains(&d.0)).map(|d| word(d.1)).collect::<Option<Vec<_>>>()?[..]
+            else {
+                return None;
+            };
+            let w2 = debug::peek(0x0207_58EE, 1)?[0] as u32;
+            Some(crate::dialogmodel::State { mark: mark as i32, f48, f4c, w2, window: window != 0 })
+        };
+        let mut model = crate::dialogmodel::Model::new(crate::dialogmodel::Params::builtin(), state().ok_or("no dialogue words")?);
+        let keys: std::collections::HashSet<u32> = handlers.keys().copied().chain(std::iter::once(STEP_KEY)).collect();
+        let a = buttons("A")?;
+        let mut out = ModelCheck { frames: 0, mismatches: 0, first: Vec::new(), texts_model: 0, texts_game: 0, resyncs: 0, others: Default::default() };
+        let mut pending_a = false;
+        let mut text = word(0x0207_5A28);
+        for i in 0..n {
+            self.keys = if i % 20 < 2 { a } else { 0 };
+            debug::log_calls(4_000_000);
+            let r = self.run(1);
+            let seq: Vec<_> = debug::take_calls().into_iter().filter(|c| c.cpu == 9 && keys.contains(&c.key)).collect();
+            debug::log_calls(0);
+            r?;
+            pending_a |= debug::peek(PAD_WORD, 2).is_some_and(|b| b[0] & 1 != 0);
+            let tags: Vec<&str> = seq.iter().filter(|c| c.key != STEP_KEY).map(|c| handlers[&c.key].as_str()).collect();
+            if seq.iter().any(|c| c.key == STEP_KEY) {
+                model.step(&tags, pending_a);
+                pending_a = false;
+            }
+            // commands the model does not know may set the mark, in a step's frame or beside it: take the game's
+            let unknown: Vec<&str> = tags.iter().copied().filter(|t| !["TEXT_EX", "WAIT", "SHOWWINDOW", "HIDEWINDOW"].contains(t)).collect();
+            if !unknown.is_empty() {
+                let off = state().is_some_and(|g| g.mark != model.state.mark);
+                for t in &unknown {
+                    let e = out.others.entry(t.to_string()).or_default();
+                    e.0 += 1;
+                    e.1 += off as u64;
+                }
+                if off {
+                    model.set_mark(state().map_or(0, |g| g.mark));
+                    out.resyncs += 1;
+                }
+            }
+            if trace.is_some() {
+                let tags: Vec<&str> = seq.iter().map(|c| handlers.get(&c.key).map_or("STEP", |t| t.as_str())).collect();
+                let g = state();
+                log.push_str(&format!("{}\t{}\t{:?}\t{:?}\n", self.vblank(), tags.join(" "), model.state, g));
+            }
+            let now = word(0x0207_5A28);
+            if now != text {
+                out.texts_game += 1;
+                text = now;
+            }
+            out.frames += 1;
+            let mine = |m: &crate::dialogmodel::Model| {
+                let mut s = m.state;
+                let g = state().unwrap_or(s);
+                // `f4c` is an animation counter with a peak that differs per line (42..105): not modelled, the game's
+                s.f4c = g.f4c;
+                if !m.armed() {
+                    // not followed before the first TEXT_EX: take the game's
+                    (s.f48, s.w2) = (g.f48, g.w2);
+                }
+                s
+            };
+            if let Some(actual) = state().filter(|s| *s != mine(&model)) {
+                out.mismatches += 1;
+                if out.first.len() < 10 {
+                    out.first.push(format!("vblank {}: model {:?}, game {:?}", self.vblank(), model.state, actual));
+                }
+            }
+        }
+        self.keys = 0;
+        if let Some(path) = trace {
+            std::fs::write(path, log).map_err(|e| format!("{}: {}", path.display(), e))?;
+        }
+        out.texts_model = model.texts;
+        Ok(out)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

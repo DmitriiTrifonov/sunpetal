@@ -1,0 +1,9 @@
+key,value,source
+mark_start,20,TEXT_EX 0x02049234: movs r3 #0x14 -> [0x0206577C]
+wait_mark,-1,WAIT 0x02048078: movs r1 #1; subs #2 -> [0x0206577C]
+w2_cap,10,observed C01_01 frames 7425..7490 ([0x020758EC+2] counts to 0x0a and holds)
+f48_clear_at,8,observed C01_01: [0x0207596C+0x48] 1 -> 0 when the mark reaches 8
+f4c_rise_at,7,observed C01_01: [0x0207596C+0x4C] starts to move when the mark reaches 7
+f4c_rise,7,observed C01_01: +7 per step up to the peak
+f4c_peak,42,observed C01_01: peak 0x2a then -1 per step (also while waiting)
+f4c_fall,1,observed C01_01; f4c is not compared (peak 42..105 varies per line)
