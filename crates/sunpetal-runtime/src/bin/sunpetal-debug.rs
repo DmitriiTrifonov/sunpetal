@@ -342,6 +342,13 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             std::fs::write(path, out).map_err(|e| format!("{}: {}", path, e))?;
             done(json!({"entries": seq.len()}))
         }
+        "dialogref" => {
+            // dialogref FRAMES OUT: per frame the scene, the hash of both screens and the dialogue state words (K-176)
+            let path = w.get(1).ok_or("dialogref FRAMES OUT")?;
+            let text = s.dialog_reference(number(w.first(), "FRAMES", None)?)?;
+            std::fs::write(path, &text).map_err(|e| format!("{}: {}", path, e))?;
+            done(json!({"frames": text.lines().count(), "columns": sunpetal_runtime::session::DIALOG_STATE.iter().map(|d| d.0).collect::<Vec<_>>()}))
+        }
         "scriptcheck" => {
             // scriptcheck FRAMES [DISPATCH_CSV]: the native interpreter follows the game's script (K-162)
             let csv = w.get(1).copied().unwrap_or("docs/native-script-dispatch.csv");

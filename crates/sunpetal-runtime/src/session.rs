@@ -1017,6 +1017,44 @@ impl Drop for Session {
     }
 }
 
+/// The dialogue state words of the European dump the pilot compares (K-176, `docs/NATIVE-PILOT.md`): the pointer
+/// to the shown text, the flags `TEXT_EX` sets, the script mark, the window flag. (name, address, length)
+pub const DIALOG_STATE: &[(&str, u32, usize)] = &[
+    ("text", 0x0207_5A28, 4),
+    ("f48", 0x0207_59B4, 4),
+    ("f4c", 0x0207_59B8, 4),
+    ("w2", 0x0207_58EE, 1),
+    ("w74", 0x0207_5960, 4),
+    ("mark", 0x0206_577C, 4),
+    ("window", 0x0207_8598, 4),
+];
+
+impl Session {
+    /// The reference for the dialogue pilot: `n` frames with A for two in every 20 (as `scriptcheck`), and per frame
+    /// one line: vblank, scene, FNV-1a hash of both screens, then the words of `DIALOG_STATE` in hex.
+    pub fn dialog_reference(&mut self, n: u64) -> Result<String, String> {
+        let a = buttons("A")?;
+        let mut out = String::new();
+        for i in 0..n {
+            self.keys = if i % 20 < 2 { a } else { 0 };
+            nds::set_draw(true); // only a frame run with drawing on has a picture
+            let r = self.run(1);
+            nds::set_draw(false);
+            r?;
+            let (_, rgba) = nds::screens_rgba();
+            let hash = rgba.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ *b as u64).wrapping_mul(0x0100_0000_01b3));
+            out.push_str(&format!("{}\t{}\t{:016x}", self.vblank(), self.scene().unwrap_or("-"), hash));
+            for (_, addr, len) in DIALOG_STATE {
+                let v = debug::peek(*addr, *len).map_or("--".to_string(), |b| b.iter().rev().map(|x| format!("{:02x}", x)).collect());
+                out.push_str(&format!("\t{}", v));
+            }
+            out.push('\n');
+        }
+        self.keys = 0;
+        Ok(out)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
