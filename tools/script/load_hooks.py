@@ -147,19 +147,22 @@ def seq_row(a, ins, ls):
     if start is None:
         start = next(n for n, i in enumerate(asm) if n > kb and i.startswith('b 0x'))
     imm = lambda x: hex(int(x, 0))
-    cases, cur, st, got = [], None, None, 0
+    cases, cur, ps, got = [], {}, [], 0
     for i in asm[start + 1:]:
         m = re.match(r'ldr (r\d), \[r\d, #(0x5[0-9a-f])\]', i)
         if m:
-            cur, st = m.group(1), m.group(2)
+            cur[m.group(1)] = m.group(2)
         m = re.match(r'str (r\d), \[r\d, #(0x[0-9a-f]+|\d+)\]', i)
-        if m and m.group(1) == cur:
-            rec = imm(m.group(2))
+        if m and m.group(1) in cur:
+            ps.append((cur[m.group(1)], imm(m.group(2))))
         if re.match(r'movs r\d, #1$', i):
             got = 1
         if i.startswith('b 0x'):
-            cases.append('%s:%s:%d' % (st, rec, got))
-            cur, st, got = None, None, 0
+            if not ps:
+                return None
+            # все пары случая; «c» — случай продолжается в следующей записи, флаг «получено» у последней
+            cases += ['%s:%s:c' % p for p in ps[:-1]] + ['%s:%s:%d' % (ps[-1] + (got,))]
+            cur, ps, got = {}, [], 0
     if not cases or any(c.startswith('None') for c in cases):
         return None
     r[6] = ' '.join(cases)

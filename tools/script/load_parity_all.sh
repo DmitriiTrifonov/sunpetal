@@ -13,7 +13,7 @@ one() {
   done
   if [ -s build/pall/$s.arm.tsv ] && cmp -s build/pall/$s.arm.tsv build/pall/$s.native.tsv; then echo "$s равны" ; else echo "$s РАСХОЖДЕНИЕ"; fi > build/pall/$s.res
 }
-for s in $(awk -F, 'NR>1 && $1 ~ /^C[0-9][0-9]_[0-9][0-9]$/ {print $1}' docs/native-scenes.csv); do
+for s in ${SCENES:-$(awk -F, 'NR>1 && $1 ~ /^C[0-9][0-9]_[0-9][0-9]$/ {print $1}' docs/native-scenes.csv)}; do
   one $s &
   while [ $(jobs -r | wc -l) -ge 10 ]; do sleep 1; done
 done
