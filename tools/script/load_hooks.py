@@ -134,7 +134,7 @@ def main():
         for r in rows:
             f.write(','.join(r) + '\n')
     arows = []
-    for gi, g in enumerate(groups[1:5]):
+    for gi, g in enumerate(groups[1:7]):
         for a in g:
             r = (args_row if gi < 3 else seq_row)(a, F[a], B[a])
             if r is None:

@@ -357,7 +357,39 @@ aslots!(
     a28 = 28,
     a29 = 29,
     a30 = 30,
-    a31 = 31
+    a31 = 31,
+    a32 = 32,
+    a33 = 33,
+    a34 = 34,
+    a35 = 35,
+    a36 = 36,
+    a37 = 37,
+    a38 = 38,
+    a39 = 39,
+    a40 = 40,
+    a41 = 41,
+    a42 = 42,
+    a43 = 43,
+    a44 = 44,
+    a45 = 45,
+    a46 = 46,
+    a47 = 47,
+    a48 = 48,
+    a49 = 49,
+    a50 = 50,
+    a51 = 51,
+    a52 = 52,
+    a53 = 53,
+    a54 = 54,
+    a55 = 55,
+    a56 = 56,
+    a57 = 57,
+    a58 = 58,
+    a59 = 59,
+    a60 = 60,
+    a61 = 61,
+    a62 = 62,
+    a63 = 63
 );
 
 pub fn wanted() -> bool {
@@ -389,7 +421,7 @@ mod tests {
     #[test]
     fn the_args_table_reads() {
         let r = parse_args(include_str!("../../../docs/native-load-args.csv")).unwrap();
-        assert!(r.len() == 31 && r.len() <= ASLOTS.len() && r.iter().all(|r| !r.pairs.is_empty() && r.key & 1 == 1));
+        assert!(r.len() == 37 && r.len() <= ASLOTS.len() && r.iter().all(|r| !r.pairs.is_empty() && r.key & 1 == 1));
     }
 
     #[test]
