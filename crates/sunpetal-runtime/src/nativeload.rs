@@ -335,7 +335,23 @@ aslots!(
     a60 = 60,
     a61 = 61,
     a62 = 62,
-    a63 = 63
+    a63 = 63,
+    a64 = 64,
+    a65 = 65,
+    a66 = 66,
+    a67 = 67,
+    a68 = 68,
+    a69 = 69,
+    a70 = 70,
+    a71 = 71,
+    a72 = 72,
+    a73 = 73,
+    a74 = 74,
+    a75 = 75,
+    a76 = 76,
+    a77 = 77,
+    a78 = 78,
+    a79 = 79
 );
 
 pub fn wanted() -> bool {
@@ -411,7 +427,7 @@ mod tests {
     #[test]
     fn the_args_table_reads() {
         let r = parse_args(include_str!("../../../docs/native-load-args.csv")).unwrap();
-        assert!(r.len() == 54 && r.len() <= ASLOTS.len() && r.iter().all(|r| !r.pairs.is_empty() && r.key & 1 == 1));
+        assert!(r.len() == 68 && r.len() <= ASLOTS.len() && r.iter().all(|r| !r.pairs.is_empty() && r.key & 1 == 1));
     }
 
     #[test]
