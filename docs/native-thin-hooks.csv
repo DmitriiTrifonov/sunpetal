@@ -1,0 +1,10 @@
+tag,entry,ops,source
+<TEXT>,0x0204802D,st32(add(0x20759EC,60),ld32(add(ld32(add(0x207596C,28)),8)));st32(add(0x207596C,72),1);st8(add(0x20758EC,2),0);st32(0x206577C,20);st32(add(0x20758EC,116),1),handler 0x0204802C (16 строк)
+<WAITFRAME>,0x020480E1,st32(0x206577C,ld32(add(ld32(add(0x207596C,28)),8)));st32(add(0x20758EC,116),1),handler 0x020480E0 (10 строк)
+<START_SHAKE>,0x0204961D,st32(add(0x20759EC,44),ld32(add(ld32(add(0x207596C,28)),8))),handler 0x0204961C (7 строк)
+<STOP_SHAKE>,0x02049631,st32(add(0x20759EC,44),0),handler 0x02049630 (5 строк)
+<PARALLELCAMERA_ON>,0x020497A5,st32(add(0x2075A6C,108),sub(ld32(add(ld32(add(0x20758EC,76)),32)),ld32(add(ld32(add(0x20758EC,76)),20))));st32(add(0x2075A6C,112),sub(ld32(add(ld32(add(0x20758EC,76)),36)),ld32(add(ld32(add(0x20758EC,76)),24))));st32(add(0x2075A6C,116),sub(ld32(add(ld32(add(0x20758EC,76)),40)),ld32(add(ld32(add(0x20758EC,76)),28))));st32(add(0x20759EC,20),1),handler 0x020497A4 (20 строк)
+<PARALLELCAMERA_OFF>,0x020497D9,st32(add(0x20759EC,20),0),handler 0x020497D8 (5 строк)
+<FADE_IN>,0x02049C79,st32(add(0x207596C,120),0);st16(0x20785E0,ld32(add(ld32(add(0x207596C,28)),8)));st32(add(0x20758EC,80),mul(20,ld8(0x2078591))),handler 0x02049C78 (16 строк)
+<CLOSE_CHAPTER>,0x02049CA9,st8(add(0x20758EC,4),not(0)),handler 0x02049CA8 (6 строк)
+<PLAYMOVIE>,0x02049CB9,st32(0x206577C,not(1));st8(add(0x20758EC,4),1),handler 0x02049CB8 (9 строк)

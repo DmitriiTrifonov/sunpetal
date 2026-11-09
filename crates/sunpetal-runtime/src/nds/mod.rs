@@ -474,6 +474,9 @@ pub fn boot(cfg: Config) -> Result<(), String> {
         crate::nativeinput::install();
         note("native input: key sampler");
     }
+    if crate::nativethin::wanted() {
+        note(&format!("native thin handlers: {}", crate::nativethin::install()?));
+    }
     if crate::nativestep::wanted() {
         crate::nativestep::install();
         note("native script step: next-command choice");
