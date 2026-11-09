@@ -63,7 +63,26 @@ def args_row_base(a, ins, ls):
     off = next(hex(int(re.search(r'#(0x[0-9a-f]+|\d+)', i).group(1), 0)) for i in asm[k804:] if i.startswith('ldr r3, [r0, #'))
     k9d8 = next(n for n, i in enumerate(asm) if i == 'bl 0x0203F9D8')
     imm = lambda x: hex(int(x, 0))
-    clears = [imm(re.search(r'#(0x[0-9a-f]+|\d+)', i).group(1)) for i in asm[:k9d8] if i.startswith('str ') and 'sp' not in i and '#' in i]
+    regs, clears = {}, []
+    for i in asm[:k9d8]:
+        m = re.match(r'movs (r\d), #(0x[0-9a-f]+|\d+)$', i)
+        if m:
+            regs[m.group(1)] = int(m.group(2), 0)
+            continue
+        m = re.match(r'adds (r\d), (r\d), #0$', i)
+        if m:
+            regs[m.group(1)] = regs.get(m.group(2))
+            continue
+        m = re.match(r'str (r\d), \[(r\d), #(0x[0-9a-f]+|\d+)\]$', i)
+        if m and m.group(2) != 'sp':
+            v = regs.get(m.group(1))
+            if v is None:
+                return None
+            clears.append('%s=%s' % (imm(m.group(3)), hex(v)))
+            continue
+        m = re.match(r'(?:ldr|lsls|asrs|lsrs|adds) (r\d)', i)
+        if m:
+            regs[m.group(1)] = None
     # после цикла сравнения (blt): пары чтение состояния +0x50.. -> запись
     kb = max(n for n, i in enumerate(asm) if i.startswith('blt '))
     cur, pairs = {}, []
@@ -81,6 +100,12 @@ def args_row_base(a, ins, ls):
 
 def args_row(a, ins, ls):
     return args_row_base(a, ins, ls)
+
+
+def is_seq(ins):
+    asm = [i for _, i in ins]
+    kb = max(n for n, i in enumerate(asm) if i.startswith('blt '))
+    return not (asm[kb + 1] == 'cmp r5, #0' and asm[kb + 2].startswith('bne '))
 
 
 def seq_row(a, ins, ls):
@@ -134,9 +159,9 @@ def main():
         for r in rows:
             f.write(','.join(r) + '\n')
     arows = []
-    for gi, g in enumerate(groups[1:7]):
+    for gi, g in enumerate(groups[1:9]):
         for a in g:
-            r = (args_row if gi < 3 else seq_row)(a, F[a], B[a])
+            r = (seq_row if is_seq(F[a]) else args_row)(a, F[a], B[a])
             if r is None:
                 print('пропуск args', a, file=sys.stderr)
             else:

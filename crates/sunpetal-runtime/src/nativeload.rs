@@ -209,7 +209,7 @@ struct Args {
     close: u32,
     base: u32,
     off: u32,
-    clears: Vec<u32>,
+    clears: Vec<(u32, u32)>,
     pairs: Vec<(u32, u32, bool)>,
     seq: bool,
     push: Vec<usize>,
@@ -225,7 +225,8 @@ fn parse_args(csv: &str) -> Result<Vec<Args>, String> {
         if f.len() != 12 || f[1] != "args" || !matches!(f[10], "once" | "seq") {
             return Err(format!("bad row: {l}"));
         }
-        let list = |s: &str| s.split_whitespace().map(num).collect::<Result<Vec<_>, _>>();
+        let clears =
+            f[5].split_whitespace().map(|p| p.split_once('=').ok_or(format!("bad clear {p}")).and_then(|(a, b)| Ok((num(a)?, num(b)?)))).collect::<Result<Vec<_>, String>>()?;
         let pairs = f[6]
             .split_whitespace()
             .map(|p| {
@@ -241,7 +242,7 @@ fn parse_args(csv: &str) -> Result<Vec<Args>, String> {
             close: num(f[2])?,
             base: num(f[3])?,
             off: num(f[4])?,
-            clears: list(f[5])?,
+            clears,
             pairs,
             seq: f[10] == "seq",
             push: f[11].split_whitespace().map(|x| x.parse::<usize>().map_err(|e| e.to_string())).collect::<Result<_, _>>()?,
@@ -276,8 +277,8 @@ unsafe fn run_args(c: *mut Cpu, i: usize) {
     (*c).r[13] = sp.wrapping_sub(frame);
 
     let (mut got, mut n) = (false, 0usize);
-    for off in &r.clears {
-        mem_write32(c, record(c) + off, 0);
+    for &(off, v) in &r.clears {
+        mem_write32(c, record(c) + off, v);
     }
     loop {
         call(c, 0x0203_F9D9, r.ret_lex, 0, 0);
@@ -421,7 +422,7 @@ mod tests {
     #[test]
     fn the_args_table_reads() {
         let r = parse_args(include_str!("../../../docs/native-load-args.csv")).unwrap();
-        assert!(r.len() == 37 && r.len() <= ASLOTS.len() && r.iter().all(|r| !r.pairs.is_empty() && r.key & 1 == 1));
+        assert!(r.len() == 42 && r.len() <= ASLOTS.len() && r.iter().all(|r| !r.pairs.is_empty() && r.key & 1 == 1));
     }
 
     #[test]

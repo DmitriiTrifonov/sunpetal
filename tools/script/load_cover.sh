@@ -10,7 +10,7 @@ one() {
   rm -f build/cva/$s.sav build/cva/$s.sav.lock
 }
 export -f one 2>/dev/null
-awk -F, 'NR>1 && $1 ~ /^C[0-9][0-9]_[0-9][0-9]$/ {print $1}' docs/native-scenes.csv | while read s; do
+for s in $(awk -F, 'NR>1 && $1 ~ /^C[0-9][0-9]_[0-9][0-9]$/ {print $1}' docs/native-scenes.csv); do
   one $s &
   while [ $(jobs -r | wc -l) -ge 10 ]; do sleep 1; done
 done
