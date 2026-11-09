@@ -1,6 +1,5 @@
 //! The native command-table loader (K-198, step E2c, `docs/NATIVE-ENGINE-PLAN.md`): the game reads the scene's text once
-//! and builds a record for each tag (`0x02074BEC`, an array of pointers to records). The pilot is `SETFACE2`
-//! (`0x0204245C`): it reads up to three numbers into the record's `+8`, `+0xC`, `+0x10` and ends at the closing tag.
+//! and builds a record for each tag (`0x02074BEC`, an array of pointers to records).
 //! Behind `SUNPETAL_NATIVE_LOAD=1`; the lexer (`0x0203F9D8`, `0x0203F804`) stays the game's. The safe points are the
 //! game's: one before each call and one for each jump back.
 use crate::abi::Cpu;
@@ -9,8 +8,6 @@ use crate::services::{mem_read32, mem_write32};
 
 const STATE: u32 = 0x0207_4084; // +0x1C the index of the record being built, +0x50 the number just read
 const TABLE: u32 = 0x0207_4BEC;
-const TEXT: u32 = 0x0206_53E4; // +0x44 the token's text, UTF-16
-const CLOSE: u32 = 0x0207_40EC; // the closing tag's text to match, 128 units
 const NAMES: u32 = 0x0206_5568;
 const MSG: u32 = 0x0207_57EC;
 
@@ -42,58 +39,6 @@ pub fn compare(close: &[u16], text: &[u16]) -> (Option<bool>, u32) {
         }
     }
     (None, 127)
-}
-
-unsafe extern "C" fn set_face2(c: *mut Cpu) {
-    if std::env::var_os("SUNPETAL_NATIVE_LOAD_LOG").is_some() {
-        eprintln!("native SETFACE2");
-    }
-    let (lr, saved) = ((*c).r[14], [(*c).r[4], (*c).r[5], (*c).r[6]]);
-    let sp = (*c).r[13];
-    let a = sp.wrapping_sub(16) & !3;
-    for (i, v) in saved.iter().enumerate() {
-        mem_write32(c, a + 4 * i as u32, *v);
-    }
-    mem_write32(c, a + 12, lr);
-    (*c).r[13] = sp.wrapping_sub(16);
-
-    let (mut got, mut n) = (false, 0u8);
-    for off in [8, 0xC, 0x10] {
-        mem_write32(c, record(c) + off, 0);
-    }
-    loop {
-        call(c, 0x0203_F9D9, 0x0204_2483, 0, 0);
-        call(c, 0x0203_F805, 0x0204_2489, 1, 0);
-        let (close, text) = (CLOSE, mem_read32(c, TEXT + 0x44));
-        let units = |base: u32| (0..128).map(|i| rd16(c, base + 2 * i)).collect::<Vec<u16>>();
-        let (res, polls) = compare(&units(close), &units(text));
-        spend(c, polls);
-        if res == Some(true) {
-            if !got {
-                let cmd = record(c);
-                let name = mem_read32(c, NAMES + 4 * mem_read32(c, cmd));
-                call(c, 0x0202_20F5, 0x0204_24B9, name, MSG);
-            }
-            mem_write32(c, STATE + 0x1C, mem_read32(c, STATE + 0x1C).wrapping_add(1));
-            break;
-        }
-        let v = mem_read32(c, STATE + 0x50);
-        match n {
-            0 => mem_write32(c, record(c) + 8, v),
-            1 | 2 => {
-                got = true;
-                mem_write32(c, record(c) + if n == 1 { 0xC } else { 0x10 }, v);
-            }
-            _ => {}
-        }
-        if n < 3 {
-            n += 1;
-        }
-        spend(c, 1); // the jump back
-    }
-    (*c).r[13] = sp;
-    [(*c).r[4], (*c).r[5], (*c).r[6]] = saved;
-    (*c).pc = if lr & 1 != 0 { lr } else { lr & !3 };
 }
 
 /// One row of `docs/native-load-hooks.csv`: a function of the `skip` shape (read tokens until the token's text is the
@@ -399,7 +344,6 @@ pub fn wanted() -> bool {
 
 pub fn install() {
     crate::machine(|m| {
-        m.override_fn(9, 0x0204_245D, set_face2);
         for (i, r) in rows().iter().enumerate() {
             m.override_fn(9, r.key, SLOTS[i]);
         }
@@ -422,7 +366,7 @@ mod tests {
     #[test]
     fn the_args_table_reads() {
         let r = parse_args(include_str!("../../../docs/native-load-args.csv")).unwrap();
-        assert!(r.len() == 42 && r.len() <= ASLOTS.len() && r.iter().all(|r| !r.pairs.is_empty() && r.key & 1 == 1));
+        assert!(r.len() == 44 && r.len() <= ASLOTS.len() && r.iter().all(|r| !r.pairs.is_empty() && r.key & 1 == 1));
     }
 
     #[test]

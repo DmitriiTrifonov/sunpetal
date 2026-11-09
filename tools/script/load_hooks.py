@@ -41,9 +41,24 @@ def skip_row(a, ls):
 ARGS_CONSTS = {'G': '0x02074084', 'T': '0x02074BEC', 'N': '0x02065568', 'M': '0x020757EC', 'close': '0x020740EC'}
 
 
+ALLOWED = {'push', 'pop', 'ldr', 'ldrh', 'str', 'movs', 'adds', 'subs', 'lsls', 'lsrs', 'asrs', 'cmp', 'bne', 'beq', 'blt', 'bhi',
+           'bl', 'b', 'add'}
+
+
+def strict(ins):
+    """Модель знает только этот скелет: вызовы лишь лексера, чтения числа и предупреждения; команды из известного набора."""
+    asm = [i for _, i in ins]
+    calls = {i.split()[1] for i in asm if i.startswith(('bl ', 'blx '))}
+    if calls != {'0x0203F9D8', '0x0203F804', '0x020220F4'}:
+        return False
+    return all(i.split()[0] in ALLOWED for i in asm)
+
+
 def args_row_base(a, ins, ls):
     """Вид `args`: прочитать число, при первом круге записать пары (слово состояния +0x50.. -> смещение записи), конец по закрывающему тегу.
     Константы по порядку ldr [pc]: G, T, текст, закрывающий, S, T, N, M, G; роли проверяются на равенство известным."""
+    if not strict(ins):
+        return None
     t = ''.join(ls)
     cs = [(int(r), v) for r, v, _ in re.findall(r'c->r\[(\d+)\] = (0x[0-9A-F]{8})u;\s+// ([0-9A-F]+) ldr', t)]
     rets = re.findall(r'r\[14\] = (0x[0-9A-F]+)u; ARM_POLL\(c\); p_arm9_[tf]_(0203F9D8|0203F804|020220F4)', t)
@@ -104,7 +119,9 @@ def args_row(a, ins, ls):
 
 def is_seq(ins):
     asm = [i for _, i in ins]
-    kb = max(n for n, i in enumerate(asm) if i.startswith('blt '))
+    kb = max((n for n, i in enumerate(asm) if i.startswith('blt ')), default=None)
+    if kb is None or kb + 2 >= len(asm):
+        return None
     return not (asm[kb + 1] == 'cmp r5, #0' and asm[kb + 2].startswith('bne '))
 
 
@@ -132,6 +149,8 @@ def seq_row(a, ins, ls):
         if i.startswith('b 0x'):
             cases.append('%s:%s:%d' % (st, rec, got))
             cur, st, got = None, None, 0
+    if not cases or any(c.startswith('None') for c in cases):
+        return None
     r[6] = ' '.join(cases)
     r[10] = 'seq'
     return r
@@ -159,9 +178,12 @@ def main():
         for r in rows:
             f.write(','.join(r) + '\n')
     arows = []
-    for gi, g in enumerate(groups[1:9]):
+    for g in groups[1:9] + [x for x in groups[9:] if len(x) > 1]:
         for a in g:
-            r = (seq_row if is_seq(F[a]) else args_row)(a, F[a], B[a])
+            m = is_seq(F[a])
+            if m is None:
+                continue
+            r = (seq_row if m else args_row)(a, F[a], B[a])
             if r is None:
                 print('пропуск args', a, file=sys.stderr)
             else:
