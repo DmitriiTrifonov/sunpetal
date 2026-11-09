@@ -342,6 +342,50 @@ pub fn wanted() -> bool {
     std::env::var("SUNPETAL_NATIVE_LOAD").is_ok_and(|v| v == "1")
 }
 
+/// `0x0203FC54`: read the names section. For each token that follows a `[[` tag the game allocates the token's
+/// length in bytes, copies the tag's text there and appends the record (`0x020747EC`, 8 bytes each).
+unsafe extern "C" fn names(c: *mut Cpu) {
+    const REC: u32 = 0x0207_47EC;
+    const CLOSE: u32 = 0x0207_40EC;
+    if std::env::var_os("SUNPETAL_NATIVE_LOAD_LOG").is_some() {
+        eprintln!("native load 0x0203fc54");
+    }
+    let (lr, saved) = ((*c).r[14], [(*c).r[3], (*c).r[4], (*c).r[5], (*c).r[6], (*c).r[7]]);
+    let sp = (*c).r[13];
+    let a = sp.wrapping_sub(24) & !3;
+    for (k, v) in saved.iter().enumerate() {
+        mem_write32(c, a + 4 * k as u32, *v);
+    }
+    mem_write32(c, a + 20, lr);
+    (*c).r[13] = sp.wrapping_sub(24);
+    for o in [0x24, 0x28, 0] {
+        mem_write32(c, STATE + o, 0);
+    }
+    loop {
+        call(c, 0x0203_F9D9, 0x0203_FC67, 0, 0);
+        let t = (*c).r[0];
+        if t == u32::MAX {
+            break;
+        }
+        if rd16(c, CLOSE) == 0x5B && rd16(c, CLOSE + 2) == 0x5B {
+            let n = t.wrapping_sub(1).wrapping_mul(2);
+            let rec = REC + (mem_read32(c, STATE + 8) << 3);
+            call(c, 0x0202_BFAD, 0x0203_FC8B, n, 0);
+            let buf = (*c).r[0];
+            mem_write32(c, rec + 4, buf);
+            (*c).r[2] = n & 0xFFFF;
+            call(c, 0x0200_9624, 0x0203_FC99, 0x0207_40F0, buf);
+            let i = mem_read32(c, STATE + 8);
+            mem_write32(c, REC + (i << 3), mem_read32(c, STATE + 0x24).wrapping_sub(1));
+            mem_write32(c, STATE + 8, i.wrapping_add(1));
+        }
+        spend(c, 1); // the jump back to the lexer
+    }
+    (*c).r[13] = sp;
+    [(*c).r[3], (*c).r[4], (*c).r[5], (*c).r[6], (*c).r[7]] = saved;
+    (*c).pc = if lr & 1 != 0 { lr } else { lr & !3 };
+}
+
 pub fn install() {
     crate::machine(|m| {
         for (i, r) in rows().iter().enumerate() {
@@ -350,6 +394,7 @@ pub fn install() {
         for (i, r) in arows().iter().enumerate() {
             m.override_fn(9, r.key, ASLOTS[i]);
         }
+        m.override_fn(9, 0x0203_FC55, names);
     });
 }
 
@@ -366,7 +411,7 @@ mod tests {
     #[test]
     fn the_args_table_reads() {
         let r = parse_args(include_str!("../../../docs/native-load-args.csv")).unwrap();
-        assert!(r.len() == 44 && r.len() <= ASLOTS.len() && r.iter().all(|r| !r.pairs.is_empty() && r.key & 1 == 1));
+        assert!(r.len() == 54 && r.len() <= ASLOTS.len() && r.iter().all(|r| !r.pairs.is_empty() && r.key & 1 == 1));
     }
 
     #[test]

@@ -75,7 +75,9 @@ def args_row_base(a, ins, ls):
     # смещение указателя на текст: первое ldr r3,[r0,#off] после bl 0x0203F804
     asm = [i for _, i in ins]
     k804 = next(n for n, i in enumerate(asm) if i == 'bl 0x0203F804')
-    off = next(hex(int(re.search(r'#(0x[0-9a-f]+|\d+)', i).group(1), 0)) for i in asm[k804:] if i.startswith('ldr r3, [r0, #'))
+    off = next((hex(int(re.search(r'#(0x[0-9a-f]+|\d+)', i).group(1), 0)) for i in asm[k804:] if i.startswith('ldr r3, [r0, #')), None)
+    if off is None:
+        return None
     k9d8 = next(n for n, i in enumerate(asm) if i == 'bl 0x0203F9D8')
     imm = lambda x: hex(int(x, 0))
     regs, clears = {}, []
@@ -94,6 +96,10 @@ def args_row_base(a, ins, ls):
             if v is None:
                 return None
             clears.append('%s=%s' % (imm(m.group(3)), hex(v)))
+            continue
+        m = re.match(r'subs (r\d), (r\d), #(\d+)$', i)
+        if m and regs.get(m.group(2)) is not None:
+            regs[m.group(1)] = (regs[m.group(2)] - int(m.group(3))) & 0xFFFFFFFF
             continue
         m = re.match(r'(?:ldr|lsls|asrs|lsrs|adds) (r\d)', i)
         if m:
@@ -186,7 +192,7 @@ def main():
         for r in rows:
             f.write(','.join(r) + '\n')
     arows = []
-    for g in groups[1:9] + [x for x in groups[9:] if len(x) > 1]:
+    for g in groups[1:]:
         for a in g:
             m = is_seq(F[a])
             if m is None:
