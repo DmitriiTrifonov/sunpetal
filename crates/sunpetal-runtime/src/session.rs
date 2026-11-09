@@ -1046,6 +1046,21 @@ pub const DIALOG_STATE: &[(&str, u32, usize)] = &[
     ("window", 0x0207_8598, 4),
 ];
 
+/// FNV-1a hash of the 16 character records and the saved `met` masks (K-190: native characters against the ARM's).
+fn character_hash() -> String {
+    let word = |a: u32| debug::peek(a, 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+    let Some(base) = word(0x0206_B460) else { return "--".into() };
+    let mut h = 0xcbf2_9ce4_8422_2325u64;
+    let mut eat = |bytes: &[u8]| bytes.iter().for_each(|b| h = (h ^ *b as u64).wrapping_mul(0x0100_0000_01b3));
+    if let Some(t) = debug::peek(base.wrapping_add(4), 16 * 0x1E80) {
+        eat(&t);
+    }
+    if let Some(m) = debug::peek(0x0209_C9CC, 0x10) {
+        eat(&m);
+    }
+    format!("{:016x}", h)
+}
+
 impl Session {
     /// The reference for the dialogue pilot: `n` frames with A for two in every 20 (as `scriptcheck`), and per frame
     /// one line: vblank, scene, FNV-1a hash of both screens, then the words of `DIALOG_STATE` in hex.
@@ -1065,7 +1080,7 @@ impl Session {
                 let v = debug::peek(*addr, *len).map_or("--".to_string(), |b| b.iter().rev().map(|x| format!("{:02x}", x)).collect());
                 out.push_str(&format!("\t{}", v));
             }
-            out.push('\n');
+            out.push_str(&format!("\t{}\n", character_hash()));
         }
         self.keys = 0;
         Ok(out)

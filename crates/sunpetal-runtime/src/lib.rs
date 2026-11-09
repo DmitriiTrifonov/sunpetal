@@ -9,6 +9,7 @@ pub mod dialogue;
 pub mod evn;
 pub mod interp;
 pub mod machine;
+pub mod nativechar;
 pub mod nativedialog;
 pub mod nativedraw;
 pub mod nativeinput;
