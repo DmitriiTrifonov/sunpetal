@@ -360,7 +360,7 @@ mod tests {
     #[test]
     fn the_skip_table_reads() {
         let r = parse(include_str!("../../../docs/native-load-hooks.csv")).unwrap();
-        assert!(r.len() == 23 && r.len() <= SLOTS.len() && r.iter().all(|r| r.key & 1 == 1 && r.close == 0x0207_40EC));
+        assert!(r.len() == 24 && r.len() <= SLOTS.len() && r.iter().all(|r| r.key & 1 == 1 && r.close == 0x0207_40EC));
     }
 
     #[test]

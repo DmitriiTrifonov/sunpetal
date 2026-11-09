@@ -28,14 +28,14 @@ def skip_row(a, ls):
     g = lambda p: re.search(p, t)
     close = g(r'c->r\[7\] = (0x[0-9A-F]+)u;')
     base = g(r'c->r\[5\] = (0x[0-9A-F]+)u;')
-    off = g(r'c->r\[3\] = ldr32\(c, c->r\[5\] \+ (0x[0-9A-F]+)u\)')
+    off = g(r'c->r\[3\] = ldr32\(c, c->r\[5\] \+ (0x[0-9A-F]+)u\)') or g(r'(?:)c->r\[3\] = ldr32\(c, c->r\[5\]\);')
     state = g(r'c->r\[0\] = (0x[0-9A-F]+)u;[^\n]*\n[^\n]*c->r\[1\] = ldr32\(c, c->r\[0\] \+ (0x[0-9A-F]+)u\)')
     n0 = g(r'c->r\[4\] = r;[^\n]*// [0-9A-F]+ movs r4, #(\d+)') or g(r'const uint32_t b = (0x[0-9a-f]+)u; const uint32_t r = b; c->r\[4\] = r')
     ret = g(r'c->r\[14\] = (0x[0-9A-F]+)u; ARM_POLL\(c\); p_arm9_t_0203F9D8')
     if not all((close, base, off, state, ret)):
         return None
     n = int(n0.group(1), 0) if n0 else 0
-    return [a, 'skip', close.group(1), base.group(1), off.group(1), state.group(1), state.group(2), str(n), ret.group(1)]
+    return [a, 'skip', close.group(1), base.group(1), (off.group(1) if off.groups() else '0x0'), state.group(1), state.group(2), str(n), ret.group(1)]
 
 
 ARGS_CONSTS = {'G': '0x02074084', 'T': '0x02074BEC', 'N': '0x02065568', 'M': '0x020757EC', 'close': '0x020740EC'}
@@ -173,6 +173,14 @@ def main():
         else:
             r[0] = '0x%08X' % (int(a, 16) | 1)
             rows.append(r)
+    for g in groups[1:]:  # одиночки той же формы: 25 команд, вызывается только лексер
+        for a in g:
+            ins = F[a]
+            if len(ins) == 25 and {i.split()[1] for _, i in ins if i.startswith('bl ')} == {'0x0203F9D8'}:
+                r = skip_row(a, B[a])
+                if r is not None:
+                    r[0] = '0x%08X' % (int(a, 16) | 1)
+                    rows.append(r)
     with open(out, 'w') as f:
         f.write('key,kind,close,base,off,state,idx,n0,ret\n')
         for r in rows:
