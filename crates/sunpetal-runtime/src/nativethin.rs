@@ -15,6 +15,10 @@ pub enum Expr {
     Not(Box<Expr>),
     /// The answer (r0) of the last call.
     Ret,
+    /// Register `n` (0..=3) as the handler was entered: what the caller left there.
+    In(usize),
+    /// Register `n` as it is now: what the function called just before left in it.
+    Keep(usize),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -35,6 +39,8 @@ pub enum Stmt {
         target: Expr,
         args: [Expr; 4],
     },
+    /// `frame(N)`: the handler has `N` bytes pushed; the functions it calls see `sp` that much lower.
+    Frame(u32),
     If {
         cond: String,
         a: Expr,
@@ -76,6 +82,12 @@ impl P<'_> {
         let n = self.name();
         if n == "ret" {
             return Ok(Expr::Ret);
+        }
+        if let Some(k) = n.strip_prefix("keep").and_then(|k| k.parse::<usize>().ok()).filter(|k| *k < 4) {
+            return Ok(Expr::Keep(k));
+        }
+        if let Some(k) = n.strip_prefix("in").and_then(|k| k.parse::<usize>().ok()).filter(|k| *k < 4) {
+            return Ok(Expr::In(k));
         }
         if self.peek() != Some(b'(') {
             let v = match n.strip_prefix("0x") {
@@ -173,6 +185,15 @@ impl P<'_> {
                         Stmt::Tail { target, args }
                     }
                 }
+                "frame" => {
+                    let n = match self.expr()? {
+                        Expr::Num(n) => n,
+                        _ => return Err("frame: a number".into()),
+                    };
+                    out.push(Stmt::Frame(n));
+                    self.eat(b')')?;
+                    continue;
+                }
                 "if" => {
                     let cond = self.name();
                     self.eat(b'(')?;
@@ -217,6 +238,8 @@ pub fn parse(csv: &str) -> Result<Vec<Hook>, String> {
 
 unsafe fn eval(c: *mut Cpu, e: &Expr) -> u32 {
     match e {
+        Expr::Keep(k) => (*c).r[*k],
+        Expr::In(k) => ENTRY.with(|r| r.get()[*k]),
         Expr::Num(n) => *n,
         Expr::Ret => (*c).r[0],
         Expr::Ld(size, a) => {
@@ -260,9 +283,10 @@ pub fn holds(cond: &str, a: u32, b: u32) -> bool {
 }
 
 /// Runs the statements; true if a tail call has taken the return.
-unsafe fn exec(c: *mut Cpu, body: &[Stmt], lr: u32) -> bool {
+unsafe fn exec(c: *mut Cpu, body: &[Stmt], lr: u32, depth: &mut u32) -> bool {
     for st in body {
         match st {
+            Stmt::Frame(n) => *depth = *n,
             Stmt::Store { size, addr, val } => {
                 let (a, v) = (eval(c, addr), eval(c, val));
                 match size {
@@ -279,7 +303,10 @@ unsafe fn exec(c: *mut Cpu, body: &[Stmt], lr: u32) -> bool {
                 (*c).r[3] = a[3];
                 (*c).r[14] = *ret;
                 crate::nativechar::spend(c, 1);
+                let sp = (*c).r[13];
+                (*c).r[13] = sp.wrapping_sub(*depth);
                 crate::call(&mut *c, t);
+                (*c).r[13] = sp;
             }
             Stmt::Tail { target, args } => {
                 let (t, a) = (eval(c, target), args.each_ref().map(|e| eval(c, e)));
@@ -288,12 +315,15 @@ unsafe fn exec(c: *mut Cpu, body: &[Stmt], lr: u32) -> bool {
                 (*c).r[2] = a[2];
                 (*c).r[3] = a[3];
                 (*c).r[14] = lr;
+                let sp = (*c).r[13];
+                (*c).r[13] = sp.wrapping_sub(*depth);
                 crate::call(&mut *c, t);
+                (*c).r[13] = sp;
                 return true;
             }
             Stmt::If { cond, a, b, then, els } => {
                 let take = holds(cond, eval(c, a), eval(c, b));
-                if exec(c, if take { then } else { els }, lr) {
+                if exec(c, if take { then } else { els }, lr, depth) {
                     return true;
                 }
             }
@@ -304,9 +334,30 @@ unsafe fn exec(c: *mut Cpu, body: &[Stmt], lr: u32) -> bool {
 
 static HOOKS: OnceLock<Vec<Hook>> = OnceLock::new();
 
+thread_local! {
+    /// r0..r3 at the entry of the running handler.
+    static ENTRY: std::cell::Cell<[u32; 4]> = const { std::cell::Cell::new([0; 4]) };
+}
+
+/// `SUNPETAL_NATIVE_THIN_LOG=1`: the tag of each handler on its first call, to see what a run has covered.
+fn log_first(i: usize, tag: &str) {
+    static SEEN: std::sync::Mutex<u64> = std::sync::Mutex::new(0);
+    if std::env::var_os("SUNPETAL_NATIVE_THIN_LOG").is_some() {
+        let mut m = SEEN.lock().unwrap_or_else(|e| e.into_inner());
+        if *m >> i & 1 == 0 {
+            *m |= 1 << i;
+            eprintln!("thin: {}", tag);
+        }
+    }
+}
+
 unsafe fn run(c: *mut Cpu, i: usize) {
     let lr = (*c).r[14];
-    let tail = exec(c, &HOOKS.get().expect("hooks")[i].body, lr);
+    let hook = &HOOKS.get().expect("hooks")[i];
+    log_first(i, &hook.tag);
+    let outer = ENTRY.with(|r| r.replace([(*c).r[0], (*c).r[1], (*c).r[2], (*c).r[3]]));
+    let tail = exec(c, &hook.body, lr, &mut 0);
+    ENTRY.with(|r| r.set(outer));
     (*c).r[14] = lr;
     if !tail {
         (*c).pc = if lr & 1 != 0 { lr } else { lr & !3 };
@@ -390,17 +441,39 @@ pub fn wanted() -> bool {
     std::env::var("SUNPETAL_NATIVE_THIN").is_ok_and(|v| v == "1")
 }
 
-pub fn install() -> Result<usize, String> {
-    let hooks = parse(include_str!("../../../docs/native-thin-hooks.csv"))?;
-    if hooks.len() > SLOTS.len() {
-        return Err("native-thin-hooks: more rows than slots".into());
+/// The table read from `docs/native-thin-hooks.csv`, once.
+fn table() -> Result<&'static [Hook], String> {
+    if HOOKS.get().is_none() {
+        let hooks = parse(include_str!("../../../docs/native-thin-hooks.csv"))?;
+        if hooks.len() > SLOTS.len() {
+            return Err("native-thin-hooks: more rows than slots".into());
+        }
+        let _ = HOOKS.set(hooks);
     }
-    let n = hooks.len();
+    Ok(HOOKS.get().map_or(&[], |h| h.as_slice()))
+}
+
+/// `(tag, entry key)` of each row, for the checks against the game's own code (`Session::thin_diff`).
+pub fn rows() -> Result<Vec<(String, u32)>, String> {
+    Ok(table()?.iter().map(|h| (h.tag.clone(), h.entry)).collect())
+}
+
+/// Runs row `i` as the installed hook would, without installing it.
+///
+/// # Safety
+/// `c` is the guest's CPU at a point where it may run its functions.
+pub unsafe fn run_row(c: *mut Cpu, i: usize) -> Result<(), String> {
+    table()?;
+    run(c, i);
+    Ok(())
+}
+
+pub fn install() -> Result<usize, String> {
+    let hooks = table()?;
     for (i, h) in hooks.iter().enumerate() {
         crate::machine(|m| m.override_fn(9, h.entry, SLOTS[i]));
     }
-    let _ = HOOKS.set(hooks);
-    Ok(n)
+    Ok(hooks.len())
 }
 
 #[cfg(test)]
@@ -425,6 +498,17 @@ mod tests {
         assert!(matches!(&b[0], Stmt::Call { ret: 5, .. }));
         assert!(matches!(&b[1], Stmt::If { cond, then, els, .. } if cond == "eq" && then.is_empty() && els.len() == 1));
         assert!(matches!(&b[2], Stmt::Tail { .. }));
+    }
+
+    #[test]
+    fn frames_and_kept_registers_read() {
+        let h = parse("t,e,x\nA,0x1,frame(8);call(0x5,0x20511A9,0x207596C,1,in2,keep3);frame(0),handler\n").unwrap();
+        let b = &h[0].body;
+        assert!(matches!(&b[0], Stmt::Frame(8)) && matches!(&b[2], Stmt::Frame(0)));
+        match &b[1] {
+            Stmt::Call { args, .. } => assert!(args[2] == Expr::In(2) && args[3] == Expr::Keep(3)),
+            s => panic!("{:?}", s),
+        }
     }
 
     #[test]

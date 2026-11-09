@@ -154,6 +154,7 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             done(json!({}))
         }
         "scene" => done(json!({"scene": s.scene()})),
+        "thindiff" => done(json!({"lines": s.thin_diff()?})),
         "scriptstate" => done(
             json!({"loaded": sunpetal_runtime::nds::script_loaded(), "idle": sunpetal_runtime::nds::script_idle(), "waits": sunpetal_runtime::nds::script_waits(), "mark": sunpetal_runtime::nds::script_mark()}),
         ),

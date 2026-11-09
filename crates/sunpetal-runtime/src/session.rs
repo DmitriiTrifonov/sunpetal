@@ -804,6 +804,109 @@ impl Session {
         Err("the game did not reach its event loop".into())
     }
 
+    /// K-193: every row of the thin-handler table against the game's own code, on the scene as it is now. Per row and
+    /// parameter set: the guest runs the original handler, the memory is put back, the table's version runs, and the
+    /// memory (RAM, DTCM), the answer (r0) and the safe points spent are compared. Lines: one per row with a difference,
+    /// then a summary. `SUNPETAL_THINDIFF_CONTROL=1` runs the original twice instead: what still differs is the game's own
+    /// nondeterminism. The hardware is not put back, so a row that talks to it (sound, effects) is checked less strictly.
+    pub fn thin_diff(&mut self) -> Result<Vec<String>, String> {
+        let rows = crate::nativethin::rows()?;
+        let out = std::rc::Rc::new(std::cell::RefCell::new(None::<Vec<String>>));
+        let sink = out.clone();
+        debug::inject(EVENT_LOOP, move |c| {
+            let mut lines = Vec::new();
+            let old = debug::peek(COMMAND_SLOT, 4).unwrap_or_default();
+            let sp = c.r[13].wrapping_sub(0x100) & !7;
+            let (mut same, mut diff) = (0, 0);
+            for (i, (tag, entry)) in rows.iter().enumerate() {
+                let mut bad = None;
+                for variant in 0..6u32 {
+                    let mut block = [0u8; 0x40];
+                    for k in 0..12u32 {
+                        // small, negative and large words by turns; the id word (k = 0) is a character number
+                        let w: i32 = match (variant + k) % 4 {
+                            0 => (k as i32 + 1) * (variant as i32 + 1),
+                            1 => -(k as i32) - 1,
+                            2 => 100 + 37 * (variant as i32) + k as i32,
+                            _ => 0x1000 * (k as i32 + 1),
+                        };
+                        block[8 + 4 * k as usize..12 + 4 * k as usize].copy_from_slice(&w.to_le_bytes());
+                    }
+                    let snap = crate::machine(|m| (m.mem.main.clone(), m.mem.dtcm.clone()));
+                    let start = *c;
+                    let go = |c: &mut crate::Cpu, native: bool| -> (u32, i32) {
+                        debug::poke(sp, &block);
+                        debug::poke(COMMAND_SLOT, &sp.to_le_bytes());
+                        c.r = start.r;
+                        c.r[13] = sp;
+                        c.r[14] = EVENT_LOOP;
+                        c.budget = i32::MAX / 2;
+                        if native {
+                            let _ = unsafe { crate::nativethin::run_row(c, i) };
+                        } else {
+                            crate::call(c, *entry);
+                        }
+                        (c.r[0], i32::MAX / 2 - c.budget)
+                    };
+                    let (r0a, pa) = go(c, false);
+                    let after = crate::machine(|m| (m.mem.main.clone(), m.mem.dtcm.clone()));
+                    crate::machine(|m| {
+                        m.mem.main.copy_from_slice(&snap.0);
+                        m.mem.dtcm.copy_from_slice(&snap.1);
+                    });
+                    let (r0n, pn) = go(c, std::env::var_os("SUNPETAL_THINDIFF_CONTROL").is_none());
+                    let now = crate::machine(|m| (m.mem.main.clone(), m.mem.dtcm.clone()));
+                    crate::machine(|m| {
+                        m.mem.main.copy_from_slice(&snap.0);
+                        m.mem.dtcm.copy_from_slice(&snap.1);
+                    });
+                    *c = start;
+                    let at = |a: &[u8], b: &[u8], base: u32| a.iter().zip(b).position(|(x, y)| x != y).map(|k| base + k as u32);
+                    // the handler's stack is scratch below `sp`; a refilled budget is the scheduler (a task switch), not a count
+                    let mut d_a = after.1.clone();
+                    let mut d_n = now.1.clone();
+                    let lo = (sp - 0x027E_0000) as usize;
+                    for k in lo.saturating_sub(0x800)..lo {
+                        d_a[k] = 0;
+                        d_n[k] = 0;
+                    }
+                    let _ = (r0a, r0n);
+                    let why = if pa != pn && pa.max(pn) < 1000 {
+                        Some(format!("polls arm {} native {}", pa, pn))
+                    } else if let Some(a) = at(&after.0, &now.0, 0x0200_0000) {
+                        {
+                            let k = (a - 0x0200_0000) as usize;
+                            Some(format!("RAM differs at {:08X}: arm {:02X?} native {:02X?}", a, &after.0[k..k + 4], &now.0[k..k + 4]))
+                        }
+                    } else {
+                        at(&d_a, &d_n, 0x027E_0000).map(|a| format!("DTCM differs at {:08X}", a))
+                    };
+                    if let Some(w) = why {
+                        bad = Some(format!("{} (variant {}): {}", tag, variant, w));
+                        break;
+                    }
+                }
+                match bad {
+                    Some(b) => {
+                        diff += 1;
+                        lines.push(b);
+                    }
+                    None => same += 1,
+                }
+            }
+            debug::poke(COMMAND_SLOT, &old);
+            lines.push(format!("rows equal {}, different {}", same, diff));
+            *sink.borrow_mut() = Some(lines);
+        });
+        for _ in 0..300 {
+            if let Some(l) = out.borrow_mut().take() {
+                return Ok(l);
+            }
+            self.run(1)?;
+        }
+        Err("the game did not reach its event loop".into())
+    }
+
     /// The story value `index` (`SETVALUE index value`; 0 is the chapter's step).
     pub fn set_value(&mut self, index: i32, value: i32) -> Result<(), String> {
         self.script_command(SETVALUE, vec![index, value])

@@ -53,9 +53,22 @@ def run(body):
         steps = 0
 
         def get(r):
+            if regs.get(r, "") is None:
+                raise Unsupported("чтение %s после вызова" % r)
             if r not in regs:
                 raise Unsupported("чтение %s до записи" % r)
             return regs[r]
+
+        def argv4():
+            # an argument register the handler did not write holds what the caller left (`inN`)
+            out_ = []
+            for k in range(4):
+                r = "r%d" % k
+                if r in regs and regs[r] is None:
+                    out_.append("keep%d" % k)  # what the callee before left in it
+                else:
+                    out_.append(regs.get(r, "in%d" % k))
+            return out_
 
         def val(a):
             return str(num(a)) if a.startswith("#") else get(a)
@@ -73,6 +86,11 @@ def run(body):
             if asm == "bx lr" or (op == "pop" and "pc" in rest):
                 return out
             if op in ("push", "pop"):
+                # the stack the callees see is lower by what the handler has pushed (they may keep `sp`)
+                n = 4 * (rest.count(",") + 1)
+                depth = regs.get("_sp", 0) + (n if op == "push" else -n)
+                regs["_sp"] = depth
+                out.append("frame(%d)" % depth)
                 i += 1
                 continue
             if op == "movs" and args[1].startswith("#"):
@@ -132,19 +150,19 @@ def run(body):
                 return out
             elif op in ("bl", "blx") and rest.startswith("0x"):
                 t = int(rest, 16) | (1 if op == "bl" else 0)
-                argv = [regs.get("r%d" % k, "0") for k in range(4)]
+                argv = argv4()
                 out.append("call(0x%X,0x%X,%s)" % (nxt | 1, t, ",".join(argv)))
                 for k in range(1, 4):
-                    regs.pop("r%d" % k, None)
+                    regs["r%d" % k] = None
                 regs["r0"] = "ret"
             elif op == "blx" and rest.startswith("r"):
-                argv = [regs.get("r%d" % k, "0") for k in range(4)]
+                argv = argv4()
                 out.append("call(0x%X,%s,%s)" % (nxt | 1, get(rest), ",".join(argv)))
                 for k in range(1, 4):
-                    regs.pop("r%d" % k, None)
+                    regs["r%d" % k] = None
                 regs["r0"] = "ret"
             elif op == "bx" and rest.startswith("r"):
-                argv = [regs.get("r%d" % k, "0") for k in range(4)]
+                argv = argv4()
                 out.append("tail(%s,%s)" % (get(rest), ",".join(argv)))
                 return out
             else:
