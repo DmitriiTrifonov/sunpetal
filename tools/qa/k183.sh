@@ -4,7 +4,9 @@
 # Без образов PS2 (нет ни каталога, ни raw) шаг пропускается с кодом 0.
 cd "$(dirname "$0")/../.." || exit 1
 CAT=${1:-build/ps2-catalog}; RAW=build/ps2-models/raw
-if [ ! -f "$CAT/index.csv" ]; then
+# каталог устарел, если читатели tools/ps2/*.py новее его индекса (K-184: расстановка частей по узлам)
+STALE=0; [ -f "$CAT/index.csv" ] && [ -n "$(find tools/ps2 -name '*.py' -newer "$CAT/index.csv" 2>/dev/null | head -1)" ] && STALE=1
+if [ ! -f "$CAT/index.csv" ] || [ "$STALE" = 1 ]; then
   if [ -d "$RAW" ]; then
     echo "== 1. каталог моделей (K-125)"; python3 tools/ps2/catalog.py "$RAW" "$CAT" >"$CAT.log" 2>&1 || { echo "каталог не собрался: $CAT.log" >&2; exit 1; }
   else
@@ -13,5 +15,5 @@ if [ ! -f "$CAT/index.csv" ]; then
 fi
 echo "== 2. метрики, статус, эталонный список"
 python3 tools/ps2/check_models.py "$CAT" --check --csv "$CAT/index_metrics.csv" --report "$CAT/report.html" | tail -4 || exit 1
-echo "== 3. тесты проверок"; python3 -m unittest tools.ps2.test_check_models 2>&1 | tail -3
+echo "== 3. тесты проверок"; python3 -m unittest tools.ps2.test_check_models tools.ps2.test_g101_nodes 2>&1 | tail -3
 echo "== Ваша часть: открыть $CAT/report.html — красное и жёлтое сверху; верно ли, что красные действительно сломаны"
