@@ -29,6 +29,8 @@ if [ "$level" = full ]; then
   [ -f "$rom" ] || { echo "full: нет ROM ($rom)" >&2; exit 1; }
   [ -d generated/recomp ] || { echo "full: нет generated/recomp (скилл sunpetal-build-test)" >&2; exit 1; }
   SUNPETAL_ROM="$rom" must cargo test -p sunpetal-runtime
+  # Проверки моделей PS2 (K-183): без каталога и образов пропускаются сами
+  must tools/qa/k183.sh
   # Паритет GPU с софтом, слепой прогон 30000 кадров: скилл gpu-parity (при правках render3d*/шейдеров).
   echo "full: паритет GPU запускай по скиллу gpu-parity, если правились render3d*.rs или шейдеры" >&2
 fi
