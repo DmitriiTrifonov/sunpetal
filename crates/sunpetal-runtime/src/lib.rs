@@ -14,6 +14,7 @@ pub mod nativedialog;
 pub mod nativedraw;
 pub mod nativeend;
 pub mod nativeinput;
+pub mod nativeload;
 pub mod nativestep;
 pub mod nativethin;
 pub mod nds;
