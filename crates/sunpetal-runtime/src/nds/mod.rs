@@ -474,6 +474,10 @@ pub fn boot(cfg: Config) -> Result<(), String> {
         crate::nativeinput::install();
         note("native input: key sampler");
     }
+    if crate::nativestep::wanted() {
+        crate::nativestep::install();
+        note("native script step: next-command choice");
+    }
     if crate::nativechar::wanted() {
         crate::nativechar::install();
         note("native characters: finder, SETCHARPOS, SETDIRECTION, SETMOTION");
