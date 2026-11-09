@@ -481,6 +481,10 @@ pub fn boot(cfg: Config) -> Result<(), String> {
         crate::nativestep::install();
         note("native script step: next-command choice");
     }
+    if crate::nativeend::wanted() {
+        crate::nativeend::install();
+        note("native script END: scene teardown");
+    }
     if crate::nativechar::wanted() {
         crate::nativechar::install();
         note("native characters: finder, SETCHARPOS, SETDIRECTION, SETMOTION");
