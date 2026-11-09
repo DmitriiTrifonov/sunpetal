@@ -210,7 +210,9 @@ struct Args {
     base: u32,
     off: u32,
     clears: Vec<u32>,
-    pairs: Vec<(u32, u32)>,
+    pairs: Vec<(u32, u32, bool)>,
+    seq: bool,
+    push: Vec<usize>,
     ret_lex: u32,
     ret_val: u32,
     ret_warn: u32,
@@ -220,11 +222,20 @@ fn parse_args(csv: &str) -> Result<Vec<Args>, String> {
     let mut out = Vec::new();
     for l in csv.lines().skip(1).filter(|l| !l.trim().is_empty()) {
         let f: Vec<&str> = l.split(',').collect();
-        if f.len() != 10 || f[1] != "args" {
+        if f.len() != 12 || f[1] != "args" || !matches!(f[10], "once" | "seq") {
             return Err(format!("bad row: {l}"));
         }
         let list = |s: &str| s.split_whitespace().map(num).collect::<Result<Vec<_>, _>>();
-        let pairs = f[6].split_whitespace().map(|p| p.split_once(':').ok_or(format!("bad pair {p}")).and_then(|(a, b)| Ok((num(a)?, num(b)?)))).collect::<Result<Vec<_>, _>>()?;
+        let pairs = f[6]
+            .split_whitespace()
+            .map(|p| {
+                let v: Vec<&str> = p.split(':').collect();
+                if v.len() != 3 {
+                    return Err(format!("bad pair {p}"));
+                }
+                Ok((num(v[0])?, num(v[1])?, v[2] == "1"))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
         out.push(Args {
             key: num(f[0])?,
             close: num(f[2])?,
@@ -232,6 +243,8 @@ fn parse_args(csv: &str) -> Result<Vec<Args>, String> {
             off: num(f[4])?,
             clears: list(f[5])?,
             pairs,
+            seq: f[10] == "seq",
+            push: f[11].split_whitespace().map(|x| x.parse::<usize>().map_err(|e| e.to_string())).collect::<Result<_, _>>()?,
             ret_lex: num(f[7])?,
             ret_val: num(f[8])?,
             ret_warn: num(f[9])?,
@@ -250,16 +263,19 @@ unsafe fn run_args(c: *mut Cpu, i: usize) {
     if std::env::var_os("SUNPETAL_NATIVE_LOAD_LOG").is_some() {
         eprintln!("native load {:#x}", r.key & !1);
     }
-    let (lr, saved) = ((*c).r[14], [(*c).r[3], (*c).r[4], (*c).r[5], (*c).r[6], (*c).r[7]]);
+    // the push {…, lr} of the game: the callees see the stack as its code leaves it
+    let lr = (*c).r[14];
+    let saved: Vec<u32> = r.push.iter().map(|&k| (*c).r[k]).collect();
     let sp = (*c).r[13];
-    let a = sp.wrapping_sub(24) & !3;
+    let frame = 4 * (saved.len() as u32 + 1);
+    let a = sp.wrapping_sub(frame) & !3;
     for (k, v) in saved.iter().enumerate() {
         mem_write32(c, a + 4 * k as u32, *v);
     }
-    mem_write32(c, a + 20, lr);
-    (*c).r[13] = sp.wrapping_sub(24);
+    mem_write32(c, a + 4 * saved.len() as u32, lr);
+    (*c).r[13] = sp.wrapping_sub(frame);
 
-    let (mut got, mut first) = (false, true);
+    let (mut got, mut n) = (false, 0usize);
     for off in &r.clears {
         mem_write32(c, record(c) + off, 0);
     }
@@ -278,18 +294,28 @@ unsafe fn run_args(c: *mut Cpu, i: usize) {
             mem_write32(c, STATE + 0x1C, mem_read32(c, STATE + 0x1C).wrapping_add(1));
             break;
         }
-        if first {
-            for (from, to) in &r.pairs {
+        if r.seq {
+            // the n-th number goes to the n-th word; after the last the numbers are read and dropped
+            if let Some(&(from, to, g)) = r.pairs.get(n) {
+                let v = mem_read32(c, STATE + from);
+                mem_write32(c, record(c) + to, v);
+                got |= g;
+                n += 1;
+            }
+        } else if n == 0 {
+            for &(from, to, _) in &r.pairs {
                 let v = mem_read32(c, STATE + from);
                 mem_write32(c, record(c) + to, v);
             }
             got = true;
-            first = false;
+            n = 1;
         }
         spend(c, 1); // the jump back to the lexer
     }
     (*c).r[13] = sp;
-    [(*c).r[3], (*c).r[4], (*c).r[5], (*c).r[6], (*c).r[7]] = saved;
+    for (&k, v) in r.push.iter().zip(saved) {
+        (*c).r[k] = v;
+    }
     (*c).pc = if lr & 1 != 0 { lr } else { lr & !3 };
 }
 
@@ -363,7 +389,7 @@ mod tests {
     #[test]
     fn the_args_table_reads() {
         let r = parse_args(include_str!("../../../docs/native-load-args.csv")).unwrap();
-        assert!(r.len() == 27 && r.len() <= ASLOTS.len() && r.iter().all(|r| !r.pairs.is_empty() && r.key & 1 == 1));
+        assert!(r.len() == 31 && r.len() <= ASLOTS.len() && r.iter().all(|r| !r.pairs.is_empty() && r.key & 1 == 1));
     }
 
     #[test]

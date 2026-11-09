@@ -41,7 +41,7 @@ def skip_row(a, ls):
 ARGS_CONSTS = {'G': '0x02074084', 'T': '0x02074BEC', 'N': '0x02065568', 'M': '0x020757EC', 'close': '0x020740EC'}
 
 
-def args_row(a, ins, ls):
+def args_row_base(a, ins, ls):
     """Вид `args`: прочитать число, при первом круге записать пары (слово состояния +0x50.. -> смещение записи), конец по закрывающему тегу.
     Константы по порядку ldr [pc]: G, T, текст, закрывающий, S, T, N, M, G; роли проверяются на равенство известным."""
     t = ''.join(ls)
@@ -73,9 +73,43 @@ def args_row(a, ins, ls):
             cur[m.group(1)] = m.group(2)
         m = re.match(r'str (r\d), \[r\d, #(0x[0-9a-f]+|\d+)\]', i)
         if m and m.group(1) in cur:
-            pairs.append('%s:%s' % (cur[m.group(1)], imm(m.group(2))))
+            pairs.append('%s:%s:1' % (cur[m.group(1)], imm(m.group(2))))
     return [a, 'args', ARGS_CONSTS['close'], base, off, ' '.join(clears), ' '.join(pairs),
-            rets['0203F9D8'], rets['0203F804'], rets['020220F4']]
+            rets['0203F9D8'], rets['0203F804'], rets['020220F4'], 'once',
+            ' '.join(re.findall(r'r(\d)', asm[0].split('{')[1]))]
+
+
+def args_row(a, ins, ls):
+    return args_row_base(a, ins, ls)
+
+
+def seq_row(a, ins, ls):
+    """Вид `seq`: n-е число в n-е слово записи (таблица переходов или цепочка сравнений); у каждого случая свой флаг «получено»."""
+    r = args_row_base(a, ins, ls)
+    if r is None:
+        return None
+    asm = [i for _, i in ins]
+    kb = max(n for n, i in enumerate(asm) if i.startswith('blt '))
+    start = next((n for n, i in enumerate(asm) if n > kb and i.startswith('add pc')), None)
+    if start is None:
+        start = next(n for n, i in enumerate(asm) if n > kb and i.startswith('b 0x'))
+    imm = lambda x: hex(int(x, 0))
+    cases, cur, st, got = [], None, None, 0
+    for i in asm[start + 1:]:
+        m = re.match(r'ldr (r\d), \[r\d, #(0x5[0-9a-f])\]', i)
+        if m:
+            cur, st = m.group(1), m.group(2)
+        m = re.match(r'str (r\d), \[r\d, #(0x[0-9a-f]+|\d+)\]', i)
+        if m and m.group(1) == cur:
+            rec = imm(m.group(2))
+        if re.match(r'movs r\d, #1$', i):
+            got = 1
+        if i.startswith('b 0x'):
+            cases.append('%s:%s:%d' % (st, rec, got))
+            cur, st, got = None, None, 0
+    r[6] = ' '.join(cases)
+    r[10] = 'seq'
+    return r
 
 
 def main():
@@ -100,16 +134,16 @@ def main():
         for r in rows:
             f.write(','.join(r) + '\n')
     arows = []
-    for g in groups[1:4]:
+    for gi, g in enumerate(groups[1:5]):
         for a in g:
-            r = args_row(a, F[a], B[a])
+            r = (args_row if gi < 3 else seq_row)(a, F[a], B[a])
             if r is None:
                 print('пропуск args', a, file=sys.stderr)
             else:
                 r[0] = '0x%08X' % (int(a, 16) | 1)
                 arows.append(r)
     with open(out2, 'w') as f:
-        f.write('key,kind,close,base,off,clears,pairs,ret_lex,ret_val,ret_warn\n')
+        f.write('key,kind,close,base,off,clears,pairs,ret_lex,ret_val,ret_warn,mode,push\n')
         for r in arows:
             f.write(','.join(r) + '\n')
     print(len(rows), 'skip ->', out, ';', len(arows), 'args ->', out2)
