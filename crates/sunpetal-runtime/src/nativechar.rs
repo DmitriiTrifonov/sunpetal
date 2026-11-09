@@ -67,7 +67,7 @@ unsafe fn find(c: *mut Cpu, id: u32) -> (u32, u32) {
 }
 
 /// Spends `n` safe points as the recompiled code does: the budget runs down and `arm_poll` takes the time.
-unsafe fn spend(c: *mut Cpu, n: u32) {
+pub(crate) unsafe fn spend(c: *mut Cpu, n: u32) {
     for _ in 0..n {
         (*c).budget -= 1;
         if (*c).budget < 0 {
