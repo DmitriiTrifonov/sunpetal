@@ -201,6 +201,139 @@ slots!(
     s23 = 23
 );
 
+/// One row of `docs/native-load-args.csv`: reads numbers until the closing tag; on the first turn it copies the words
+/// `+0x50…` of the loader state into the record (`pairs`); the record's words in `clears` are zeroed first. Nothing
+/// copied by the end: the game's warning.
+struct Args {
+    key: u32,
+    close: u32,
+    base: u32,
+    off: u32,
+    clears: Vec<u32>,
+    pairs: Vec<(u32, u32)>,
+    ret_lex: u32,
+    ret_val: u32,
+    ret_warn: u32,
+}
+
+fn parse_args(csv: &str) -> Result<Vec<Args>, String> {
+    let mut out = Vec::new();
+    for l in csv.lines().skip(1).filter(|l| !l.trim().is_empty()) {
+        let f: Vec<&str> = l.split(',').collect();
+        if f.len() != 10 || f[1] != "args" {
+            return Err(format!("bad row: {l}"));
+        }
+        let list = |s: &str| s.split_whitespace().map(num).collect::<Result<Vec<_>, _>>();
+        let pairs = f[6].split_whitespace().map(|p| p.split_once(':').ok_or(format!("bad pair {p}")).and_then(|(a, b)| Ok((num(a)?, num(b)?)))).collect::<Result<Vec<_>, _>>()?;
+        out.push(Args {
+            key: num(f[0])?,
+            close: num(f[2])?,
+            base: num(f[3])?,
+            off: num(f[4])?,
+            clears: list(f[5])?,
+            pairs,
+            ret_lex: num(f[7])?,
+            ret_val: num(f[8])?,
+            ret_warn: num(f[9])?,
+        });
+    }
+    Ok(out)
+}
+
+fn arows() -> &'static Vec<Args> {
+    static ROWS: std::sync::OnceLock<Vec<Args>> = std::sync::OnceLock::new();
+    ROWS.get_or_init(|| parse_args(include_str!("../../../docs/native-load-args.csv")).expect("native-load-args.csv"))
+}
+
+unsafe fn run_args(c: *mut Cpu, i: usize) {
+    let r = &arows()[i];
+    if std::env::var_os("SUNPETAL_NATIVE_LOAD_LOG").is_some() {
+        eprintln!("native load {:#x}", r.key & !1);
+    }
+    let (lr, saved) = ((*c).r[14], [(*c).r[3], (*c).r[4], (*c).r[5], (*c).r[6], (*c).r[7]]);
+    let sp = (*c).r[13];
+    let a = sp.wrapping_sub(24) & !3;
+    for (k, v) in saved.iter().enumerate() {
+        mem_write32(c, a + 4 * k as u32, *v);
+    }
+    mem_write32(c, a + 20, lr);
+    (*c).r[13] = sp.wrapping_sub(24);
+
+    let (mut got, mut first) = (false, true);
+    for off in &r.clears {
+        mem_write32(c, record(c) + off, 0);
+    }
+    loop {
+        call(c, 0x0203_F9D9, r.ret_lex, 0, 0);
+        call(c, 0x0203_F805, r.ret_val, 1, 0);
+        let text = mem_read32(c, r.base + r.off);
+        let (res, polls) = compare(&units(c, r.close), &units(c, text));
+        spend(c, polls);
+        if res == Some(true) {
+            if !got {
+                let cmd = record(c);
+                let name = mem_read32(c, NAMES + 4 * mem_read32(c, cmd));
+                call(c, 0x0202_20F5, r.ret_warn, name, MSG);
+            }
+            mem_write32(c, STATE + 0x1C, mem_read32(c, STATE + 0x1C).wrapping_add(1));
+            break;
+        }
+        if first {
+            for (from, to) in &r.pairs {
+                let v = mem_read32(c, STATE + from);
+                mem_write32(c, record(c) + to, v);
+            }
+            got = true;
+            first = false;
+        }
+        spend(c, 1); // the jump back to the lexer
+    }
+    (*c).r[13] = sp;
+    [(*c).r[3], (*c).r[4], (*c).r[5], (*c).r[6], (*c).r[7]] = saved;
+    (*c).pc = if lr & 1 != 0 { lr } else { lr & !3 };
+}
+
+macro_rules! aslots {
+    ($($n:ident = $i:expr),*) => {
+        $(unsafe extern "C" fn $n(c: *mut Cpu) { run_args(c, $i) })*
+        const ASLOTS: &[unsafe extern "C" fn(*mut Cpu)] = &[$($n),*];
+    };
+}
+aslots!(
+    a0 = 0,
+    a1 = 1,
+    a2 = 2,
+    a3 = 3,
+    a4 = 4,
+    a5 = 5,
+    a6 = 6,
+    a7 = 7,
+    a8 = 8,
+    a9 = 9,
+    a10 = 10,
+    a11 = 11,
+    a12 = 12,
+    a13 = 13,
+    a14 = 14,
+    a15 = 15,
+    a16 = 16,
+    a17 = 17,
+    a18 = 18,
+    a19 = 19,
+    a20 = 20,
+    a21 = 21,
+    a22 = 22,
+    a23 = 23,
+    a24 = 24,
+    a25 = 25,
+    a26 = 26,
+    a27 = 27,
+    a28 = 28,
+    a29 = 29,
+    a30 = 30,
+    a31 = 31
+);
+
 pub fn wanted() -> bool {
     std::env::var("SUNPETAL_NATIVE_LOAD").is_ok_and(|v| v == "1")
 }
@@ -210,6 +343,9 @@ pub fn install() {
         m.override_fn(9, 0x0204_245D, set_face2);
         for (i, r) in rows().iter().enumerate() {
             m.override_fn(9, r.key, SLOTS[i]);
+        }
+        for (i, r) in arows().iter().enumerate() {
+            m.override_fn(9, r.key, ASLOTS[i]);
         }
     });
 }
@@ -222,6 +358,12 @@ mod tests {
     fn the_skip_table_reads() {
         let r = parse(include_str!("../../../docs/native-load-hooks.csv")).unwrap();
         assert!(r.len() == 23 && r.len() <= SLOTS.len() && r.iter().all(|r| r.key & 1 == 1 && r.close == 0x0207_40EC));
+    }
+
+    #[test]
+    fn the_args_table_reads() {
+        let r = parse_args(include_str!("../../../docs/native-load-args.csv")).unwrap();
+        assert!(r.len() == 27 && r.len() <= ASLOTS.len() && r.iter().all(|r| !r.pairs.is_empty() && r.key & 1 == 1));
     }
 
     #[test]
