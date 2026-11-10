@@ -1539,4 +1539,69 @@ mod tests {
         assert_eq!(scrolled(0.0).patches.len(), 1);
         assert_eq!(scrolled(192.0).patches.len(), 1);
     }
+    /// K-080: the device's frames on the one-screen layout, as the window would pick it, in three window shapes: the picture
+    /// of the window goes to `SUNPETAL_DEVICE_OUT`, and a touch on the dial and the keys lands where it should. Skipped without
+    /// `SUNPETAL_DEVICE_FRAMES` (a folder of 256 x 384 PNGs, the upper screen above the lower: `tools/scrape2d.py` snapshots).
+    #[test]
+    fn the_device_frames_on_one_screen_are_laid_out_and_touched_right() {
+        let Ok(dir) = std::env::var("SUNPETAL_DEVICE_FRAMES") else { return };
+        let out = std::env::var("SUNPETAL_DEVICE_OUT").ok();
+        let mut files: Vec<_> = std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "png")).collect();
+        files.sort();
+        let v = crate::config::Video { layout: "single".into(), auto: true, ..Default::default() };
+        for file in files {
+            let Some(rgba) = load_rgba(&file) else { continue };
+            if rgba.len() != 256 * 384 * 4 {
+                continue;
+            }
+            let name = file.file_stem().unwrap().to_string_lossy().to_string();
+            // what the window works out from the frame
+            let dial = crate::dial::recognise(1, &rgba);
+            let live = Live {
+                both: dial,
+                both_side: dial && led_under_panel(1, &rgba),
+                device: device_in(1, &rgba),
+                counter_seen: counter_in(1, &rgba),
+                hint_seen: hint_in(1, &rgba),
+                lower: lower_wanted(1, &rgba).unwrap_or(false),
+                ..Live::default()
+            };
+            let l = find(&all(), &v, &live);
+            eprintln!("{name}: dial {dial}, device {}, layout {}", live.device, l.name);
+            for win in [(1080.0f32, 2520.0f32), (2400.0, 1080.0), (1280.0, 720.0)] {
+                let fit = l.fit(win);
+                if dial || live.device {
+                    assert!(fit[0].is_some() && fit[1].is_some() || !l.patches.is_empty(), "{name}: both screens are wanted, got {}", l.name);
+                    // a touch at the centre of the lower screen's rectangle, and at points of the dial and its keys (DS pixels)
+                    if let Some(b) = fit[1] {
+                        for p in [(153, 95), (153, 93), (60, 100), (20, 150), (242, 90), (128, 20)] {
+                            let w = (b.x + (p.0 as f32 + 0.5) / 256.0 * b.w, b.y + (p.1 as f32 + 0.5) / 192.0 * b.h);
+                            let got = l.touch(win, w, false).unwrap_or((-9, -9));
+                            assert!((got.0 - p.0).abs() <= 1 && (got.1 - p.1).abs() <= 1, "{name} {win:?}: touch {p:?} landed at {got:?}");
+                        }
+                    }
+                }
+                if let Some(dir) = &out {
+                    // the window's picture: each screen's rectangle filled from the frame (nearest), the rest black
+                    let (w, h) = (win.0 as usize, win.1 as usize);
+                    let mut img = vec![0u8; w * h * 3];
+                    for (e, r) in fit.iter().enumerate() {
+                        let Some(r) = r else { continue };
+                        for y in (r.y.max(0.0) as usize)..((r.y + r.h).min(h as f32) as usize) {
+                            for x in (r.x.max(0.0) as usize)..((r.x + r.w).min(w as f32) as usize) {
+                                let (u, t) = (((x as f32 - r.x) / r.w * 256.0) as usize, ((y as f32 - r.y) / r.h * 192.0) as usize);
+                                let src = ((e * 192 + t.min(191)) * 256 + u.min(255)) * 4;
+                                img[(y * w + x) * 3..][..3].copy_from_slice(&rgba[src..src + 3]);
+                            }
+                        }
+                    }
+                    let path = std::path::Path::new(dir).join(format!("{name}_{}x{}.png", w, h));
+                    let mut enc = png::Encoder::new(std::io::BufWriter::new(std::fs::File::create(path).unwrap()), w as u32, h as u32);
+                    enc.set_color(png::ColorType::Rgb);
+                    enc.set_depth(png::BitDepth::Eight);
+                    enc.write_header().unwrap().write_image_data(&img).unwrap();
+                }
+            }
+        }
+    }
 }
