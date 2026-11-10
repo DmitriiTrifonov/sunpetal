@@ -576,9 +576,10 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             let c = sunpetal_runtime::services::counters();
             let tm = nds::timing();
             let pt = nds::picture_times_take();
+            let hp = nds::hw_parts_take();
             let per = |a: u64, b: u64| (a - b) as f64 / shown as f64;
             *shared.status.lock().unwrap() = format!(
-                "DS frame {}, {:.0} fps\nrun {:.0} ms/frame, picture {:.1} ms (screens {:.1}, wide {:.1})\nper frame: polls {:.0}, calls {:.0}\nquanta {:.0}: guest {:.1} ms, hardware {:.1} ms, sound {:.1} ms\npicture parts: buffer {:.1}, screens {:.1}, laid {:.1} ms\nskip {} (marks {}, idle {}, waiting {}, loaded {}, dialogue {}), script mark {:08X}",
+                "DS frame {}, {:.0} fps\nrun {:.0} ms/frame, picture {:.1} ms (screens {:.1}, wide {:.1})\nper frame: polls {:.0}, calls {:.0}\nquanta {:.0}: guest {:.1} ms, hardware {:.1} ms, sound {:.1} ms\npicture parts: buffer {:.1}, screens {:.1}, laid {:.1} ms\nhw ms: 2Dline {:.1} gxline {:.1} 3Dstart {:.1}\n3Dstart: swap {:.1} job {:.1} vram {:.1}\nkeys {:.1} settle {:.1} begin {:.1}\nskip {} (marks {}, idle {}, waiting {}, loaded {}, dialogue {}), script mark {:08X}",
                 nds::vblanks(),
                 fps,
                 t_run.as_secs_f64() * 1000.0 / shown as f64,
@@ -594,6 +595,15 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
                 pt.0,
                 pt.1,
                 pt.2,
+                hp[6] / shown as f64,
+                hp[7] / shown as f64,
+                hp[8] / shown as f64,
+                hp[0] / shown as f64,
+                hp[3] / shown as f64,
+                hp[1] / shown as f64,
+                hp[2] / shown as f64,
+                hp[4] / shown as f64,
+                hp[5] / shown as f64,
                 skipping,
                 shared.marks.load(Ordering::Relaxed),
                 shared.idle.load(Ordering::Relaxed),

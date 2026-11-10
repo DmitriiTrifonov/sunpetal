@@ -238,7 +238,9 @@ impl Nds {
         self.video.flags &= !2;
         let v = self.video.vcount;
         if v < 192 {
+            let t = std::time::Instant::now();
             self.gpu2d_line(v as usize);
+            super::note_hw(6, t);
         } else if v == 192 {
             self.gpu2d_vblank();
             self.gx_vblank();
@@ -251,7 +253,9 @@ impl Nds {
                 self.dma_event(cpu, 1);
             }
         } else if v == RENDER_LINE {
+            let t = std::time::Instant::now();
             self.gx_render_start();
+            super::note_hw(8, t);
         } else if v == 262 {
             self.video.flags &= !1;
         }
@@ -260,7 +264,9 @@ impl Nds {
                 self.irq_raise(cpu, 2);
             }
         }
+        let t = std::time::Instant::now();
         self.gx_line();
+        super::note_hw(7, t);
         self.schedule(Ev::Line, when + LINE_TICKS);
     }
 

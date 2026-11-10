@@ -1474,7 +1474,9 @@ impl Nds {
     /// The rendering engine starts a frame: its job is taken (lists, 3D registers, texture
     /// memory) and drawn, to be shown in the next frame.
     pub(super) fn gx_render_start(&mut self) {
+        let t = std::time::Instant::now();
         self.swap_apply(self.gpu.on);
+        let t = super::note_hw(0, t);
         if !self.gpu.on {
             return; // a headless run with no picture of the next frame
         }
@@ -1498,9 +1500,12 @@ impl Nds {
         for (i, e) in edge.iter_mut().enumerate() {
             *e = self.gx_r16(0x0400_0330 + 2 * i as u32);
         }
+        let t = super::note_hw(3, t);
         let (tex_mem, texpal_mem) = (self.vram_copy(super::video::VRAM_TEX, 0x80000), self.vram_copy(super::video::VRAM_TEXPAL, 0x18000));
+        let t = super::note_hw(1, t);
         let texture_on = self.io_reg16(9, 0x0400_0060) & 1 != 0;
         let keys = self.texture_keys(&polys, &super::render3d::Mem { tex: &tex_mem, pal: &texpal_mem }, texture_on);
+        let t = super::note_hw(2, t);
         let g = &self.gx;
         let reg32 = |o: usize| u32::from_le_bytes([g.regs[o], g.regs[o + 1], g.regs[o + 2], g.regs[o + 3]]);
         let job = Job {
@@ -1533,7 +1538,9 @@ impl Nds {
                 }
             }
         }
+        let t = super::note_hw(3, t);
         self.settle_3d();
+        let t = super::note_hw(4, t);
         let scale = self.scale;
         let mut drawing = None;
         let mut early = None;
@@ -1549,6 +1556,7 @@ impl Nds {
             early = Some(super::render3d::render(&job, scale));
         }
         self.pending3d = Some(Pending3d { job, scale, vblank: self.vblanks, drawing, early });
+        super::note_hw(5, t);
     }
 
     /// The GPU's failure told once per distinct message; the software engine takes over.

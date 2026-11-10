@@ -1308,6 +1308,19 @@ pub fn picture_times_take() -> (f64, f64, f64) {
     (m(0), m(1), m(2))
 }
 
+static HW_NS: [std::sync::atomic::AtomicU64; 9] = [const { std::sync::atomic::AtomicU64::new(0) }; 9];
+
+/// Adds the time since `t` to part `i` of the 3D start (0 swap, 1 VRAM copy, 2 texture keys, 3 the job, 4 settle, 5 begin).
+pub(crate) fn note_hw(i: usize, t: std::time::Instant) -> std::time::Instant {
+    HW_NS[i].fetch_add(t.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+    std::time::Instant::now()
+}
+
+/// The parts of the 3D start in ms summed since the last call.
+pub fn hw_parts_take() -> [f64; 9] {
+    HW_NS.each_ref().map(|a| a.swap(0, std::sync::atomic::Ordering::Relaxed) as f64 / 1e6)
+}
+
 pub fn timing() -> (u64, u64, u64, u64) {
     use std::sync::atomic::Ordering::Relaxed;
     (QUANTA.load(Relaxed), NS_GUEST.load(Relaxed), NS_HW.load(Relaxed), NS_SOUND.load(Relaxed))
