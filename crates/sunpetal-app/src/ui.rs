@@ -168,12 +168,8 @@ impl Menu {
             let shown = |v: &str| if v == "original" { tx("original (pixel)", "оригинал (пиксельные)") } else { variant_label(v) };
             let now = s.video.pack_variants.get(group).cloned().unwrap_or_else(|| names.first().cloned().unwrap_or_default());
             let mut pick = now.clone();
-            let combo_r = egui::ComboBox::from_label(label).selected_text(shown(&now)).show_ui(ui, |ui| {
-                for v in names.iter().map(String::as_str).chain(["original"]) {
-                    ui.selectable_value(&mut pick, v.to_string(), shown(v));
-                }
-            });
-            arrow_pick(ui, &combo_r.response, &mut pick, &{
+            let combo_r = Spin::from_label(label).selected_text(shown(&now)).show(ui);
+            arrow_pick(ui, &combo_r, &mut pick, &{
                 let mut o = names.clone();
                 o.push("original".to_string());
                 o
@@ -200,13 +196,8 @@ impl Menu {
             _ => tx("Enhanced", "Улучшенный"),
         };
         let mut pick = now.to_string();
-        let combo_r = egui::ComboBox::from_label(tx("Graphics (F12: standard / enhanced)", "Графика (F12: стандартный / улучшенный)")).selected_text(name(now)).show_ui(ui, |ui| {
-            ui.selectable_value(&mut pick, "standard".to_string(), name("standard"));
-            ui.selectable_value(&mut pick, "enhanced".to_string(), name("enhanced"));
-            // the PS2 models are not made yet (K-110, K-111): the entry is shown, not offered
-            ui.add_enabled_ui(false, |ui| ui.selectable_label(false, format!("{} ({})", name("ultimate"), tx("PS2 models: later", "модели PS2: позже"))));
-        });
-        arrow_pick(ui, &combo_r.response, &mut pick, &["standard".to_string(), "enhanced".to_string()]);
+        let combo_r = Spin::from_label(tx("Graphics (F12: standard / enhanced)", "Графика (F12: стандартный / улучшенный)")).selected_text(name(now)).show(ui);
+        arrow_pick(ui, &combo_r, &mut pick, &["standard".to_string(), "enhanced".to_string()]);
         if pick != now {
             self.originals = pick == "standard";
             s.video.graphics = pick;
@@ -236,22 +227,13 @@ impl Menu {
                 }
                 Block::Screen => {
                     ui.heading(tx("Screen and window", "Экран и окно"));
-                    let combo_r =
-                        egui::ComboBox::from_label(tx("Screen layout", "Раскладка экранов")).selected_text(layout_label(&s.video.layout, lang).to_string()).show_ui(ui, |ui| {
-                            for l in layouts {
-                                ui.selectable_value(&mut s.video.layout, l.to_string(), layout_label(l, lang));
-                            }
-                        });
-                    arrow_pick(ui, &combo_r.response, &mut s.video.layout, &layouts.iter().map(|l| l.to_string()).collect::<Vec<_>>());
+                    let combo_r = Spin::from_label(tx("Screen layout", "Раскладка экранов")).selected_text(layout_label(&s.video.layout, lang).to_string()).show(ui);
+                    arrow_pick(ui, &combo_r, &mut s.video.layout, &layouts.iter().map(|l| l.to_string()).collect::<Vec<_>>());
                     const SIZES: [[u32; 2]; 8] = [[512, 384], [768, 576], [1024, 768], [1280, 720], [1600, 900], [1920, 1080], [2560, 1440], [512, 768]];
                     let own = tx("own (dragged)", "своё (по перетаскиванию)");
                     let now = SIZES.iter().find(|z| **z == s.video.window).map_or(own, |z| format!("{} × {}", z[0], z[1]));
-                    let combo_r = egui::ComboBox::from_label(tx("Window size", "Размер окна")).selected_text(now).show_ui(ui, |ui| {
-                        for z in SIZES {
-                            ui.selectable_value(&mut s.video.window, z, format!("{} × {}", z[0], z[1]));
-                        }
-                    });
-                    arrow_pick(ui, &combo_r.response, &mut s.video.window, &SIZES);
+                    let combo_r = Spin::from_label(tx("Window size", "Размер окна")).selected_text(now).show(ui);
+                    arrow_pick(ui, &combo_r, &mut s.video.window, &SIZES);
                     ui.checkbox(&mut s.video.fullscreen, tx("Full screen (F11)", "Полный экран (F11)"));
                 }
                 Block::Graphics => {
@@ -261,20 +243,15 @@ impl Menu {
                         ui.add(egui::Slider::new(&mut s.video.res, 1..=8).suffix("x"));
                     });
                     ui.label(format!("{} {}x{}", tx("each screen, pixels:", "каждый экран, точек:"), internal.0, internal.1));
-                    let combo_r = egui::ComboBox::from_label(tx("Dialogue font", "Шрифт реплик"))
+                    let combo_r = Spin::from_label(tx("Dialogue font", "Шрифт реплик"))
                         .selected_text(match s.video.dialogue_font.as_str() {
                             "rubik" => "Rubik",
                             "ubuntu" => "Ubuntu",
                             "noto" => "Noto Sans",
                             _ => "Nunito",
                         })
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut s.video.dialogue_font, "nunito".to_string(), "Nunito");
-                            ui.selectable_value(&mut s.video.dialogue_font, "noto".to_string(), "Noto Sans");
-                            ui.selectable_value(&mut s.video.dialogue_font, "rubik".to_string(), "Rubik");
-                            ui.selectable_value(&mut s.video.dialogue_font, "ubuntu".to_string(), "Ubuntu");
-                        });
-                    arrow_pick(ui, &combo_r.response, &mut s.video.dialogue_font, &["nunito".to_string(), "noto".to_string(), "rubik".to_string(), "ubuntu".to_string()]);
+                        .show(ui);
+                    arrow_pick(ui, &combo_r, &mut s.video.dialogue_font, &["nunito".to_string(), "noto".to_string(), "rubik".to_string(), "ubuntu".to_string()]);
                     ui.checkbox(&mut s.video.linear, tx("Smooth when stretched (linear filter)", "Сглаживание при растяжении (линейный фильтр)"));
                     self.variant_rows(ui, s, tx);
                     self.graphics_row(ui, s, tx);
@@ -410,23 +387,15 @@ impl Menu {
                 self.short_body(ui, s, layouts, internal, &tx, &mut action);
                 return;
             }
-            let combo_r = egui::ComboBox::from_label("Language / Язык")
+            let combo_r = Spin::from_label("Language / Язык")
                 .selected_text(match s.interface.language.as_str() {
                     "en" => "English".to_string(),
                     "ru" => "Русский".to_string(),
                     "auto" => tx("system language", "язык системы"),
                     other => other.to_string(),
                 })
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut s.interface.language, "auto".to_string(), tx("system language", "язык системы"));
-                    ui.selectable_value(&mut s.interface.language, "en".to_string(), "English");
-                    ui.selectable_value(&mut s.interface.language, "ru".to_string(), "Русский");
-                    // the tables in ui/ (pl.toml...): the code is the name
-                    for c in custom.iter().filter(|c| !matches!(c.as_str(), "en" | "ru")) {
-                        ui.selectable_value(&mut s.interface.language, c.clone(), c.as_str());
-                    }
-                });
-arrow_pick(ui, &combo_r.response, &mut s.interface.language, &{ let mut o: Vec<String> = ["auto", "en", "ru"].iter().map(|x| x.to_string()).collect(); o.extend(custom.iter().filter(|c| !matches!(c.as_str(), "en" | "ru")).cloned()); o });
+                .show(ui);
+arrow_pick(ui, &combo_r, &mut s.interface.language, &{ let mut o: Vec<String> = ["auto", "en", "ru"].iter().map(|x| x.to_string()).collect(); o.extend(custom.iter().filter(|c| !matches!(c.as_str(), "en" | "ru")).cloned()); o });
             egui::CollapsingHeader::new(tx("Video", "Графика")).default_open(true).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(tx("3D resolution:", "Разрешение 3D:"));
@@ -434,25 +403,13 @@ arrow_pick(ui, &combo_r.response, &mut s.interface.language, &{ let mut o: Vec<S
                 });
                 ui.label(format!("{} {}x{}", tx("each screen, pixels:", "каждый экран, точек:"), internal.0, internal.1));
                 let rl = |v: &str| if v == "gpu" { tx("Graphics card (faster at high resolution)", "Видеокарта (быстрее при высоком разрешении)") } else { tx("Processor (the reference)", "Процессор (эталон)") };
-                let combo_r = egui::ComboBox::from_label(tx("3D drawn by", "3D рисует")).selected_text(rl(&s.video.renderer)).show_ui(ui, |ui| {
-                    for v in ["software", "gpu"] {
-                        ui.selectable_value(&mut s.video.renderer, v.to_string(), rl(v));
-                    }
-                });
-arrow_pick(ui, &combo_r.response, &mut s.video.renderer, &["software".to_string(), "gpu".to_string()]);
+                let combo_r = Spin::from_label(tx("3D drawn by", "3D рисует")).selected_text(rl(&s.video.renderer)).show(ui);
+arrow_pick(ui, &combo_r, &mut s.video.renderer, &["software".to_string(), "gpu".to_string()]);
                 ui.checkbox(&mut s.video.linear, tx("Smooth when stretched (linear filter)", "Сглаживание при растяжении (линейный фильтр)"));
-                let combo_r = egui::ComboBox::from_label(tx("Screen layout", "Раскладка экранов")).selected_text(tl(layout_label(&s.video.layout, lang))).show_ui(ui, |ui| {
-                    for l in layouts {
-                        ui.selectable_value(&mut s.video.layout, l.to_string(), tl(layout_label(l, lang)));
-                    }
-                });
-arrow_pick(ui, &combo_r.response, &mut s.video.layout, &layouts.iter().map(|l| l.to_string()).collect::<Vec<_>>());
-                let combo_r = egui::ComboBox::from_label(tx("Picture in the window", "Картинка в окне")).selected_text(tl(fit_label(&s.video.fit, lang))).show_ui(ui, |ui| {
-                    for m in ["fit", "integer", "fill", "stretch"] {
-                        ui.selectable_value(&mut s.video.fit, m.to_string(), tl(fit_label(m, lang)));
-                    }
-                });
-arrow_pick(ui, &combo_r.response, &mut s.video.fit, &["fit".to_string(), "integer".to_string(), "fill".to_string(), "stretch".to_string()]);
+                let combo_r = Spin::from_label(tx("Screen layout", "Раскладка экранов")).selected_text(tl(layout_label(&s.video.layout, lang))).show(ui);
+arrow_pick(ui, &combo_r, &mut s.video.layout, &layouts.iter().map(|l| l.to_string()).collect::<Vec<_>>());
+                let combo_r = Spin::from_label(tx("Picture in the window", "Картинка в окне")).selected_text(tl(fit_label(&s.video.fit, lang))).show(ui);
+arrow_pick(ui, &combo_r, &mut s.video.fit, &["fit".to_string(), "integer".to_string(), "fill".to_string(), "stretch".to_string()]);
                 ui.horizontal_wrapped(|ui| {
                     ui.label(tx("Window shape:", "Форма окна:"));
                     let now = config::shape_name(s.video.window);
@@ -475,90 +432,61 @@ arrow_pick(ui, &combo_r.response, &mut s.video.fit, &["fit".to_string(), "intege
                     }));
                 }
                 ui.checkbox(&mut s.video.counter, tx("Counter on the upper screen when it is alone", "Счётчик на верхнем экране, когда он один"));
-                let combo_r = egui::ComboBox::from_label(tx("Dialogue text", "Текст реплик")).selected_text(match s.video.dialogue_text.as_str() {
+                let combo_r = Spin::from_label(tx("Dialogue text", "Текст реплик")).selected_text(match s.video.dialogue_text.as_str() {
                     "pixel" => tx("pixel (the game's)", "пиксельный (как в игре)"),
                     "crisp" => tx("crisp", "чёткий"),
                     _ => tx("auto (crisp from 2x)", "авто (чёткий от 2x)"),
-                }).show_ui(ui, |ui| {
-                    ui.selectable_value(&mut s.video.dialogue_text, "auto".to_string(), tx("auto (crisp from 2x)", "авто (чёткий от 2x)"));
-                    ui.selectable_value(&mut s.video.dialogue_text, "crisp".to_string(), tx("crisp", "чёткий"));
-                    ui.selectable_value(&mut s.video.dialogue_text, "pixel".to_string(), tx("pixel (the game's)", "пиксельный (как в игре)"));
-                });
-arrow_pick(ui, &combo_r.response, &mut s.video.dialogue_text, &["auto".to_string(), "crisp".to_string(), "pixel".to_string()]);
-                let combo_r = egui::ComboBox::from_label(tx("Dialogue font", "Шрифт реплик")).selected_text(match s.video.dialogue_font.as_str() {
+                }).show(ui);
+arrow_pick(ui, &combo_r, &mut s.video.dialogue_text, &["auto".to_string(), "crisp".to_string(), "pixel".to_string()]);
+                let combo_r = Spin::from_label(tx("Dialogue font", "Шрифт реплик")).selected_text(match s.video.dialogue_font.as_str() {
                     "rubik" => "Rubik",
                     "ubuntu" => "Ubuntu",
                     "noto" => "Noto Sans",
                     _ => "Nunito",
-                }).show_ui(ui, |ui| {
-                    ui.selectable_value(&mut s.video.dialogue_font, "nunito".to_string(), "Nunito");
-                    ui.selectable_value(&mut s.video.dialogue_font, "noto".to_string(), "Noto Sans");
-                    ui.selectable_value(&mut s.video.dialogue_font, "rubik".to_string(), "Rubik");
-                    ui.selectable_value(&mut s.video.dialogue_font, "ubuntu".to_string(), "Ubuntu");
-                });
-arrow_pick(ui, &combo_r.response, &mut s.video.dialogue_font, &["nunito".to_string(), "noto".to_string(), "rubik".to_string(), "ubuntu".to_string()]);
+                }).show(ui);
+arrow_pick(ui, &combo_r, &mut s.video.dialogue_font, &["nunito".to_string(), "noto".to_string(), "rubik".to_string(), "ubuntu".to_string()]);
                 self.variant_rows(ui, s, &tx);
                 ui.checkbox(&mut s.video.follow_shape, tx("Window follows the picture's shape", "Окно по форме картинки"));
                 ui.checkbox(&mut s.video.logos_in_turn, tx("Logos in turn when one screen is shown", "Логотипы по очереди, когда виден один экран"));
                 if matches!(s.video.layout.as_str(), "single" | "overlay") && s.video.auto {
-                    let combo_r = egui::ComboBox::from_label(tx("Dial puzzle (both screens)", "Головоломка с диском (оба экрана)")).selected_text(match s.video.puzzle.as_str() {
+                    let combo_r = Spin::from_label(tx("Dial puzzle (both screens)", "Головоломка с диском (оба экрана)")).selected_text(match s.video.puzzle.as_str() {
                         "side" => tx("side by side", "рядом"),
                         _ => tx("lower screen as a panel (PS2)", "нижний экран панелью (как на PS2)"),
-                    }).show_ui(ui, |ui| {
-                        ui.selectable_value(&mut s.video.puzzle, "inset".to_string(), tx("lower screen as a panel (PS2)", "нижний экран панелью (как на PS2)"));
-                        ui.selectable_value(&mut s.video.puzzle, "side".to_string(), tx("side by side", "рядом"));
-                    });
-arrow_pick(ui, &combo_r.response, &mut s.video.puzzle, &["inset".to_string(), "side".to_string()]);
+                    }).show(ui);
+arrow_pick(ui, &combo_r, &mut s.video.puzzle, &["inset".to_string(), "side".to_string()]);
                 }
                 if s.video.layout == "overlay" {
                     ui.checkbox(&mut s.video.panel, tx("Lower screen as a panel (F8)", "Нижний экран панелью (F8)"));
                 }
-                let combo_r = egui::ComboBox::from_label(tx("Background", "Подложка")).selected_text(match s.video.background.as_str() {
+                let combo_r = Spin::from_label(tx("Background", "Подложка")).selected_text(match s.video.background.as_str() {
                     "black" => tx("black", "чёрная"),
                     "glow" => tx("glow of the picture", "свечение картинки"),
                     _ => tx("the picture's edge rows run on", "строки края картинки"),
-                }).show_ui(ui, |ui| {
-                    ui.selectable_value(&mut s.video.background, "edge".to_string(), tx("the picture's edge rows run on", "строки края картинки"));
-                    ui.selectable_value(&mut s.video.background, "glow".to_string(), tx("glow of the picture", "свечение картинки"));
-                    ui.selectable_value(&mut s.video.background, "black".to_string(), tx("black", "чёрная"));
-                });
-arrow_pick(ui, &combo_r.response, &mut s.video.background, &["edge".to_string(), "glow".to_string(), "black".to_string()]);
+                }).show(ui);
+arrow_pick(ui, &combo_r, &mut s.video.background, &["edge".to_string(), "glow".to_string(), "black".to_string()]);
                 ui.checkbox(&mut s.video.wide, tx("Widen the 3D view to the window (one screen)", "Расширять 3D под окно (один экран)"));
                 if s.video.wide {
                     // how wide the 3D may get: the window's shape, or at most one of the common ones (bars take the rest)
                     const LIMITS: [(f32, &str, &str); 4] = [(0.0, "as the window", "по окну"), (16.0 / 10.0, "16:10", "16:10"), (16.0 / 9.0, "16:9", "16:9"), (21.0 / 9.0, "21:9", "21:9")];
                     let now = LIMITS.iter().find(|l| (l.0 - s.video.wide_limit).abs() < 0.01).map_or_else(|| format!("{:.2}", s.video.wide_limit), |l| tx(l.1, l.2).to_string());
-                    let combo_r = egui::ComboBox::from_label(tx("Widest 3D view", "Макс. ширина 3D")).selected_text(now).show_ui(ui, |ui| {
-                        for l in LIMITS {
-                            ui.selectable_value(&mut s.video.wide_limit, l.0, tx(l.1, l.2));
-                        }
-                    });
-arrow_pick(ui, &combo_r.response, &mut s.video.wide_limit, &[0.0, 16.0 / 10.0, 16.0 / 9.0, 21.0 / 9.0]);
+                    let combo_r = Spin::from_label(tx("Widest 3D view", "Макс. ширина 3D")).selected_text(now).show(ui);
+arrow_pick(ui, &combo_r, &mut s.video.wide_limit, &[0.0, 16.0 / 10.0, 16.0 / 9.0, 21.0 / 9.0]);
                 }
                 ui.checkbox(&mut s.video.bars_match, tx("Bars take the picture's edge colour (logos)", "Полосы цвета края картинки (логотипы)"));
                 // window sizes (logical pixels); the window is also free to drag, and the menu then shows "own"
                 const SIZES: [[u32; 2]; 8] = [[512, 384], [768, 576], [1024, 768], [1280, 720], [1600, 900], [1920, 1080], [2560, 1440], [512, 768]];
                 let own = tx("own (dragged)", "своё (по перетаскиванию)").to_string();
                 let now = SIZES.iter().find(|z| **z == s.video.window).map_or(own, |z| format!("{} × {}", z[0], z[1]));
-                let combo_r = egui::ComboBox::from_label(tx("Window size", "Размер окна")).selected_text(now).show_ui(ui, |ui| {
-                    for z in SIZES {
-                        ui.selectable_value(&mut s.video.window, z, format!("{} × {}", z[0], z[1]));
-                    }
-                });
-arrow_pick(ui, &combo_r.response, &mut s.video.window, &SIZES);
+                let combo_r = Spin::from_label(tx("Window size", "Размер окна")).selected_text(now).show(ui);
+arrow_pick(ui, &combo_r, &mut s.video.window, &SIZES);
                 ui.checkbox(&mut s.video.fullscreen, tx("Full screen (F11)", "Полный экран (F11)"));
                 // the texture sets beside the file in use (data files with pictures), switched at once
                 {
                     let sets = pack_sets(&s.video.texture_pack);
                     let name = |p: &str| std::path::Path::new(p).file_stem().map_or(String::new(), |n| n.to_string_lossy().into_owned());
                     let shown = if s.video.texture_pack.is_empty() { tx("the game's own pictures", "оригинал (без подмены)").to_string() } else { name(&s.video.texture_pack) };
-                    let combo_r = egui::ComboBox::from_label(tx("Texture set (the text and the language stay with the start)", "Набор текстур (текст и язык меняются при запуске)")).selected_text(shown).show_ui(ui, |ui| {
-                        ui.selectable_value(&mut s.video.texture_pack, String::new(), tx("the game's own pictures", "оригинал (без подмены)"));
-                        for p in &sets {
-                            ui.selectable_value(&mut s.video.texture_pack, p.clone(), name(p));
-                        }
-                    });
-arrow_pick(ui, &combo_r.response, &mut s.video.texture_pack, &{ let mut o = vec![String::new()]; o.extend(sets.iter().cloned()); o });
+                    let combo_r = Spin::from_label(tx("Texture set (the text and the language stay with the start)", "Набор текстур (текст и язык меняются при запуске)")).selected_text(shown).show(ui);
+arrow_pick(ui, &combo_r, &mut s.video.texture_pack, &{ let mut o = vec![String::new()]; o.extend(sets.iter().cloned()); o });
                 }
                 ui.horizontal(|ui| {
                     ui.label(tx("Data file or texture folder:", "Файл данных или папка текстур:"));
@@ -574,14 +502,11 @@ arrow_pick(ui, &combo_r.response, &mut s.video.texture_pack, &{ let mut o = vec!
                 if !s.video.pack_2d.is_empty() && !std::path::Path::new(&s.video.pack_2d).exists() {
                     ui.colored_label(egui::Color32::LIGHT_RED, tx("not found", "не найдено"));
                 }
-                let combo_r = egui::ComboBox::from_label(tx("Game language (needs the data file)", "Язык игры (нужен файл данных)")).selected_text(match s.game.language.as_str() {
+                let combo_r = Spin::from_label(tx("Game language (needs the data file)", "Язык игры (нужен файл данных)")).selected_text(match s.game.language.as_str() {
                     "ru" => "Русский".to_string(),
                     _ => tx("the ROM's own", "как в ROM"),
-                }).show_ui(ui, |ui| {
-                    ui.selectable_value(&mut s.game.language, String::new(), tx("the ROM's own", "как в ROM"));
-                    ui.selectable_value(&mut s.game.language, "ru".to_string(), "Русский");
-                });
-arrow_pick(ui, &combo_r.response, &mut s.game.language, &["".to_string(), "ru".to_string()]);
+                }).show(ui);
+arrow_pick(ui, &combo_r, &mut s.game.language, &["".to_string(), "ru".to_string()]);
                 ui.label(tx("Takes effect the next time the game starts.", "Применится при следующем запуске игры."));
             });
             egui::CollapsingHeader::new(tx("Effects", "Эффекты")).show(ui, |ui| {
@@ -603,14 +528,8 @@ arrow_pick(ui, &combo_r.response, &mut s.game.language, &["".to_string(), "ru".t
                         (_, true) => "свои настройки",
                     }
                 };
-                let combo_r = egui::ComboBox::from_label(tx("Preset (F6)", "Пресет (F6)")).selected_text(label(&s.effects.preset)).show_ui(ui, |ui| {
-                    for p in crate::effects::PRESETS {
-                        if ui.selectable_label(s.effects.preset == p, tl(label(p))).clicked() {
-                            s.effects = crate::effects::Effects::preset(p);
-                        }
-                    }
-                });
-if combo_r.response.has_focus() { let mut cur = s.effects.preset.clone(); let order: Vec<String> = crate::effects::PRESETS.iter().map(|p| p.to_string()).collect(); arrow_pick(ui, &combo_r.response, &mut cur, &order); if cur != s.effects.preset { s.effects = crate::effects::Effects::preset(&cur); } }
+                let combo_r = Spin::from_label(tx("Preset (F6)", "Пресет (F6)")).selected_text(label(&s.effects.preset)).show(ui);
+{ let mut cur = s.effects.preset.clone(); let order: Vec<String> = crate::effects::PRESETS.iter().map(|p| p.to_string()).collect(); arrow_pick(ui, &combo_r, &mut cur, &order); if cur != s.effects.preset { s.effects = crate::effects::Effects::preset(&cur); } }
                 let before = s.effects.clone();
                 let e = &mut s.effects;
                 ui.checkbox(&mut e.sharp, tx("Sharp pixels", "Чёткие пиксели"));
@@ -627,20 +546,12 @@ if combo_r.response.has_focus() { let mut cur = s.effects.preset.clone(); let or
                 ui.add(egui::Slider::new(&mut e.shadow, 0.0..=1.0).text(tx("Soft shadows", "Мягкие тени")));
                 ui.add_enabled(e.shadow > 0.0, egui::Slider::new(&mut e.shadow_radius, 0.5..=6.0).text(tx("Shadow reach", "Размер теней")));
                 let tf = |v: &str| if v == "bilinear" { tx("Bilinear", "Билинейная") } else { tx("Nearest (as the DS)", "Ближайший (как на DS)") };
-                let combo_r = egui::ComboBox::from_label(tx("Texture filtering", "Фильтрация текстур")).selected_text(tf(&e.texture_filter)).show_ui(ui, |ui| {
-                    for v in ["nearest", "bilinear"] {
-                        ui.selectable_value(&mut e.texture_filter, v.to_string(), tf(v));
-                    }
-                });
-arrow_pick(ui, &combo_r.response, &mut e.texture_filter, &["nearest".to_string(), "bilinear".to_string()]);
-                let combo_r = egui::ComboBox::from_label(tx("3D edge anti-aliasing", "Сглаживание краёв 3D"))
+                let combo_r = Spin::from_label(tx("Texture filtering", "Фильтрация текстур")).selected_text(tf(&e.texture_filter)).show(ui);
+arrow_pick(ui, &combo_r, &mut e.texture_filter, &["nearest".to_string(), "bilinear".to_string()]);
+                let combo_r = Spin::from_label(tx("3D edge anti-aliasing", "Сглаживание краёв 3D"))
                     .selected_text(match e.msaa { 2 => "2x2".to_string(), 4 => "4x4".to_string(), _ => tx("off", "выкл") })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut e.msaa, 0, tx("off", "выкл"));
-                        ui.selectable_value(&mut e.msaa, 2, "2x2");
-                        ui.selectable_value(&mut e.msaa, 4, "4x4");
-                    });
-arrow_pick(ui, &combo_r.response, &mut e.msaa, &[0, 2, 4]);
+                    .show(ui);
+arrow_pick(ui, &combo_r, &mut e.msaa, &[0, 2, 4]);
                 if e.msaa > 0 {
                     let used = crate::effects::effective_msaa(video_res, e.msaa, s.video.renderer == "gpu");
                     if used != e.msaa {
@@ -657,12 +568,8 @@ arrow_pick(ui, &combo_r.response, &mut e.msaa, &[0, 2, 4]);
                     "soft" => tx("Soft", "Мягкое"),
                     _ => tx("Off", "Выкл"),
                 };
-                let combo_r = egui::ComboBox::from_label(tx("2D smoothing", "Сглаживание 2D")).selected_text(sl(&e.smooth_2d)).show_ui(ui, |ui| {
-                    for v in ["off", "smooth", "soft"] {
-                        ui.selectable_value(&mut e.smooth_2d, v.to_string(), sl(v));
-                    }
-                });
-arrow_pick(ui, &combo_r.response, &mut e.smooth_2d, &["off".to_string(), "smooth".to_string(), "soft".to_string()]);
+                let combo_r = Spin::from_label(tx("2D smoothing", "Сглаживание 2D")).selected_text(sl(&e.smooth_2d)).show(ui);
+arrow_pick(ui, &combo_r, &mut e.smooth_2d, &["off".to_string(), "smooth".to_string(), "soft".to_string()]);
                 ui.add_enabled(e.smooth_2d != "off", egui::Slider::new(&mut e.smooth_strength, 0.0..=1.0).text(tx("2D smoothing strength", "Сила сглаживания 2D")));
                 if *e != before {
                     e.preset = "custom".into();
@@ -688,18 +595,14 @@ arrow_pick(ui, &combo_r.response, &mut e.smooth_2d, &["off".to_string(), "smooth
                     s.input.keys = config::Input::default().keys;
                     self.rebinding = None;
                 }
-                let combo_r = egui::ComboBox::from_label(tx("On-screen buttons", "Кнопки на экране"))
+                let combo_r = Spin::from_label(tx("On-screen buttons", "Кнопки на экране"))
                     .selected_text(match s.input.touch_controls.as_str() {
                         "on" => tx("always", "всегда"),
                         "off" => tx("never", "никогда"),
                         _ => tx("on a phone", "на телефоне"),
                     })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut s.input.touch_controls, "auto".to_string(), tx("on a phone", "на телефоне"));
-                        ui.selectable_value(&mut s.input.touch_controls, "on".to_string(), tx("always", "всегда"));
-                        ui.selectable_value(&mut s.input.touch_controls, "off".to_string(), tx("never", "никогда"));
-                    });
-arrow_pick(ui, &combo_r.response, &mut s.input.touch_controls, &["auto".to_string(), "on".to_string(), "off".to_string()]);
+                    .show(ui);
+arrow_pick(ui, &combo_r, &mut s.input.touch_controls, &["auto".to_string(), "on".to_string(), "off".to_string()]);
                 ui.checkbox(&mut s.input.dial_swipe, tx("A swipe turns the dial puzzle's dial", "Свайп вращает диск в головоломке с диском"));
                 if s.input.dial_swipe {
                     ui.add(egui::Slider::new(&mut s.input.dial_gain, -4.0..=4.0).text(tx("Dial turn per swipe (negative: the other way)", "Поворот диска за свайп (минус: в другую сторону)")));
@@ -799,22 +702,90 @@ arrow_pick(ui, &combo_r.response, &mut s.input.touch_controls, &["auto".to_strin
     }
 }
 
-/// A drop-down list also moves by the pad's left and right, with no popup: to the neighbour of the value in `order`.
-fn arrow_pick<T: PartialEq + Clone>(ui: &egui::Ui, r: &egui::Response, cur: &mut T, order: &[T]) {
-    if !r.has_focus() {
-        return;
+/// A choice among a few values (K-207): `[<] value [>] label`, no popup. The value is the focusable middle; the arrows
+/// are clickable marks. A click on an arrow leaves a step in the memory for `arrow_pick`, which owns the order.
+pub struct Spin {
+    label: String,
+    text: String,
+}
+
+impl Spin {
+    pub fn from_label(label: impl Into<String>) -> Self {
+        Self { label: label.into(), text: String::new() }
     }
-    // the arrows are the widget's now: the focus does not walk off with them
-    ui.memory_mut(|m| m.set_focus_lock_filter(r.id, egui::EventFilter { horizontal_arrows: true, ..Default::default() }));
-    let step = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight) as i32 - i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft) as i32);
+
+    pub fn selected_text(mut self, text: impl Into<String>) -> Self {
+        self.text = text.into();
+        self
+    }
+
+    /// The middle's response (the focus and the id `arrow_pick` goes by).
+    pub fn show(self, ui: &mut egui::Ui) -> egui::Response {
+        let mark = |ui: &mut egui::Ui, text: &str| {
+            let size = egui::vec2(ui.spacing().interact_size.y, ui.spacing().interact_size.y);
+            let (rect, r) = ui.allocate_exact_size(size, egui::Sense::CLICK);
+            let fill = if r.hovered() { crate::theme::TILE_HOT } else { crate::theme::TILE };
+            ui.painter().rect_filled(rect, 0.0, fill);
+            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, text, egui::TextStyle::Button.resolve(ui.style()), crate::theme::ORANGE);
+            r
+        };
+        ui.horizontal(|ui| {
+            let left = mark(ui, "<");
+            let mid = ui.add(egui::Button::new(self.text).min_size(egui::vec2(ui.spacing().interact_size.x * 4.6, 0.0)));
+            let right = mark(ui, ">");
+            ui.label(self.label);
+            // a click (on the value or a mark) puts the keyboard on the value: the arrows then stay with it
+            if mid.clicked() || left.clicked() || right.clicked() {
+                mid.request_focus();
+            }
+            let wheel = if mid.hovered() || left.hovered() || right.hovered() { ui.input(|i| i.smooth_scroll_delta.x) } else { 0.0 };
+            let step = right.clicked() as i32 - left.clicked() as i32
+                + if wheel < -4.0 {
+                    1
+                } else if wheel > 4.0 {
+                    -1
+                } else {
+                    0
+                };
+            if step != 0 {
+                ui.data_mut(|d| d.insert_temp(mid.id, step));
+            }
+            mid
+        })
+        .inner
+    }
+}
+
+/// Memory keys: the `Spin` in focus, and the arrow steps `gfx.rs` took out of the input for it.
+pub const SPIN_FOCUS: &str = "spin_focus";
+pub const SPIN_STEP: &str = "spin_step";
+
+/// A `Spin` moves by the arrows (the pad's left and right, the keys, a click on the marks, a sideways wheel): to the
+/// neighbour of the value in `order`, round the ends.
+fn arrow_pick<T: PartialEq + Clone>(ui: &egui::Ui, r: &egui::Response, cur: &mut T, order: &[T]) {
+    let mut step = ui.data_mut(|d| d.remove_temp::<i32>(r.id)).unwrap_or(0);
+    if r.has_focus() {
+        // gfx.rs took the arrows out before egui walked the focus with them: they are here
+        step += ui.data_mut(|d| d.remove_temp::<i32>(egui::Id::new(SPIN_STEP))).unwrap_or(0);
+        ui.data_mut(|d| d.insert_temp(egui::Id::new(SPIN_FOCUS), r.id.value()));
+        // the arrows are the widget's now: the focus does not walk off with them
+        ui.memory_mut(|m| m.set_focus_lock_filter(r.id, egui::EventFilter { horizontal_arrows: true, ..Default::default() }));
+        step += ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight) as i32 - i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft) as i32);
+    }
+    if !r.has_focus() && ui.data(|d| d.get_temp::<u64>(egui::Id::new(SPIN_FOCUS))) == Some(r.id.value()) {
+        ui.data_mut(|d| d.remove_temp::<u64>(egui::Id::new(SPIN_FOCUS)));
+    }
     if step == 0 {
         return;
     }
-    let at = order.iter().position(|v| v == cur).unwrap_or(0) as i32;
-    let to = (at + step).clamp(0, order.len() as i32 - 1) as usize;
-    if let Some(v) = order.get(to) {
+    if let Some(v) = order.get(spin_to(order.iter().position(|v| v == cur), order.len(), step)) {
         *cur = v.clone();
     }
+}
+
+/// The index a step of `step` from `at` (the value's place, if it is in the list) leads to: round the ends.
+fn spin_to(at: Option<usize>, len: usize, step: i32) -> usize {
+    (at.unwrap_or(0) as i32 + step.signum()).rem_euclid(len.max(1) as i32) as usize
 }
 
 /// A variant's name as the menu shows it: the font names written out, others as they are.
@@ -931,6 +902,15 @@ mod pack_tests {
 #[cfg(test)]
 mod short_tests {
     use super::*;
+
+    #[test]
+    fn a_spin_goes_round_the_ends() {
+        assert_eq!(spin_to(Some(2), 3, 1), 0);
+        assert_eq!(spin_to(Some(0), 3, -1), 2);
+        assert_eq!(spin_to(Some(1), 3, 1), 2);
+        assert_eq!(spin_to(None, 3, 1), 1);
+        assert_eq!(spin_to(Some(0), 1, 1), 0);
+    }
 
     #[test]
     fn the_short_menu_holds_the_five_blocks_the_author_chose() {

@@ -11,6 +11,8 @@ pub const TILE: Color32 = Color32::from_rgb(0x20, 0x30, 0x50);
 /// Плитка под курсором мыши.
 pub const TILE_HOT: Color32 = Color32::from_rgb(0x30, 0x48, 0x70);
 /// Самое тёмное: фон полей ввода и полос.
+/// Выбранная плитка: светлее `TILE_HOT`, белый текст читается (контраст ≥ 4,5).
+pub const SELECTED: Color32 = Color32::from_rgb(0x28, 0x50, 0xa0);
 pub const DEEP: Color32 = Color32::from_rgb(0x08, 0x12, 0x28);
 /// Белый текст и белая плитка выбранного.
 pub const WHITE: Color32 = Color32::from_rgb(0xf0, 0xf0, 0xf0);
@@ -54,12 +56,13 @@ pub fn visuals() -> Visuals {
     w.hovered.weak_bg_fill = TILE_HOT;
     w.hovered.bg_stroke = Stroke::new(1.5, ORANGE);
     w.hovered.fg_stroke = Stroke::new(1.5, Color32::WHITE);
-    // нажатое и открытое: как выбранная плитка игры, белая с чёрным текстом
+    // выбранное (фокус), нажатое, открытое: яркая синяя плитка с оранжевой окантовкой и белым текстом
+    // (светлая заливка с чёрным текстом не годилась: egui красит текст кнопки не цветом этого состояния, B-32)
     for s in [&mut w.active, &mut w.open] {
-        s.bg_fill = WHITE;
-        s.weak_bg_fill = WHITE;
-        s.bg_stroke = Stroke::new(1.5, ORANGE);
-        s.fg_stroke = Stroke::new(1.5, Color32::BLACK);
+        s.bg_fill = SELECTED;
+        s.weak_bg_fill = SELECTED;
+        s.bg_stroke = Stroke::new(2.0, ORANGE);
+        s.fg_stroke = Stroke::new(1.5, Color32::WHITE);
     }
     v
 }
@@ -170,6 +173,7 @@ mod tests {
             (w.active.weak_bg_fill, w.active.fg_stroke.color),
             (w.open.weak_bg_fill, w.open.fg_stroke.color),
             (v.extreme_bg_color, WHITE),
+            (w.active.weak_bg_fill, WHITE),
         ] {
             assert!(contrast(fill, text) >= 4.5, "{:?} on {:?}: {:.1}", text, fill, contrast(fill, text));
         }

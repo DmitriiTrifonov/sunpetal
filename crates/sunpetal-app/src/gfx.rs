@@ -878,6 +878,25 @@ impl Gfx {
                     raw.events.push(egui::Event::Key { key, physical_key: Some(key), pressed, repeat: false, modifiers });
                 }
             }
+            // the pad drives the menu in a window that never got a click: egui would take it for unfocused, and every
+            // widget would lose its keyboard focus (`Response::has_focus` is false then); the menu is in front when shown
+            raw.focused = true;
+            // a drop-down list in focus (`ui::Spin`) owns left and right: egui's own focus walk must not see them
+            // (its filter needs two frames of focus first, and the arrow would walk off to the next widget)
+            let spin = self.egui_ctx.data(|d| d.get_temp::<u64>(egui::Id::new(crate::ui::SPIN_FOCUS)));
+            if spin.is_some() && spin == self.egui_ctx.memory(|m| m.focused()).map(|i| i.value()) {
+                let mut step = 0;
+                raw.events.retain(|e| match e {
+                    egui::Event::Key { key: k @ (egui::Key::ArrowLeft | egui::Key::ArrowRight), pressed: true, modifiers, .. } if !modifiers.any() => {
+                        step += if *k == egui::Key::ArrowRight { 1 } else { -1 };
+                        false
+                    }
+                    _ => true,
+                });
+                if step != 0 {
+                    self.egui_ctx.data_mut(|d| d.insert_temp(egui::Id::new(crate::ui::SPIN_STEP), step));
+                }
+            }
             let out = self.egui_ctx.run_pass(raw, |ctx| menu(ctx));
             if let Some((w, st)) = &mut self.window {
                 st.handle_platform_output(w, out.platform_output);
