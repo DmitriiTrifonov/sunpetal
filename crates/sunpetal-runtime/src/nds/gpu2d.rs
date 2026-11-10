@@ -1026,8 +1026,12 @@ impl Nds {
     }
 
     /// Lays the pack's pictures over `rgb` (the two screens, `CH` bytes a pixel, `s` times the DS's size).
-    fn overlay_pack(&self, rgb: &mut [u8], s: usize, ch: usize, a_top: bool) {
+    /// With `wide` (each side, DS pixels) `rgb` is the widened upper screen alone, (256 + 2 * each side) x `s`
+    /// wide: the pictures go on its middle 256 and the lower engine's are left out (K-195: the logos on the
+    /// widened screen kept the game's own pixels).
+    fn overlay_pack(&self, rgb: &mut [u8], s: usize, ch: usize, a_top: bool, wide: Option<usize>) {
         let (w, h3) = (256 * s, 192 * s);
+        let (stride, xo) = wide.map_or((w, 0), |e| ((256 + 2 * e) * s, e * s));
         // the master brightness of each engine: the pictures fade with the screen (B-16: the old art showed through a fade)
         let fade = [0usize, 1].map(|e| {
             let mb = self.g16(if e == 1 { 0x0400_106C } else { 0x0400_006C }) as u32;
@@ -1059,6 +1063,9 @@ impl Nds {
             o
         };
         for (e, bg, img) in &self.gpu.layers_placed {
+            if wide.is_some() && (*e == 0) != a_top {
+                continue;
+            }
             let top = if (*e == 0) == a_top { 0 } else { h3 };
             let pic = img.scaled(w, h3);
             for y in 0..h3 {
@@ -1073,7 +1080,7 @@ impl Nds {
                     if c[3] == 0 {
                         continue;
                     }
-                    let o = ((top + y) * w + x) * ch;
+                    let o = ((top + y) * stride + xo + x) * ch;
                     let f = faded(*e, c);
                     if c[3] == 255 {
                         for k in 0..3 {
@@ -1097,6 +1104,9 @@ impl Nds {
         let mut order: Vec<usize> = (0..self.gpu.placed.len()).collect();
         order.sort_by_key(|&j| (std::cmp::Reverse(self.gpu.placed[j].prio), std::cmp::Reverse(j)));
         for p in order.iter().map(|&j| &self.gpu.placed[j]) {
+            if wide.is_some() && (p.e == 0) != a_top {
+                continue;
+            }
             let top = if (p.e == 0) == a_top { 0 } else { h3 };
             let (bw, bh) = p.aff.map_or((p.w, p.h), |(_, bw, bh)| (bw, bh));
             let (pw, ph) = ((bw as usize) * s, (bh as usize) * s);
@@ -1147,7 +1157,7 @@ impl Nds {
                     if c[3] == 0 {
                         continue;
                     }
-                    let o = ((top + sy as usize) * w + sx as usize) * ch;
+                    let o = ((top + sy as usize) * stride + xo + sx as usize) * ch;
                     let a = c[3] as u32;
                     let f = faded(p.e, &c);
                     for k in 0..3 {
@@ -1427,7 +1437,7 @@ impl Nds {
                 });
             }
         });
-        self.overlay_pack(&mut rgb, s, CH, a_top);
+        self.overlay_pack(&mut rgb, s, CH, a_top, None);
         rgb
     }
 }
@@ -1493,6 +1503,10 @@ impl Nds {
                 });
             }
         });
+        // the 2D pack's pictures over the middle 256, as `screens_rgb` lays them (K-195)
+        if layers & 1 != 0 {
+            self.overlay_pack(&mut rgb, s, 3, true, Some(e3));
+        }
         Some((e3, rgb))
     }
 }
