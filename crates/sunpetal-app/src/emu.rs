@@ -575,9 +575,10 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
             let fps = shown as f64 / shown_since.elapsed().as_secs_f64();
             let c = sunpetal_runtime::services::counters();
             let tm = nds::timing();
+            let pt = nds::picture_times_take();
             let per = |a: u64, b: u64| (a - b) as f64 / shown as f64;
             *shared.status.lock().unwrap() = format!(
-                "DS frame {}, {:.0} fps\nrun {:.0} ms/frame, picture {:.1} ms (screens {:.1}, wide {:.1})\nper frame: polls {:.0}, calls {:.0}\nquanta {:.0}: guest {:.1} ms, hardware {:.1} ms, sound {:.1} ms\nskip {} (marks {}, idle {}, waiting {}, loaded {}, dialogue {}), script mark {:08X}",
+                "DS frame {}, {:.0} fps\nrun {:.0} ms/frame, picture {:.1} ms (screens {:.1}, wide {:.1})\nper frame: polls {:.0}, calls {:.0}\nquanta {:.0}: guest {:.1} ms, hardware {:.1} ms, sound {:.1} ms\npicture parts: buffer {:.1}, screens {:.1}, laid {:.1} ms\nskip {} (marks {}, idle {}, waiting {}, loaded {}, dialogue {}), script mark {:08X}",
                 nds::vblanks(),
                 fps,
                 t_run.as_secs_f64() * 1000.0 / shown as f64,
@@ -590,6 +591,9 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
                 (tm.1 - prev_t.1) as f64 / 1e6 / shown as f64,
                 (tm.2 - prev_t.2) as f64 / 1e6 / shown as f64,
                 (tm.3 - prev_t.3) as f64 / 1e6 / shown as f64,
+                pt.0,
+                pt.1,
+                pt.2,
                 skipping,
                 shared.marks.load(Ordering::Relaxed),
                 shared.idle.load(Ordering::Relaxed),

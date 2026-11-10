@@ -2045,6 +2045,9 @@ fn pick_game() -> Option<(locate::Picked, PathBuf)> {
 fn android_main(app: winit::platform::android::activity::AndroidApp) {
     use winit::platform::android::EventLoopBuilderExtAndroid;
     android::redirect_stderr();
+    // the screen stays on while the game runs: a scene to watch needs no touch, and the system's timeout
+    // (30 s on the phone) would lock the phone under it
+    app.set_window_flags(winit::platform::android::activity::WindowManagerFlags::KEEP_SCREEN_ON, winit::platform::android::activity::WindowManagerFlags::empty());
     let private = app.internal_data_path().unwrap_or_else(|| PathBuf::from("/data/local/tmp"));
     let dir = app.external_data_path().unwrap_or_else(|| private.clone());
     std::env::set_var("SUNPETAL_CONFIG", private.join("config"));

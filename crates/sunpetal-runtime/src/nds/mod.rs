@@ -1289,6 +1289,25 @@ pub static NS_GUEST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64
 pub static NS_HW: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 pub static NS_SOUND: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+static PIC_NS: [std::sync::atomic::AtomicU64; 4] = [const { std::sync::atomic::AtomicU64::new(0) }; 4];
+
+/// One picture's parts (the buffer, the screens, the pictures laid over), for the speed line.
+pub(crate) fn note_picture_times(a: std::time::Duration, b: std::time::Duration, c: std::time::Duration) {
+    use std::sync::atomic::Ordering::Relaxed;
+    PIC_NS[0].fetch_add(a.as_nanos() as u64, Relaxed);
+    PIC_NS[1].fetch_add(b.as_nanos() as u64, Relaxed);
+    PIC_NS[2].fetch_add(c.as_nanos() as u64, Relaxed);
+    PIC_NS[3].fetch_add(1, Relaxed);
+}
+
+/// The mean of each part in ms since the last call: (buffer, screens, laid pictures).
+pub fn picture_times_take() -> (f64, f64, f64) {
+    use std::sync::atomic::Ordering::Relaxed;
+    let n = PIC_NS[3].swap(0, Relaxed).max(1) as f64;
+    let m = |i: usize| PIC_NS[i].swap(0, Relaxed) as f64 / 1e6 / n;
+    (m(0), m(1), m(2))
+}
+
 pub fn timing() -> (u64, u64, u64, u64) {
     use std::sync::atomic::Ordering::Relaxed;
     (QUANTA.load(Relaxed), NS_GUEST.load(Relaxed), NS_HW.load(Relaxed), NS_SOUND.load(Relaxed))

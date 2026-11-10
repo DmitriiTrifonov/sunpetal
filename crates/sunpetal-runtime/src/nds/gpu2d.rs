@@ -1407,7 +1407,10 @@ impl Nds {
     fn screens_pixels<const CH: usize>(&self, scale: usize) -> Vec<u8> {
         let s = scale.max(1);
         let (w, h3) = (256 * s, 192 * s);
-        let mut rgb = vec![255u8; w * 2 * h3 * CH];
+        let t0 = std::time::Instant::now();
+        // zeroed pages come lazily; the threads below write every pixel (and its alpha), so nothing fills them first
+        let mut rgb = vec![0u8; w * 2 * h3 * CH];
+        let t1 = std::time::Instant::now();
         let a_top = self.gpu2d_top_is_a();
         let f3 = self.frame3d_scale.max(1);
         // the 3D picture may be wider than the screen: the middle of it is the screen
@@ -1420,24 +1423,48 @@ impl Nds {
         std::thread::scope(|sc| {
             for (k, chunk) in rgb.chunks_mut(rows_per * w * CH).enumerate() {
                 sc.spawn(move || {
-                    for (r, row) in chunk.chunks_mut(w * CH).enumerate() {
+                    // the row before: a row with the same screen and the same source rows is a copy of it
+                    let mut prev: Option<(usize, usize, usize, usize)> = None;
+                    for r in 0..chunk.len() / (w * CH) {
                         let ry = k * rows_per + r;
                         let (screen, y) = (ry / h3, ry % h3);
                         let e = if (screen == 0) == a_top { 0 } else { 1 };
                         let (y2, y3) = (y / s, y * f3 / s);
+                        let at = r * w * CH;
+                        if let Some((ps, py2, py3, pr)) = prev {
+                            if ps == screen && py2 == y2 && py3 == y3 {
+                                chunk.copy_within(pr * w * CH..(pr + 1) * w * CH, at);
+                                continue;
+                            }
+                        }
+                        prev = Some((screen, y2, y3, r));
+                        let row = &mut chunk[at..at + w * CH];
+                        // the pixel before: the same DS pixel over the same 3D pixel gives the same colour
+                        let mut last = (usize::MAX, u32::MAX, 0u32);
                         for x in 0..w {
                             let i = Gpu2d::at(e, y2) + 2 * (x / s);
                             let p3 = if e == 0 { self.frame3d[y3 * w3 + c3 + x * f3 / s] } else { 0 };
-                            let c = compose(&self.gpu.px[i..i + 2], p3);
+                            let c = if last.0 == i && last.1 == p3 {
+                                last.2
+                            } else {
+                                let c = compose(&self.gpu.px[i..i + 2], p3);
+                                last = (i, p3, c);
+                                c
+                            };
                             row[CH * x] = (c >> 16) as u8;
                             row[CH * x + 1] = (c >> 8) as u8;
                             row[CH * x + 2] = c as u8;
+                            if CH == 4 {
+                                row[CH * x + 3] = 255;
+                            }
                         }
                     }
                 });
             }
         });
+        let t2 = std::time::Instant::now();
         self.overlay_pack(&mut rgb, s, CH, a_top, None);
+        super::note_picture_times(t1 - t0, t2 - t1, t2.elapsed());
         rgb
     }
 }
