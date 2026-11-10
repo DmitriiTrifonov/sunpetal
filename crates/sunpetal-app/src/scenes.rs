@@ -28,6 +28,27 @@ pub fn kind(name: &str) -> Option<&'static str> {
     scene(name).map(|s| s.kind)
 }
 
+/// Что раскладке делать с видом сцены (решение автора 2026-11-10, K-163). Живая раскладка пока идёт по картинке
+/// (`layout.rs`); таблица видов подключается к ней отдельной карточкой.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Policy {
+    /// устройство Катарины: верхний экран с предметом, нижний (головоломка) панелью поверх
+    Panel,
+    /// ролик или титры: показывается один экран, нижний не нужен
+    SingleScreen,
+    /// разговор, ходьба, стрелялка: как решает картинка (нижний экран по меню и касанию)
+    ByPicture,
+}
+
+/// Политика раскладки для вида сцены из `kind`.
+pub fn policy(kind: &str) -> Policy {
+    match kind {
+        "device" => Policy::Panel,
+        "movie" | "credits" => Policy::SingleScreen,
+        _ => Policy::ByPicture,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -43,6 +64,20 @@ mod tests {
         assert_eq!(kind("C02_12"), Some("device"));
         assert!(kind("C19_01").is_some());
         assert_eq!(kind("C99_99"), None);
+    }
+
+    #[test]
+    fn the_kinds_get_the_policy_the_author_chose() {
+        assert_eq!(policy("device"), Policy::Panel);
+        assert_eq!(policy("movie"), Policy::SingleScreen);
+        assert_eq!(policy("credits"), Policy::SingleScreen);
+        for k in ["talk", "walk", "shooter"] {
+            assert_eq!(policy(k), Policy::ByPicture);
+        }
+        // каждый вид таблицы имеет политику, а устройства и ролики в ней есть
+        let rows: Vec<&str> = CSV.lines().skip(1).collect();
+        assert!(rows.iter().any(|l| policy(l.rsplit(',').next().unwrap()) == Policy::Panel));
+        assert!(rows.iter().any(|l| policy(l.rsplit(',').next().unwrap()) == Policy::SingleScreen));
     }
 
     #[test]
