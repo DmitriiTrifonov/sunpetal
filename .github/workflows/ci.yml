@@ -54,6 +54,23 @@ jobs:
       - name: The keys the tools work out agree with the runtime's (golden values)
         run: python tools/ds/test_nitro.py
 
+  # Упаковка AppImage на x86_64 (K-057): ROM в CI нет, поэтому внутри приложение без модулей игры;
+  # задача проверяет сам скрипт (сборка, образ, библиотеки), а играбельный образ игрок собирает у себя.
+  appimage:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Linux packages (sound, pads, file for appimagetool)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev file
+      - run: tools/package/linux.sh
+      - name: The image unpacks and every library of the binary is found
+        run: |
+          cd "$RUNNER_TEMP"
+          "$GITHUB_WORKSPACE"/build/package/Sunpetal-x86_64.AppImage --appimage-extract >/dev/null
+          test -x squashfs-root/AppRun && test -f squashfs-root/sunpetal.desktop
+          ! ldd squashfs-root/usr/bin/sunpetal-app | grep "not found"
+
   android:
     runs-on: ubuntu-latest
     steps:
