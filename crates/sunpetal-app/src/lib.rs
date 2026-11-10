@@ -293,6 +293,8 @@ struct App {
     title_menu: bool,
     /// The title's "Press START" box has been seen at least once (before that, START is the game's, not the app's menu).
     title_seen: bool,
+    /// B-30: после «Продолжить» сцена остаётся `C19_01`; счётчик шагов, меню ходьбы или устройство значит, что титул пройден (плашка «Press START» сбрасывает).
+    title_left: bool,
     /// Защёлка титула: поднята, пока виден «Press START» (или сцена C19_01), сброшена, когда игра
     /// прочитала другую сцену (`start::latch`). Держит START игровым на меню титула без плашки (B-18).
     on_title: bool,
@@ -651,10 +653,15 @@ impl App {
             b,
             pad::Ctx {
                 menu_open: self.menu.open,
-                start_to_game: start::start_to_game(
-                    self.shared.scene.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_deref(),
-                    start_to_game(self.prompt.is_some() || self.prompt_off < PROMPT_HOLD, self.title_seen, self.title_menu) || self.on_title,
-                ),
+                start_to_game: {
+                    let scene = self.shared.scene.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+                    // B-30: «Продолжить» не читает новый файл сцены, `C19_01` остаётся; нижнее меню ходьбы значит, что титул пройден
+                    let scene = if self.title_left { None } else { scene };
+                    start::start_to_game(
+                        scene.as_deref(),
+                        start_to_game(self.prompt.is_some() || self.prompt_off < PROMPT_HOLD, self.title_seen, self.title_menu) || (self.on_title && !self.title_left),
+                    )
+                },
                 game_menu_up: self.auto_lower && self.puzzle_hold == 0 && !self.dial_scene,
             },
         );
@@ -855,6 +862,7 @@ impl App {
             self.prompt = layout::prompt_box(*scale, rgba);
             self.prompt_off = if self.prompt.is_some() { 0 } else { self.prompt_off.saturating_add(1) };
             self.title_seen |= self.prompt.is_some();
+            self.title_left = if self.prompt.is_some() { false } else { self.title_left || self.counter_seen || self.auto_lower || self.device_seen };
             let scene = self.shared.scene.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
             self.on_title = start::latch(self.on_title, self.prompt.is_some(), scene.as_deref());
             self.title_menu = layout::title_menu_in(*scale, rgba);
@@ -1692,6 +1700,7 @@ fn prepare(o: Options, scripted: bool) -> (App, Arc<Shared>, Option<cpal::Stream
         prompt: None,
         title_menu: false,
         title_seen: false,
+        title_left: false,
         on_title: false,
         wide_now: 0,
         bar_color: None,
