@@ -285,10 +285,10 @@ impl Menu {
                             *action = Some(Action::Quit);
                         }
                     });
-                    ui.label(tx(
-                        "All the settings: full_menu = true under [ui] in the settings file, or --full-menu.",
-                        "Все настройки: full_menu = true в разделе [ui] файла настроек или --full-menu.",
-                    ));
+                    // the full menu for this opening, as F1 gives it (the window takes `forced_full` into `short` each frame)
+                    if ui.button(tx("All settings…", "Все настройки…")).clicked() {
+                        self.forced_full = true;
+                    }
                 }
             }
         }

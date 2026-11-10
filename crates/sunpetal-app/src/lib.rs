@@ -2083,7 +2083,7 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
             out: Some(dir),
             save: None,
             mute: false,
-            res: Some(1),
+            res: None, // the saved resolution (2x at first), not forced: the slider keeps its place across launches
             menu: false,
             full_menu: false,
             goto: None,
