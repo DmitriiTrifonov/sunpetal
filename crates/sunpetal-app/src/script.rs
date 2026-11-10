@@ -200,6 +200,24 @@ fn command(app: &mut App, words: &[&str]) -> Result<String, String> {
             app.toggle_menu();
             Ok(format!("\"open\":{}", app.menu.open))
         }
+        // the pad's menu moves: padmenu up|down|left|right|ok|back (the same path as the buttons)
+        "padmenu" => {
+            use crate::pad::{Act, Dir};
+            let act = match words.get(1).copied() {
+                Some("up") => Act::Nav(Dir::Up),
+                Some("down") => Act::Nav(Dir::Down),
+                Some("left") => Act::Nav(Dir::Left),
+                Some("right") => Act::Nav(Dir::Right),
+                Some("ok") => Act::Confirm,
+                Some("back") => Act::Back,
+                _ => return Err("padmenu up|down|left|right|ok|back".into()),
+            };
+            app.menu_key(act);
+            // two passes: the focus moves in the first, the list scrolls to it in the second
+            app.redraw();
+            app.redraw();
+            Ok(format!("\"padmenu\":{:?}", words[1]))
+        }
         "set" => {
             let (key, value) = (words.get(1).ok_or("set KEY VALUE")?, words[2..].join(" "));
             let new = set(&app.settings, key, &value)?;

@@ -524,6 +524,23 @@ pub fn clean_name(name: &str) -> String {
     name.trim().chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == ' ' { c } else { '_' }).collect()
 }
 
+/// A free name for a profile typed by nobody ("profile 1", "profile 2"…): the pad has no keyboard.
+pub fn next_profile_name(taken: &[String]) -> String {
+    (1..).map(|n| format!("profile {n}")).find(|c| !taken.contains(c)).unwrap_or_default()
+}
+
+/// The save files lying in the config folder: what the pad can import without a file dialog.
+pub fn save_files() -> Vec<std::path::PathBuf> {
+    let mut v: Vec<_> = fs::read_dir(dir()).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "sav" || x == "dsv")).collect();
+    v.sort();
+    v
+}
+
+/// Where the pad's export goes: the config folder, no dialog.
+pub fn export_file() -> std::path::PathBuf {
+    dir().join("sunpetal.sav")
+}
+
 pub fn save_profile(name: &str, s: &Settings) -> Result<(), String> {
     let name = clean_name(name);
     if name.is_empty() {
@@ -686,6 +703,12 @@ mod tests {
         let mut s: Settings = toml::from_str("[interface]\nlanguage = \"xx\"\n").unwrap();
         s.sanitize();
         assert_eq!(s.interface.language, "auto");
+    }
+
+    #[test]
+    fn a_free_profile_name_skips_the_taken_ones() {
+        assert_eq!(next_profile_name(&[]), "profile 1");
+        assert_eq!(next_profile_name(&["profile 1".into(), "profile 3".into()]), "profile 2");
     }
 
     #[test]

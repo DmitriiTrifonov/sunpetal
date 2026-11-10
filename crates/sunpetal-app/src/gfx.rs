@@ -204,7 +204,7 @@ pub struct Gfx {
     /// Off screen: the texture drawn into instead of the window's surface, and egui's points per pixel.
     offscreen: Option<(wgpu::Texture, f32)>,
     /// Keys the pad presses for the menu (its arrows, Enter, Escape), given to egui with the next frame's input.
-    pad_keys: Vec<egui::Key>,
+    pad_keys: Vec<(egui::Key, egui::Modifiers)>,
     egui_renderer: egui_wgpu::Renderer,
     bgl: wgpu::BindGroupLayout,
     nearest: wgpu::Sampler,
@@ -684,9 +684,18 @@ impl Gfx {
 
     /// A key for the menu, from the pad. An arrow with nothing focused yet is a Tab: it focuses the first widget.
     pub fn pad_key(&mut self, key: egui::Key) {
-        let arrow = matches!(key, egui::Key::ArrowUp | egui::Key::ArrowDown | egui::Key::ArrowLeft | egui::Key::ArrowRight);
         let nothing = self.egui_ctx.memory(|m| m.focused().is_none());
-        self.pad_keys.push(if arrow && nothing { egui::Key::Tab } else { key });
+        // up and down walk the focus in the tab order (a slider takes the vertical arrows too, and the pad
+        // could not leave it; a text field takes them for its cursor); left and right stay arrows: they move a slider
+        let in_text = self.egui_ctx.text_edit_focused();
+        self.pad_keys.push(match key {
+            egui::Key::ArrowUp => (egui::Key::Tab, egui::Modifiers::SHIFT),
+            egui::Key::ArrowDown => (egui::Key::Tab, egui::Modifiers::NONE),
+            egui::Key::ArrowLeft if in_text => (egui::Key::Tab, egui::Modifiers::SHIFT),
+            egui::Key::ArrowRight if in_text => (egui::Key::Tab, egui::Modifiers::NONE),
+            egui::Key::ArrowLeft | egui::Key::ArrowRight if nothing => (egui::Key::Tab, egui::Modifiers::NONE),
+            k => (k, egui::Modifiers::NONE),
+        });
     }
 
     /// A popup (a drop-down list) is open in the menu: the pad's B closes it before the menu.
@@ -864,9 +873,9 @@ impl Gfx {
                 }
                 (None, None) => egui::RawInput::default(),
             };
-            for key in self.pad_keys.drain(..) {
+            for (key, modifiers) in self.pad_keys.drain(..) {
                 for pressed in [true, false] {
-                    raw.events.push(egui::Event::Key { key, physical_key: Some(key), pressed, repeat: false, modifiers: egui::Modifiers::NONE });
+                    raw.events.push(egui::Event::Key { key, physical_key: Some(key), pressed, repeat: false, modifiers });
                 }
             }
             let out = self.egui_ctx.run_pass(raw, |ctx| menu(ctx));

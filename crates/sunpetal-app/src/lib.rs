@@ -34,6 +34,7 @@ mod scenes;
 pub mod screen_report;
 mod script;
 mod start;
+mod theme;
 mod touchpad;
 mod ui;
 mod uitext;
@@ -634,7 +635,7 @@ impl App {
     }
 
     /// A key for the menu, from a pad button (`Back` closes a drop-down list first, then the menu).
-    fn menu_key(&mut self, a: pad::Act) {
+    pub(crate) fn menu_key(&mut self, a: pad::Act) {
         if a == pad::Act::Back && !self.gfx.as_ref().is_some_and(|g| g.popup_open()) {
             self.toggle_menu();
             return;
