@@ -848,6 +848,16 @@ pub(super) fn msaa_factor(job: &Job, s: usize) -> usize {
 /// the outline come out smooth.
 pub(super) fn render(job: &Job, scale: usize) -> (Vec<u32>, u32) {
     let s = scale.max(1);
+    // a frame with no polygons (the 2D scenes: title, menus) is the clear plane: drawn at 1x, and if it is
+    // one colour all over (no clear image), the big one is the same colour, so no pass at s x is needed
+    if s > 1 && job.polys.is_empty() && job.disp3dcnt & 0x4000 == 0 {
+        let (px, notes) = render(job, 1);
+        if let Some(&first) = px.first() {
+            if px.iter().all(|&p| p == first) {
+                return (vec![first; job.width * s * 192 * s], notes);
+            }
+        }
+    }
     // at most 16x the DS's size each way, and 8192 wide: more would not fit in memory
     let k = msaa_factor(job, s);
     if k < 2 {
@@ -1034,6 +1044,23 @@ pub(crate) mod tests {
     fn pixel(c555: u16, alpha: u32) -> u32 {
         let (r, g, b) = rgb555(c555);
         r | g << 6 | b << 12 | alpha << 18
+    }
+
+    /// A frame with no polygons takes the 1x shortcut in `render`: the same picture as the full pass at s x.
+    #[test]
+    fn an_empty_frame_at_scale_equals_the_full_pass() {
+        for (cnt, wide, cc) in [(0u16, 256usize, 31u32 << 16), (0x00A0, 256, 0x001F_7C00), (0x0020, 288, 0x0010_03E0), (0x0080, 256, 0x8000_0000 | 31 << 16)] {
+            let mut j = empty_job();
+            (j.disp3dcnt, j.width, j.clear_color) = (cnt, wide, cc);
+            j.extras.outline = 0.5;
+            j.extras.shadow = 0.5;
+            for s in [2usize, 4] {
+                let fast = render(&j, s);
+                let full = render_at(&j, s);
+                assert_eq!(fast.0, full.0, "cnt {cnt:04X} wide {wide} scale {s}");
+                assert_eq!(fast.1, full.2);
+            }
+        }
     }
 
     const BLUE: u16 = 0x7C00;
