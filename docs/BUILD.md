@@ -54,6 +54,14 @@ python3 tools/build-data.py "$ROM" диск.iso game.spdata --cache build/ps2.ca
 
 Модели из PS2 (шаг C) лягут в тот же файл отдельной секцией `MODL`; формат описан в `tools/ps2/spdata.py`.
 
+## Упаковка в приложение (K-057)
+
+Игровой код производный от ROM, поэтому готовые образы не раздаются: пакет собирается на машине игрока из его сборки (с `generated/recomp`; без него внутри приложение без модулей игры) и никому не передаётся.
+
+- **macOS:** `tools/package/macos.sh` даёт `build/package/Sunpetal.app` (иконка, `Info.plist`, подпись ad hoc, лицензия и `NOTICE` внутри) и `build/package/Sunpetal.dmg` (приложение и ссылка на «Программы»). Шрифты и раскладки зашиты в бинарник. Запуск из Finder: выбор ROM или `sunpetal.data` — как в обычном окне. Проверка скрипта: образ монтируется, `plutil -lint`, `codesign --verify --deep --strict`. Иконка рисуется кодом: `tools/android/make-icon.py --iconset DIR`.
+- Android: `tools/android/build-apk.sh`, см. `docs/ANDROID.md`.
+- AppImage, exe, ipa: в работе (K-057).
+
 ## Управление
 
 Стрелки, Z/X/S/A (кнопки A/B/X/Y), Q/W (L/R), Enter (Start), Backspace (Select); мышь по нижнему экрану это стилус. F1 или Esc открывает меню (графика, эффекты, звук, управление, профили), F2 раскладка, F3 фильтр, F4/F5 разрешение 3D, F6 эффекты, F11 полный экран, Tab ускорение. Геймпад поддерживается. Настройки в `config.toml` папки конфигурации (macOS: `~/Library/Application Support/sunpetal`, Linux: `~/.config/sunpetal`).

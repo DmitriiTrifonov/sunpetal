@@ -2,6 +2,7 @@
 """The app's icon, drawn in code (no picture to ship): a sun with eight petals.
 
     make-icon.py OUT_RES_DIR      writes mipmap-{mdpi,hdpi,xhdpi,xxhdpi,xxxhdpi}/ic_launcher.png
+    make-icon.py --iconset DIR    writes DIR/icon_*.png for `iconutil -c icns` (macOS, tools/package/macos.sh)
 """
 import math
 import os
@@ -63,5 +64,20 @@ def main(out):
         png(os.path.join(d, 'ic_launcher.png'), size, size, draw(size))
 
 
+def iconset(out):
+    os.makedirs(out, exist_ok=True)
+    for size in (16, 32, 64, 128, 256, 512, 1024):
+        rgba = draw(size)
+        half = size // 2
+        names = ['icon_%dx%d.png' % (size, size)] if size <= 512 else []
+        if size >= 32:
+            names.append('icon_%dx%d@2x.png' % (half, half))
+        for n in names:
+            png(os.path.join(out, n), size, size, rgba)
+
+
 if __name__ == '__main__':
-    main(sys.argv[1])
+    if sys.argv[1] == '--iconset':
+        iconset(sys.argv[2])
+    else:
+        main(sys.argv[1])
