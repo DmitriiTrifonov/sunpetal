@@ -442,6 +442,10 @@ impl Nds {
         c.reload = reload;
         c.loop_ = loop_;
         c.len = len;
+        if started && std::env::var_os("SUNPETAL_SOUND_LOG").is_some() {
+            // every start, to find which sample is which sound: the source address, the length, the volume, the time
+            eprintln!("sound-start vb={} ch={} cnt={:08x} src={:07x} len={} loop={} reload={:04x}", super::vblanks(), n, cnt, src, len, loop_, reload);
+        }
         if started {
             const FMT: [&str; 4] = ["PCM8", "PCM16", "IMA-ADPCM", "PSG/noise"];
             const REP: [&str; 4] = ["manual", "looped", "one-shot", "repeat mode 3"];
