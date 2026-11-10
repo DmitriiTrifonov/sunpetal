@@ -60,7 +60,8 @@ python3 tools/build-data.py "$ROM" диск.iso game.spdata --cache build/ps2.ca
 
 - **macOS:** `tools/package/macos.sh` даёт `build/package/Sunpetal.app` (иконка, `Info.plist`, подпись ad hoc, лицензия и `NOTICE` внутри) и `build/package/Sunpetal.dmg` (приложение и ссылка на «Программы»). Шрифты и раскладки зашиты в бинарник. Запуск из Finder: выбор ROM или `sunpetal.data` — как в обычном окне. Проверка скрипта: образ монтируется, `plutil -lint`, `codesign --verify --deep --strict`. Иконка рисуется кодом: `tools/android/make-icon.py --iconset DIR`.
 - Android: `tools/android/build-apk.sh`, см. `docs/ANDROID.md`.
-- AppImage, exe, ipa: в работе (K-057).
+- **Windows (кросс-сборка):** `tools/package/windows.sh` даёт `build/package/Sunpetal-windows.zip` (`Sunpetal.exe`, лицензия, `NOTICE`; около 10 МБ). Нужны mingw-w64 (macOS: `brew install mingw-w64`) и `rustup target add x86_64-pc-windows-gnu`. Сборка в цель `x86_64-pc-windows-gnu`, иконка встроена через `windres`, подсистема «оконная» (`CONSOLE=1` оставляет консоль с журналом). Зависит только от системных DLL Windows. Запуск проверен автором в CrossOver (2026-11-10): игра работает; на настоящей Windows не проверялось.
+- AppImage, ipa: в работе (K-057).
 
 ## Управление
 

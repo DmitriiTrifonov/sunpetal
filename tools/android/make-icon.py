@@ -2,6 +2,7 @@
 """The app's icon, drawn in code (no picture to ship): a sun with eight petals.
 
     make-icon.py OUT_RES_DIR      writes mipmap-{mdpi,hdpi,xhdpi,xxhdpi,xxxhdpi}/ic_launcher.png
+    make-icon.py --ico FILE       writes a Windows .ico (PNG frames 16..256; tools/package/windows.sh)
     make-icon.py --iconset DIR    writes DIR/icon_*.png for `iconutil -c icns` (macOS, tools/package/macos.sh)
 """
 import math
@@ -64,6 +65,25 @@ def main(out):
         png(os.path.join(d, 'ic_launcher.png'), size, size, draw(size))
 
 
+def ico(path):
+    sizes = (16, 32, 48, 64, 128, 256)
+    frames = []
+    for size in sizes:
+        tmp = path + '.%d.png' % size
+        png(tmp, size, size, draw(size))
+        with open(tmp, 'rb') as f:
+            frames.append(f.read())
+        os.remove(tmp)
+    head = struct.pack('<HHH', 0, 1, len(sizes))
+    off = 6 + 16 * len(sizes)
+    entries = b''
+    for size, data in zip(sizes, frames):
+        entries += struct.pack('<BBBBHHII', size % 256, size % 256, 0, 0, 1, 32, len(data), off)
+        off += len(data)
+    with open(path, 'wb') as f:
+        f.write(head + entries + b''.join(frames))
+
+
 def iconset(out):
     os.makedirs(out, exist_ok=True)
     for size in (16, 32, 64, 128, 256, 512, 1024):
@@ -79,5 +99,7 @@ def iconset(out):
 if __name__ == '__main__':
     if sys.argv[1] == '--iconset':
         iconset(sys.argv[2])
+    elif sys.argv[1] == '--ico':
+        ico(sys.argv[2])
     else:
         main(sys.argv[1])
