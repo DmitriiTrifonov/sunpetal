@@ -37,6 +37,7 @@ mod start;
 mod theme;
 mod touchpad;
 mod ui;
+mod uisound;
 mod uitext;
 
 use std::collections::HashMap;
@@ -1617,7 +1618,9 @@ fn prepare(o: Options, scripted: bool) -> (App, Arc<Shared>, Option<cpal::Stream
     if error.is_none() {
         emu::spawn(cfg, shared.clone(), ring.clone());
     }
-    let app = App {
+    // the menu's blips from the user's ROM (no ROM file: silent)
+    let menu_sound = ring.clone().zip(Some(&rom).filter(|r| !r.as_os_str().is_empty()).and_then(|r| uisound::load(r)));
+    let mut app = App {
         shared: shared.clone(),
         ring,
         window: None,
@@ -1700,6 +1703,7 @@ fn prepare(o: Options, scripted: bool) -> (App, Arc<Shared>, Option<cpal::Stream
         restart: false,
         scripted,
     };
+    app.menu.sound = menu_sound;
     (app, shared, stream)
 }
 

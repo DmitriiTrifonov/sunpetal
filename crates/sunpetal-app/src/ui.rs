@@ -29,6 +29,8 @@ pub struct Menu {
     profile_name: String,
     /// The widget that had the focus last frame: a move of it scrolls the menu to it.
     last_focus: Option<egui::Id>,
+    /// The game's own blips for the menu (from the ROM) and where to play them; none: silent.
+    pub sound: Option<(std::sync::Arc<crate::audio::Ring>, crate::uisound::Cues)>,
     profiles: Vec<String>,
     message: String,
     /// The restart button was pressed once: the next press does it.
@@ -73,6 +75,7 @@ impl Menu {
             rebinding: None,
             profile_name: String::new(),
             last_focus: None,
+            sound: None,
             profiles: config::profiles(),
             message: String::new(),
             restart_ask: false,
@@ -100,6 +103,13 @@ impl Menu {
         (self.restart_ask, self.import_ask, self.main_ask) = (false, false, false);
         if self.open {
             self.profiles = config::profiles();
+            self.play(|c| &c.open);
+        }
+    }
+
+    fn play(&self, pick: impl Fn(&crate::uisound::Cues) -> &std::sync::Arc<crate::uisound::Cue>) {
+        if let Some((ring, cues)) = &self.sound {
+            ring.play(pick(cues));
         }
     }
 
@@ -383,10 +393,16 @@ impl Menu {
             ui.separator();
             egui::ScrollArea::vertical().auto_shrink([false, false]).max_height((screen.max.y - ui.cursor().min.y - 12.0).max(60.0)).show(ui, |ui| {
             let focus = ctx.memory(|m| m.focused());
+            if ctx.input(|i| i.key_pressed(egui::Key::Enter)) && focus.is_some() {
+                self.play(|c| &c.select);
+            }
             if focus != self.last_focus {
                 // the pad moved the focus: the list follows it (the least scroll that shows the widget)
                 if let Some(r) = focus.and_then(|id| ctx.read_response(id)) {
                     ui.scroll_to_rect(r.rect.expand(8.0), None);
+                }
+                if focus.is_some() {
+                    self.play(|c| &c.cursor);
                 }
                 self.last_focus = focus;
             }
