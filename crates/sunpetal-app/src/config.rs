@@ -443,7 +443,18 @@ pub fn dir() -> PathBuf {
     if let Some(d) = std::env::var_os("SUNPETAL_CONFIG") {
         return PathBuf::from(d);
     }
-    dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join("sunpetal")
+    dirs::config_dir().or_else(ios_config_dir).unwrap_or_else(|| PathBuf::from(".")).join("sunpetal")
+}
+
+/// iOS: the settings live in the app container's `Library/Application Support` (the program's own folder is read-only).
+#[cfg(target_os = "ios")]
+fn ios_config_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library").join("Application Support"))
+}
+
+#[cfg(not(target_os = "ios"))]
+fn ios_config_dir() -> Option<PathBuf> {
+    None
 }
 
 fn file() -> PathBuf {

@@ -9,9 +9,14 @@ pub const DATA_NAME: &str = "sunpetal.data";
 /// The game code of the supported dump (the European one).
 const GAME_CODE: &[u8; 4] = b"YHNP";
 
-/// Where files are looked for: the current folder, the program's, the configuration folder.
+/// Where files are looked for: the current folder, the program's, the configuration folder (on iOS first the app's Documents).
 pub fn search_dirs() -> Vec<PathBuf> {
     let mut v = vec![PathBuf::from(".")];
+    // iOS: the ROM or `sunpetal.data` goes to the app's Documents (Files app, Finder), the program's own folder is read-only
+    #[cfg(target_os = "ios")]
+    if let Some(h) = std::env::var_os("HOME") {
+        v.insert(0, PathBuf::from(h).join("Documents"));
+    }
     if let Some(d) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
         v.push(d);
     }

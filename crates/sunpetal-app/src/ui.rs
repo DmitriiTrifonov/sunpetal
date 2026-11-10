@@ -14,9 +14,11 @@ pub enum Action {
     Restart,
     /// Ask the Android launcher to show the file picker the next time the app starts.
     PickGame,
-    /// A copy of the game's save to this file.
+    /// A copy of the game's save to this file (made by the file dialog, which iOS has not).
+    #[cfg_attr(target_os = "ios", allow(dead_code))]
     ExportSave(std::path::PathBuf),
     /// This file replaces the game's save, and the game starts anew.
+    #[cfg_attr(target_os = "ios", allow(dead_code))]
     ImportSave(std::path::PathBuf),
 }
 
