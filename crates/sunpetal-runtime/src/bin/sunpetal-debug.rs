@@ -242,6 +242,24 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
                 .collect();
             done(json!({"writers": rows}))
         }
+        "batches" => {
+            // the frame's polygons by where the game sent them from: model file, model, mesh (docs/ULTIMATE-IMPORT.md, У3.4)
+            let mut by: std::collections::BTreeMap<(String, u16, String), (u32, u32)> = Default::default();
+            let (mut none, mut all) = (0u32, 0u32);
+            for (m, polys) in debug::frame_models() {
+                all += polys;
+                match m {
+                    Some(m) => {
+                        let e = by.entry((m.model, m.mesh, m.mesh_name)).or_default();
+                        (e.0, e.1) = (e.0 + 1, e.1 + polys);
+                    }
+                    None => none += polys,
+                }
+            }
+            let rows: Vec<Value> =
+                by.iter().map(|((model, mesh, name), (runs, polys))| json!({"model": model, "mesh": mesh, "name": name, "runs": runs, "polys": polys})).collect();
+            done(json!({"polys": all, "unnamed": none, "meshes": rows}))
+        }
         "poke" => {
             let addr = address(w.first().ok_or("poke ADDR VALUE")?)?;
             let value: u32 = number(w.get(1), "VALUE", None)?;

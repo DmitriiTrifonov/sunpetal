@@ -17,6 +17,7 @@ mod gx;
 mod input;
 mod jobdump;
 mod mmio;
+pub mod modelsrc;
 mod pack2d;
 mod render3d;
 #[cfg(feature = "gpu")]

@@ -165,7 +165,12 @@ impl Nds {
         };
         let (ds, ss) = (step(dctl), step(sctl));
         let (mut s, mut t) = (d.src, d.dst);
+        // a display list going to the geometry engine: the commands remember where they came from (`modelsrc.rs`)
+        let to_gx = cpu == 9 && unit == 4 && dctl == 2 && d.dst == 0x0400_0400;
         for _ in 0..d.count {
+            if to_gx {
+                self.gx.dl_src = s;
+            }
             if unit == 4 {
                 let v = self.rd(cpu, s & !3, 4);
                 self.wr(cpu, t & !3, v, 4);
@@ -176,6 +181,7 @@ impl Nds {
             s = s.wrapping_add(ss);
             t = t.wrapping_add(ds);
         }
+        self.gx.dl_src = 0;
         let dst_reload = self.io_reg(cpu, base + 4);
         let mode = Self::dma_mode(cpu, ctl);
         let d = &mut self.sys.dma[ci(cpu)][ch];

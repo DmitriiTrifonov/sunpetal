@@ -234,6 +234,11 @@ pub(crate) fn on_enter(c: &mut Cpu, key: u32) {
     }
 }
 
+/// The frame being drawn, by model and mesh: the polygons of each (`None`: batches not out of a model file).
+pub fn frame_models() -> Vec<(Option<super::modelsrc::ModelAt>, u32)> {
+    super::nds(|n| n.frame_models())
+}
+
 /// `len` bytes of ARM9 memory at `addr`, if all of them are memory.
 pub fn peek(addr: u32, len: usize) -> Option<Vec<u8>> {
     if (0x0400_0000..0x0800_0000).contains(&addr) {

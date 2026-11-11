@@ -176,11 +176,16 @@ struct Lists {
     verts: Vec<GxVertex>,
     polys: Vec<GxPoly>,
     nverts_ds: u32,
+    /// The batches' sources, in order: the address the batch's BEGIN_VTXS came from by DMA (0: not by DMA)
+    /// and the polygons it gave (`modelsrc.rs`). A run of batches from one address is one entry.
+    srcs: Vec<(u32, u32)>,
 }
 
 struct Queued {
     cmd: u32,
     p: Vec<u32>,
+    /// `Gx::dl_src` as the command came.
+    src: u32,
 }
 
 /// `SUNPETAL_GX_TRACE=FILE` (+ `SUNPETAL_GX_FRAMES=a-b`, by SWAP_BUFFERS' count): one text line
@@ -365,6 +370,9 @@ pub(super) struct Gx {
     render_manual: bool,
     swaps: u64,
     swap_pending: bool,
+    /// The address of the word a DMA is writing to GXFIFO now (0: no DMA), and that of the command being run.
+    pub(super) dl_src: u32,
+    cmd_src: u32,
     swap_param: u32,
     // a strip's or quad's vertices so far
     strip: [V; 4],
@@ -446,6 +454,8 @@ impl Gx {
             render_manual: false,
             swaps: 0,
             swap_pending: false,
+            dl_src: 0,
+            cmd_src: 0,
             swap_param: 0,
             strip: [V::default(); 4],
             nstrip: 0,
@@ -687,6 +697,9 @@ impl Gx {
         let (ytop, ybot) = (ytop.clamp(0, 255) as u32, ybot.clamp(0, 255) as u32);
         poly.sortkey = ybot << 8 | ytop;
         self.build.polys.push(poly);
+        if let Some(s) = self.build.srcs.last_mut() {
+            s.1 += 1;
+        }
         self.build.nverts_ds += n as u32;
         false
     }
@@ -1187,6 +1200,9 @@ impl Nds {
             0x40 => {
                 // BEGIN_VTXS
                 let g = &mut self.gx;
+                if g.build.srcs.last().map(|s| s.0) != Some(g.cmd_src) {
+                    g.build.srcs.push((g.cmd_src, 0));
+                }
                 #[cfg(feature = "debug-tools")]
                 {
                     let (frame, pos, tex, pal) = (g.swaps, g.mtx_pos, g.tex_param, g.pltt_base);
@@ -1273,9 +1289,10 @@ impl Nds {
     fn gx_command(&mut self, cmd: u32, p: &[u32]) {
         if self.gx.swap_pending {
             let n = if cmd < 0x80 { PARAMS[cmd as usize] as usize } else { 0 };
-            self.gx.queue.push_back(Queued { cmd, p: p[..n].to_vec() });
+            self.gx.queue.push_back(Queued { cmd, p: p[..n].to_vec(), src: self.gx.dl_src });
             return;
         }
+        self.gx.cmd_src = self.gx.dl_src;
         self.gx_exec(cmd, p);
     }
 
@@ -1457,6 +1474,7 @@ impl Nds {
         g.swaps += 1;
         while !self.gx.queue.is_empty() && !self.gx.swap_pending {
             let q = self.gx.queue.pop_front().unwrap();
+            self.gx.cmd_src = q.src;
             self.gx_exec(q.cmd, &q.p);
         }
         self.gx_fifo_irq();
@@ -1668,5 +1686,14 @@ mod gpu_fallback_tests {
         let want = render3d::render(&job, 1);
         let (got, failed) = gpu_or_software(&job, 1, || panic!("the GPU draws a frame with no polygons"));
         assert_eq!((got, failed), (want, None));
+    }
+}
+
+impl Nds {
+    /// The frame being drawn: each run of batches' model and mesh (`None`: not out of a model file) and its polygons.
+    pub(crate) fn frame_models(&mut self) -> Vec<(Option<super::modelsrc::ModelAt>, u32)> {
+        let srcs = self.gx.render.srcs.clone();
+        let at = self.models_at(&srcs.iter().map(|s| s.0).collect::<Vec<_>>());
+        at.into_iter().zip(srcs).map(|(m, s)| (m, s.1)).collect()
     }
 }
