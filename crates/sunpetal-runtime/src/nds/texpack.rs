@@ -342,6 +342,13 @@ impl Nds {
             if keys.contains_key(&id) {
                 continue;
             }
+            if p.pal & super::gx::ULT_PAL != 0 {
+                // a replacement model's picture: its key is the model's, not the texture memory's
+                if let Some(k) = self.ult_key(p.tex, p.pal) {
+                    keys.insert(id, k);
+                }
+                continue;
+            }
             let key = match self.texpack.cache.get(&id) {
                 Some((g, k)) if *g == gen => *k,
                 _ => {

@@ -10,8 +10,8 @@ size = float(sys.argv[4]) if len(sys.argv) > 4 else 2.0
 verts, idx = [], []
 
 
-def v(p, c):
-    verts.append((p, c))
+def v(p, c, uv=(0.0, 0.0)):
+    verts.append((p, c, uv))
     return len(verts) - 1
 
 
@@ -22,7 +22,7 @@ h = size / 4
 for n, a, b, col in faces:
     q = []
     for sa, sb in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
-        q.append(v(tuple(h * (n[k] + sa * a[k] + sb * b[k]) for k in range(3)), col))
+        q.append(v(tuple(h * (n[k] + sa * a[k] + sb * b[k]) for k in range(3)), (255, 255, 255) if col[0] else col, (sa + 1.0, sb + 1.0)))
     idx += [q[0], q[1], q[2], q[0], q[2], q[3]]
 cube = len(idx)
 # a grid in the plane y = -h: 2 * grid * grid triangles, a chequered grey
@@ -38,10 +38,11 @@ o = b"SPM2" + bytes([1]) + struct.pack("<f", 1.0)
 o += struct.pack("<H", len(name)) + name.encode() + struct.pack("<IH", 0, 0xFFFF)
 o += struct.pack("<12f", 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
 o += struct.pack("<H", 0)  # no bones
-o += struct.pack("<H", 2) + bytes([0, 0, 0, 0]) + bytes([0, 1, 0, 0])  # two materials: pass 0 and pass 1, no picture
+# two materials: the grid (pass 0, no picture) and the cube (pass 1, a 64 x 64 picture: tools/ult/mk_test_spm.py's key)
+o += struct.pack("<H", 2) + bytes([0, 0, 0, 0]) + bytes([1]) + struct.pack("<QQHH", 0x1111, 0x2222, 64, 64) + bytes([1, 0, 0])
 o += struct.pack("<I", len(verts))
-for p, c in verts:
-    o += struct.pack("<3f3f4B2fHH", *p, 0, 1, 0, c[0] // 2, c[1] // 2, c[2] // 2, 128, 0, 0, 0, 0)
+for p, c, uv in verts:
+    o += struct.pack("<3f3f4B2fHH", *p, 0, 1, 0, c[0] // 2, c[1] // 2, c[2] // 2, 128, uv[0], uv[1], 0, 0)
 o += struct.pack("<I", 2) + struct.pack("<HII", 1, 0, cube) + struct.pack("<HII", 0, cube, len(idx) - cube)
 o += struct.pack("<I", len(idx)) + struct.pack("<%dI" % len(idx), *idx)
 open(out, "wb").write(o)

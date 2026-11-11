@@ -268,9 +268,27 @@ struct Ult {
     size: Option<u32>,
     anchor: Option<u16>,
     only_mesh: bool,
-    /// Triangles in the order of drawing (by pass): each vertex's place in the anchor mesh's space and colour (0-31).
-    tris: Vec<[([f64; 3], [i32; 3]); 3]>,
+    /// In the order of drawing (by pass).
+    parts: Vec<UltPart>,
 }
+
+/// A material's triangles. Its picture is in the texture pack under `key`; the polygons carry `tex` and `pal`
+/// (a TEXIMAGE_PARAM of the picture's size and a PLTT_BASE no DS texture has: `ULT_PAL`), which the frame's keys
+/// lead from to the picture (`texture_keys`), so both rendering engines draw it as any replaced texture.
+struct UltPart {
+    key: Option<super::render3d::TexKey>,
+    tex: u32,
+    pal: u32,
+    /// Each vertex: its place in the anchor mesh's space, colour (0-31), texture coordinates (texels × 16).
+    tris: Vec<[UltVertex; 3]>,
+}
+
+type UltVertex = ([f64; 3], [i32; 3], [i32; 2]);
+
+/// The bit of a polygon's PLTT_BASE that says its picture is a replacement model's (the rest numbers the picture).
+pub(super) const ULT_PAL: u32 = 0x8000_0000;
+/// The format of a PS2 picture's key in a texture pack: `128x128_200_<picture hash>_<palette hash>.png`.
+pub(super) const ULT_FMT: u8 = 200;
 
 /// The bones' matrices in the model's space at rest (rows x, y, z of three, then the place): a bone is
 /// T · Ry · Rz · Rx under its parent.
@@ -327,7 +345,8 @@ fn ult_point(m: &[f64; 12], v: [f64; 3]) -> [f64; 3] {
 }
 
 impl Ult {
-    fn new(m: &sunpetal_data::spm2::Model) -> Option<Ult> {
+    /// `pictures` counts the materials with a picture, over all the models (their PLTT_BASE numbers).
+    fn new(m: &sunpetal_data::spm2::Model, pictures: &mut u32) -> Option<Ult> {
         let b = m.bind.as_ref()?;
         let bones = ult_bones(&m.bones);
         // the binding's rows are the DS axes' (x, y, z of three), then the shift
@@ -339,17 +358,36 @@ impl Ult {
                 p = ult_point(w, p);
             }
             let p = ult_point(&place, p.map(|x| x * m.unit as f64));
-            (p, [0, 1, 2].map(|k| ((v.rgba[k] as i32 * 31 + 64) / 128).min(31)))
+            (p, [0, 1, 2].map(|k| ((v.rgba[k] as i32 * 31 + 64) / 128).min(31)), v.uv)
         };
-        let mut parts: Vec<&sunpetal_data::spm2::Part> = m.parts.iter().collect();
-        parts.sort_by_key(|p| m.materials[p.material as usize].pass);
-        let mut tris = Vec::with_capacity(m.idx.len() / 3);
-        for p in parts {
-            for t in m.idx[p.first as usize..(p.first + p.count) as usize].chunks_exact(3) {
-                tris.push([vert(t[0]), vert(t[1]), vert(t[2])]);
-            }
+        // a material's picture: a TEXIMAGE_PARAM of a size that holds it (direct colour, repeated unless clamped)
+        let code = |n: u16| (0..7u32).find(|c| 8u32 << c >= n as u32).unwrap_or(7);
+        let mats: Vec<(Option<super::render3d::TexKey>, u32, u32)> = m
+            .materials
+            .iter()
+            .map(|mt| match mt.picture {
+                Some(pic) => {
+                    *pictures += 1;
+                    let repeat = (mt.flags & 2 == 0) as u32 | ((mt.flags & 4 == 0) as u32) << 1;
+                    let tex = 7 << 26 | code(pic.h) << 23 | code(pic.w) << 20 | repeat << 16;
+                    (Some(super::render3d::TexKey { data: pic.data, pal: pic.pal, fmt: ULT_FMT, w: pic.w, h: pic.h }), tex, ULT_PAL | *pictures)
+                }
+                None => (None, 0, 0),
+            })
+            .collect();
+        let mut order: Vec<&sunpetal_data::spm2::Part> = m.parts.iter().collect();
+        order.sort_by_key(|p| m.materials[p.material as usize].pass);
+        let mut parts = Vec::with_capacity(order.len());
+        for p in order {
+            let (key, tex, pal) = mats[p.material as usize];
+            let (w, h) = ((8u32 << ((tex >> 20) & 7)) as f32 * 16.0, (8u32 << ((tex >> 23) & 7)) as f32 * 16.0);
+            let texel = |(q, c, uv): ([f64; 3], [i32; 3], [f32; 2])| -> UltVertex {
+                (q, c, [(uv[0] * w).round().clamp(-32768.0, 32767.0) as i32, (uv[1] * h).round().clamp(-32768.0, 32767.0) as i32])
+            };
+            let tris = m.idx[p.first as usize..(p.first + p.count) as usize].chunks_exact(3).map(|t| [texel(vert(t[0])), texel(vert(t[1])), texel(vert(t[2]))]).collect();
+            parts.push(UltPart { key, tex, pal, tris });
         }
-        Some(Ult { model: b.model.clone(), size: b.size, anchor: b.mesh, only_mesh: b.only_mesh && b.mesh.is_some(), tris })
+        Some(Ult { model: b.model.clone(), size: b.size, anchor: b.mesh, only_mesh: b.only_mesh && b.mesh.is_some(), parts })
     }
 
     fn from_env() -> Vec<Ult> {
@@ -376,7 +414,8 @@ impl Ult {
         };
         match read() {
             Ok(models) => {
-                let ult: Vec<Ult> = models.iter().filter_map(Ult::new).collect();
+                let mut pictures = 0;
+                let ult: Vec<Ult> = models.iter().filter_map(|m| Ult::new(m, &mut pictures)).collect();
                 eprintln!("models: {} of {} from {} stand for DS models", ult.len(), models.len(), path.display());
                 ult
             }
@@ -386,6 +425,16 @@ impl Ult {
             }
         }
     }
+}
+
+/// A batch whose display list was copied to GXFIFO by the CPU: where its polygons begin, its entry in the frame's
+/// sources, its clip matrix and polygon attributes, and the words that followed its BEGIN_VTXS (six at most).
+struct UltPend {
+    start: usize,
+    src_at: usize,
+    m: Mtx,
+    attr: u32,
+    words: Vec<u32>,
 }
 
 /// K-111, the prototype of a model swap at the GX border (`SUNPETAL_MODEL_SWAP=FILE`, off by
@@ -460,6 +509,8 @@ pub(super) struct Gx {
     ult_at_r: Vec<(usize, Mtx, u32)>,
     /// A replacement's polygons are going in: the DS's list limits do not hold.
     unbounded: bool,
+    /// A batch that did not come by DMA, to be known by its words when it ends (`ult_pend_close`).
+    ult_pend: Option<UltPend>,
     #[cfg(feature = "debug-tools")]
     trace: Option<Trace>,
     /// 0x04000320-0x0400071F, as written.
@@ -560,6 +611,7 @@ impl Gx {
             ult_hide_r: Vec::new(),
             ult_at_r: Vec::new(),
             unbounded: false,
+            ult_pend: None,
             #[cfg(feature = "debug-tools")]
             trace: Trace::from_env(),
             regs: vec![0; 0x400],
@@ -636,6 +688,23 @@ impl Gx {
             }
         }
         self.swap_cur = None;
+    }
+
+    /// The replacement bound to the model of file `fi`, if any (looked up once a file).
+    fn ult_of(&self, files: &mut super::modelsrc::Files, fi: usize) -> Option<usize> {
+        let f = &mut files.list[fi];
+        *f.ult.get_or_insert_with(|| self.ult.iter().position(|u| u.model == f.model && u.size.is_none_or(|s| s == f.size)))
+    }
+
+    /// The entry of `ult_seen` for these batches (made if new).
+    fn ult_seen_at(&mut self, u: usize, mesh: u16, m: Mtx, attr: u32) -> usize {
+        match self.ult_seen.iter().position(|c| c.0 == u && c.1 == mesh && c.2 == m) {
+            Some(i) => i,
+            None => {
+                self.ult_seen.push((u, mesh, m, attr, 0));
+                self.ult_seen.len() - 1
+            }
+        }
     }
 
     /// Closes the open run of a replaced model's polygons.
@@ -913,15 +982,20 @@ impl Nds {
         if self.gx.ult.is_empty() {
             return;
         }
+        self.ult_pend_close();
         self.gx.ult_close();
         let (src, now) = (self.gx.cmd_src, self.gx.swaps);
+        if src == 0 {
+            // not by DMA: known, if at all, by the words that follow
+            let g = &mut self.gx;
+            if !g.swap_pending && !g.build.srcs.is_empty() {
+                g.update_clip();
+                g.ult_pend = Some(UltPend { start: g.build.polys.len(), src_at: g.build.srcs.len() - 1, m: g.mtx_clip, attr: g.attr_pending, words: Vec::new() });
+            }
+            return;
+        }
         let mut files = std::mem::take(&mut self.gx.files);
-        let found = self.model_of(&mut files, src, now).and_then(|(fi, mesh)| {
-            let f = &mut files.list[fi];
-            let ult = &self.gx.ult;
-            let u = *f.ult.get_or_insert_with(|| ult.iter().position(|u| u.model == f.model && u.size.is_none_or(|s| s == f.size)));
-            u.map(|u| (u, mesh))
-        });
+        let found = self.model_of(&mut files, src, now).and_then(|(fi, mesh)| self.gx.ult_of(&mut files, fi).map(|u| (u, mesh)));
         self.gx.files = files;
         let Some((u, mesh)) = found else { return };
         let g = &mut self.gx;
@@ -930,18 +1004,41 @@ impl Nds {
         }
         g.update_clip();
         let (m, attr) = (g.mtx_clip, g.attr_pending);
-        let i = match g.ult_seen.iter().position(|c| c.0 == u && c.1 == mesh && c.2 == m) {
-            Some(i) => i,
-            None => {
-                g.ult_seen.push((u, mesh, m, attr, 0));
-                g.ult_seen.len() - 1
-            }
-        };
+        let i = g.ult_seen_at(u, mesh, m, attr);
         g.ult_open = Some((g.build.polys.len(), i));
+    }
+
+    /// The batch that came by the CPU's copy has ended: whose it is, by its words.
+    fn ult_pend_close(&mut self) {
+        let Some(p) = self.gx.ult_pend.take() else { return };
+        let n = self.gx.build.polys.len();
+        if n <= p.start {
+            return;
+        }
+        let now = self.gx.swaps;
+        let mut files = std::mem::take(&mut self.gx.files);
+        let hit = self.model_by_words(&mut files, &p.words, now);
+        let found = hit.and_then(|(fi, mesh)| self.gx.ult_of(&mut files, fi).map(|u| (u, mesh)));
+        if let Some((fi, mesh)) = hit {
+            // the frame's sources name the mesh's list from now on (`batches`)
+            if let Some(s) = self.gx.build.srcs.get_mut(p.src_at) {
+                s.0 = files.mesh_list(fi, mesh);
+            }
+        }
+        self.gx.files = files;
+        let Some((u, mesh)) = found else { return };
+        let g = &mut self.gx;
+        if g.ult[u].only_mesh && g.ult[u].anchor != Some(mesh) {
+            return;
+        }
+        let i = g.ult_seen_at(u, mesh, p.m, p.attr);
+        g.ult_seen[i].4 += n - p.start;
+        g.ult_hide.push((p.start, n));
     }
 
     /// The VBlank of a swap: the frame's replaced batches go with its lists.
     fn ult_swap(&mut self) {
+        self.ult_pend_close();
         let g = &mut self.gx;
         g.ult_close();
         g.ult_hide_r = std::mem::take(&mut g.ult_hide);
@@ -976,22 +1073,29 @@ impl Nds {
         let saved = (g.attr, g.tex_param, g.pltt_base);
         std::mem::swap(&mut g.render, &mut g.build);
         g.unbounded = true;
+        let pack = self.texpack.pack.clone();
         for (u, m, attr) in at {
-            // opaque, both faces (the model may wind either way), no texture yet
-            (self.gx.attr, self.gx.tex_param) = ((attr | 0xC0) & !(0x1F << 16) | 31 << 16, 0);
-            let tris = std::mem::take(&mut self.gx.ult[u].tris);
-            for t in &tris {
-                let v = t.map(|(q, c)| {
-                    let mut nv = V::default();
-                    for i in 0..4 {
-                        nv.p[i] = (q[0] * m[i] as f64 + q[1] * m[4 + i] as f64 + q[2] * m[8 + i] as f64 + m[12 + i] as f64).round() as i32;
-                    }
-                    nv.c = c.map(|c| c << 4 | if c != 0 { 0xF } else { 0 });
-                    nv
-                });
-                self.gx_submit(&v, 3);
+            // opaque, both faces (the model may wind either way), the picture times the vertex colour
+            self.gx.attr = (attr | 0xC0) & !(0x1F << 16 | 3 << 4) | 31 << 16;
+            let parts = std::mem::take(&mut self.gx.ult[u].parts);
+            for part in &parts {
+                // a picture the pack does not have: the vertices' colours alone
+                let has = part.key.is_some_and(|k| pack.get(&k).is_some());
+                (self.gx.tex_param, self.gx.pltt_base) = if has { (part.tex, part.pal) } else { (0, 0) };
+                for t in &part.tris {
+                    let v = t.map(|(q, c, uv)| {
+                        let mut nv = V::default();
+                        for i in 0..4 {
+                            nv.p[i] = (q[0] * m[i] as f64 + q[1] * m[4 + i] as f64 + q[2] * m[8 + i] as f64 + m[12 + i] as f64).round() as i32;
+                        }
+                        nv.c = c.map(|c| c << 4 | if c != 0 { 0xF } else { 0 });
+                        nv.t = uv;
+                        nv
+                    });
+                    self.gx_submit(&v, 3);
+                }
             }
-            self.gx.ult[u].tris = tris;
+            self.gx.ult[u].parts = parts;
         }
         let g = &mut self.gx;
         g.unbounded = false;
@@ -1553,6 +1657,11 @@ impl Nds {
     }
 
     fn gx_fifo_word(&mut self, v: u32) {
+        if let Some(p) = &mut self.gx.ult_pend {
+            if p.words.len() < 6 {
+                p.words.push(v);
+            }
+        }
         if self.gx.cur >= 0 {
             // a parameter of the command being gathered
             let g = &mut self.gx;
@@ -1949,6 +2058,11 @@ mod gpu_fallback_tests {
 }
 
 impl Nds {
+    /// The key of a replacement model's picture, by the PLTT_BASE its polygons carry (`ULT_PAL`).
+    pub(super) fn ult_key(&self, tex: u32, pal: u32) -> Option<super::render3d::TexKey> {
+        self.gx.ult.iter().flat_map(|u| &u.parts).find(|p| p.pal == pal && p.tex == tex).and_then(|p| p.key)
+    }
+
     /// The frame being drawn: each run of batches' model and mesh (`None`: not out of a model file) and its polygons.
     pub(crate) fn frame_models(&mut self) -> Vec<(Option<super::modelsrc::ModelAt>, u32)> {
         let srcs = self.gx.render.srcs.clone();

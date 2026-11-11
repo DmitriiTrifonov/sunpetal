@@ -119,6 +119,15 @@ pub(super) struct Files {
     pub(super) list: Vec<File>,
     none: Vec<(u32, u32)>,
     cleared: u64,
+    /// The first words of display lists that came by the CPU's copy, and where in a mesh they were found (0: nowhere).
+    by_words: std::collections::HashMap<Vec<u32>, u32>,
+}
+
+impl Files {
+    /// The address of a mesh's display list.
+    pub(super) fn mesh_list(&self, file: usize, mesh: u16) -> u32 {
+        self.list[file].meshes[mesh as usize].0
+    }
 }
 
 impl super::Nds {
@@ -130,6 +139,7 @@ impl super::Nds {
         }
         if now >= files.cleared + 64 {
             files.none.clear();
+            files.by_words.retain(|_, a| *a != 0);
             files.cleared = now;
         }
         let mut i = 0;
@@ -162,5 +172,41 @@ impl super::Nds {
         files.list.push(File { base, size, model, meshes: meshes.iter().map(|m| (m.3, m.4)).collect(), seen: now, ult: None });
         let f = files.list.last().unwrap();
         f.meshes.iter().position(|m| addr >= m.0 && addr - m.0 < m.1).map(|m| (files.list.len() - 1, m as u16))
+    }
+}
+
+impl super::Nds {
+    /// The file and mesh of a display list that did not come by DMA (a short list is copied to GXFIFO word by
+    /// word, and its address is not seen): `words` are the ones that followed its BEGIN_VTXS, looked for in the
+    /// meshes of the files seen so far. A model none of whose lists goes by DMA is not found.
+    pub(super) fn model_by_words(&mut self, files: &mut Files, words: &[u32], now: u64) -> Option<(usize, u16)> {
+        if words.len() < 3 {
+            return None;
+        }
+        let at = match files.by_words.get(words) {
+            Some(&a) => a,
+            None => {
+                let mut found = 0;
+                let lists: Vec<(u32, u32)> = files.list.iter().flat_map(|f| f.meshes.iter().copied()).collect();
+                'all: for (start, size) in lists {
+                    let n = size / 4;
+                    let list: Vec<u32> = (0..n).map(|i| self.m32(start + 4 * i)).collect();
+                    if let Some(i) = list.windows(words.len()).position(|w| w == words) {
+                        found = start + 4 * i as u32;
+                        break 'all;
+                    }
+                }
+                files.by_words.insert(words.to_vec(), found);
+                found
+            }
+        };
+        if at == 0 {
+            return None;
+        }
+        let hit = self.model_of(files, at, now);
+        if hit.is_none() {
+            files.by_words.remove(words); // the file has gone
+        }
+        hit
     }
 }

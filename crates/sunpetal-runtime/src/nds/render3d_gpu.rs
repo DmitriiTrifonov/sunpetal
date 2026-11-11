@@ -3593,6 +3593,22 @@ mod tests {
     }
 
     #[test]
+    fn a_replacement_models_picture_draws_the_same() {
+        // a polygon of a replacement model (`gx.rs`, `Ult`): a direct-colour TEXIMAGE_PARAM of the picture's
+        // size, repeated, and a PLTT_BASE with `ULT_PAL` that no texture has; the key leads to the pack's picture
+        let st = [(-4.0, 0.0), (20.0, 0.0), (20.0, 20.0), (-4.0, 20.0)];
+        let mut j = textured_job(7 << 26 | 3 << 16, 0, 31 << 16, st);
+        j.polys[0].pal = super::super::gx::ULT_PAL | 1;
+        j.keys.insert((j.polys[0].tex, j.polys[0].pal), TexKey { data: 0x1111, pal: 0x2222, fmt: 4, w: 8, h: 8 });
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/tiny.spdata");
+        j.pack = Arc::new(super::super::texpack::Pack::from_file(&path).unwrap());
+        both(&j, 1);
+        both(&j, 2);
+        j.extras.filter = super::super::TexFilter::Bilinear;
+        both(&j, 1);
+    }
+
+    #[test]
     fn the_bilinear_filter_blends_by_alpha_and_matches_the_software() {
         let st = [(0.0, 0.0), (8.0, 0.0), (8.0, 8.0), (0.0, 8.0)];
         // a lone red texel in a sea of transparent ones: the alpha-weighted blend keeps the red
