@@ -4,9 +4,9 @@
 //! file in memory, and the file names the model (`nds/modelsrc.rs` of the runtime). Little-endian.
 //!
 //! ```text
-//! model:    "SPM2", u8 flags (bit 0: bound to a DS model), f32 unit (positions × unit = the PS2 scene's units),
+//! model:    "SPM2", u8 flags (bit 0: bound to a DS model; bit 1: it stands for the anchor mesh only, not the whole DS model), f32 unit (positions × unit = the PS2 scene's units),
 //!           [bound: u16 length + the DS model's name in its file's dictionary ("no46_room_402r"),
-//!                   u32 the DS file's size (0: any; a few names are shared by several files), u16 the DS mesh (0xFFFF: all of them), 12 × f32: rows x, y, z of the 3 × 3, then the shift
+//!                   u32 the DS file's size (0: any; a few names are shared by several files), u16 the anchor: the DS mesh whose space the model is put in (0xFFFF: the mesh with most polygons in the frame), 12 × f32: rows x, y, z of the 3 × 3, then the shift
 //!                   (a point of this model, after its bone and × unit, into the DS model's space)],
 //!           u16 bones,     each: i16 parent (-1: a root), i16 standard joint (-1: none), i16 DS bone (-1: none),
 //!                                6 × f32 rest: place x y z, turn x y z in radians (the bone = T · Ry · Rz · Rx, under its parent)
@@ -29,8 +29,10 @@ pub struct Bind {
     pub model: String,
     /// That file's size, where the name alone is shared by several files.
     pub size: Option<u32>,
-    /// The mesh of that file, or `None` for all of them.
+    /// The anchor: the DS mesh whose space `place` leads into (`None`: the one with most polygons in the frame).
     pub mesh: Option<u16>,
+    /// Only the anchor mesh is replaced (else every mesh of the DS model is).
+    pub only_mesh: bool,
     /// Rows x, y, z of the 3 × 3, then the shift.
     pub place: [f32; 12],
 }
@@ -97,7 +99,7 @@ fn opt(v: Option<u16>) -> [u8; 2] {
 impl Model {
     pub fn encode(&self) -> Vec<u8> {
         let mut o = MAGIC.to_vec();
-        o.push(self.bind.is_some() as u8);
+        o.push(self.bind.as_ref().map_or(0, |b| 1 | (b.only_mesh as u8) << 1));
         o.extend_from_slice(&self.unit.to_le_bytes());
         if let Some(b) = &self.bind {
             o.extend_from_slice(&(b.model.len() as u16).to_le_bytes());
@@ -170,7 +172,7 @@ impl Model {
             return Err(bad("not a model"));
         }
         let flags = take(1)?[0];
-        if flags > 1 {
+        if flags > 3 || flags == 2 {
             return Err(bad("unknown flags"));
         }
         let unit = f32_at(take(4)?, 0)?;
@@ -184,7 +186,7 @@ impl Model {
             for (i, x) in place.iter_mut().enumerate() {
                 *x = f32_at(p, 4 * i)?;
             }
-            Some(Bind { model, size, mesh, place })
+            Some(Bind { model, size, mesh, only_mesh: flags & 2 != 0, place })
         } else {
             None
         };
@@ -281,7 +283,13 @@ mod tests {
         Model {
             name: "room".into(),
             unit: 0.1,
-            bind: Some(Bind { model: "no46_room_402r".into(), size: Some(80376), mesh: None, place: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.5, 0.0, -2.0] }),
+            bind: Some(Bind {
+                model: "no46_room_402r".into(),
+                size: Some(80376),
+                mesh: None,
+                only_mesh: false,
+                place: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.5, 0.0, -2.0],
+            }),
             bones: vec![
                 Bone { parent: None, standard: Some(0), ds: Some(0), rest: [0.0, 9.0, 0.0, 0.0, 0.0, 0.0] },
                 Bone { parent: Some(0), standard: Some(1), ds: None, rest: [0.0, 1.5, 0.0, 0.0, -0.03, 0.0] },
@@ -328,6 +336,12 @@ mod tests {
         check("parts with a gap", &|m| m.parts[1].first = 4);
         check("parts short of the indices", &|m| m.parts.truncate(1));
         check("pass past 2", &|m| m.materials[0].pass = 3);
+        let mut one = model();
+        one.bind.as_mut().unwrap().only_mesh = true;
+        assert_eq!(Model::decode("room", &one.encode()).unwrap(), one, "the anchor-only flag");
+        let mut flags = model().encode();
+        flags[4] = 2;
+        assert!(Model::decode("x", &flags).is_err(), "anchor-only with no binding");
     }
 
     #[test]

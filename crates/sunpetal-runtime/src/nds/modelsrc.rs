@@ -99,3 +99,68 @@ impl super::Nds {
             .collect()
     }
 }
+
+/// A model file seen in memory, kept between frames (`Nds::model_of`).
+pub(super) struct File {
+    base: u32,
+    pub(super) size: u32,
+    pub(super) model: String,
+    /// The meshes' display lists: address and size.
+    meshes: Vec<(u32, u32)>,
+    /// The frame (`Gx::swaps`) the file was last checked to be still there.
+    seen: u64,
+    /// The replacement bound to this model (`gx.rs`, `Ult`), looked up once.
+    pub(super) ult: Option<Option<usize>>,
+}
+
+/// The model files found so far and the stretches of memory found to hold none.
+#[derive(Default)]
+pub(super) struct Files {
+    pub(super) list: Vec<File>,
+    none: Vec<(u32, u32)>,
+    cleared: u64,
+}
+
+impl super::Nds {
+    /// The file (an index into `files.list`) and mesh a display-list address lies in, at frame `now`. Cheap
+    /// after the first time: a file is checked once a frame, and memory with no file is remembered for 64 frames.
+    pub(super) fn model_of(&mut self, files: &mut Files, addr: u32, now: u64) -> Option<(usize, u16)> {
+        if addr == 0 {
+            return None;
+        }
+        if now >= files.cleared + 64 {
+            files.none.clear();
+            files.cleared = now;
+        }
+        let mut i = 0;
+        while i < files.list.len() {
+            let f = &files.list[i];
+            if addr >= f.base && addr - f.base < f.size {
+                if f.seen != now {
+                    let (base, size) = (f.base, f.size);
+                    let same = self.m32(base) == BMD0 && self.m32(base + 8) == size && self.model_meshes(base).first().is_some_and(|m| m.0 == files.list[i].model);
+                    if !same {
+                        files.list.remove(i);
+                        continue;
+                    }
+                    files.list[i].seen = now;
+                }
+                let f = &files.list[i];
+                return f.meshes.iter().position(|m| addr >= m.0 && addr - m.0 < m.1).map(|m| (i, m as u16));
+            }
+            i += 1;
+        }
+        if files.none.iter().any(|n| addr >= n.0 && addr <= n.1) {
+            return None;
+        }
+        let Some((base, size)) = self.model_file(addr) else {
+            files.none.push((addr.saturating_sub(REACH).max(0x0200_0000), addr));
+            return None;
+        };
+        let meshes = self.model_meshes(base);
+        let model = meshes.first()?.0.clone();
+        files.list.push(File { base, size, model, meshes: meshes.iter().map(|m| (m.3, m.4)).collect(), seen: now, ult: None });
+        let f = files.list.last().unwrap();
+        f.meshes.iter().position(|m| addr >= m.0 && addr - m.0 < m.1).map(|m| (files.list.len() - 1, m as u16))
+    }
+}

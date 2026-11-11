@@ -257,6 +257,137 @@ impl Trace {
     }
 }
 
+/// A PS2 model that stands for a DS one (`SPM2`; `docs/ULTIMATE-IMPORT.md`, steps У4.3 and У4.4), ready to
+/// draw. `SUNPETAL_ULT_MODELS` names a folder of `*.spm` or a data file with a `MODL` part. The DS model's
+/// batches are known by where the game sends them from (`modelsrc.rs`): they are built as ever (the counters
+/// the game reads stay the same), taken out at the start of rendering, and this model's triangles go in
+/// through the clip matrix of the anchor mesh. Its polygons do not count against the DS's list limits.
+/// Not done: the model's pictures (it is drawn in its vertices' colours), its motions (the rest pose).
+struct Ult {
+    model: String,
+    size: Option<u32>,
+    anchor: Option<u16>,
+    only_mesh: bool,
+    /// Triangles in the order of drawing (by pass): each vertex's place in the anchor mesh's space and colour (0-31).
+    tris: Vec<[([f64; 3], [i32; 3]); 3]>,
+}
+
+/// The bones' matrices in the model's space at rest (rows x, y, z of three, then the place): a bone is
+/// T · Ry · Rz · Rx under its parent.
+fn ult_bones(bones: &[sunpetal_data::spm2::Bone]) -> Vec<[f64; 12]> {
+    fn local(r: &[f32; 6]) -> [f64; 12] {
+        let (sx, cx) = (r[3] as f64).sin_cos();
+        let (sy, cy) = (r[4] as f64).sin_cos();
+        let (sz, cz) = (r[5] as f64).sin_cos();
+        // Ry · Rz · Rx, row by row
+        [
+            cy * cz,
+            -cy * sz * cx + sy * sx,
+            cy * sz * sx + sy * cx,
+            sz,
+            cz * cx,
+            -cz * sx,
+            -sy * cz,
+            sy * sz * cx + cy * sx,
+            -sy * sz * sx + cy * cx,
+            r[0] as f64,
+            r[1] as f64,
+            r[2] as f64,
+        ]
+    }
+    fn mul(a: &[f64; 12], b: &[f64; 12]) -> [f64; 12] {
+        let mut o = [0.0; 12];
+        for r in 0..3 {
+            for c in 0..3 {
+                o[3 * r + c] = (0..3).map(|k| a[3 * r + k] * b[3 * k + c]).sum();
+            }
+            o[9 + r] = (0..3).map(|k| a[3 * r + k] * b[9 + k]).sum::<f64>() + a[9 + r];
+        }
+        o
+    }
+    fn world(bones: &[sunpetal_data::spm2::Bone], i: usize, done: &mut [Option<[f64; 12]>]) -> [f64; 12] {
+        if let Some(m) = done[i] {
+            return m;
+        }
+        let l = local(&bones[i].rest);
+        let m = match bones[i].parent {
+            Some(p) => mul(&world(bones, p as usize, done), &l),
+            None => l,
+        };
+        done[i] = Some(m);
+        m
+    }
+    let mut done = vec![None; bones.len()];
+    (0..bones.len()).map(|i| world(bones, i, &mut done)).collect()
+}
+
+/// A point through a matrix of `ult_bones`' layout.
+fn ult_point(m: &[f64; 12], v: [f64; 3]) -> [f64; 3] {
+    [0, 1, 2].map(|r| m[3 * r] * v[0] + m[3 * r + 1] * v[1] + m[3 * r + 2] * v[2] + m[9 + r])
+}
+
+impl Ult {
+    fn new(m: &sunpetal_data::spm2::Model) -> Option<Ult> {
+        let b = m.bind.as_ref()?;
+        let bones = ult_bones(&m.bones);
+        // the binding's rows are the DS axes' (x, y, z of three), then the shift
+        let place: [f64; 12] = std::array::from_fn(|i| b.place[i] as f64);
+        let vert = |i: u32| {
+            let v = &m.verts[i as usize];
+            let mut p = [v.pos[0] as f64, v.pos[1] as f64, v.pos[2] as f64];
+            if let Some(w) = bones.get(v.bone as usize) {
+                p = ult_point(w, p);
+            }
+            let p = ult_point(&place, p.map(|x| x * m.unit as f64));
+            (p, [0, 1, 2].map(|k| ((v.rgba[k] as i32 * 31 + 64) / 128).min(31)))
+        };
+        let mut parts: Vec<&sunpetal_data::spm2::Part> = m.parts.iter().collect();
+        parts.sort_by_key(|p| m.materials[p.material as usize].pass);
+        let mut tris = Vec::with_capacity(m.idx.len() / 3);
+        for p in parts {
+            for t in m.idx[p.first as usize..(p.first + p.count) as usize].chunks_exact(3) {
+                tris.push([vert(t[0]), vert(t[1]), vert(t[2])]);
+            }
+        }
+        Some(Ult { model: b.model.clone(), size: b.size, anchor: b.mesh, only_mesh: b.only_mesh && b.mesh.is_some(), tris })
+    }
+
+    fn from_env() -> Vec<Ult> {
+        let Some(path) = std::env::var_os("SUNPETAL_ULT_MODELS").map(std::path::PathBuf::from) else { return Vec::new() };
+        let read = || -> Result<Vec<sunpetal_data::spm2::Model>, String> {
+            let mut out = Vec::new();
+            if path.is_dir() {
+                let mut names: Vec<std::path::PathBuf> =
+                    std::fs::read_dir(&path).map_err(|e| e.to_string())?.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "spm")).collect();
+                names.sort();
+                for n in names {
+                    let d = std::fs::read(&n).map_err(|e| format!("{}: {}", n.display(), e))?;
+                    if d.starts_with(sunpetal_data::spm2::MAGIC) {
+                        out.push(sunpetal_data::spm2::Model::decode(&n.file_stem().unwrap_or_default().to_string_lossy(), &d)?);
+                    }
+                }
+            } else {
+                let c = sunpetal_data::container::Container::read_only(&path, |t| t == sunpetal_data::models::TAG)?;
+                for s in c.all(sunpetal_data::models::TAG) {
+                    out.extend(sunpetal_data::spm2::unpack(&s.data)?);
+                }
+            }
+            Ok(out)
+        };
+        match read() {
+            Ok(models) => {
+                let ult: Vec<Ult> = models.iter().filter_map(Ult::new).collect();
+                eprintln!("models: {} of {} from {} stand for DS models", ult.len(), models.len(), path.display());
+                ult
+            }
+            Err(e) => {
+                eprintln!("models: {}: {}", path.display(), e);
+                Vec::new()
+            }
+        }
+    }
+}
+
 /// K-111, the prototype of a model swap at the GX border (`SUNPETAL_MODEL_SWAP=FILE`, off by
 /// default): the batches that use the texture `tex` are not drawn; at the first of them in a frame
 /// the file's triangles take their place, moved by `e` into the first batch's model space and
@@ -318,6 +449,17 @@ pub(super) struct Gx {
     swap_gen: u64,
     swap_count: std::collections::HashMap<u32, u32>,
     swap_mtime: Option<std::time::SystemTime>,
+    ult: Vec<Ult>,
+    files: super::modelsrc::Files,
+    /// The open run of a replaced model's polygons: where it began in the list, and its entry of `ult_seen`.
+    ult_open: Option<(usize, usize)>,
+    ult_hide: Vec<(usize, usize)>,
+    /// The replaced batches of the frame being built: model, DS mesh, clip matrix, polygon attributes, polygons.
+    ult_seen: Vec<(usize, u16, Mtx, u32, usize)>,
+    ult_hide_r: Vec<(usize, usize)>,
+    ult_at_r: Vec<(usize, Mtx, u32)>,
+    /// A replacement's polygons are going in: the DS's list limits do not hold.
+    unbounded: bool,
     #[cfg(feature = "debug-tools")]
     trace: Option<Trace>,
     /// 0x04000320-0x0400071F, as written.
@@ -410,6 +552,14 @@ impl Gx {
             swap_gen: u64::MAX,
             swap_count: Default::default(),
             swap_mtime: None,
+            ult: Ult::from_env(),
+            files: Default::default(),
+            ult_open: None,
+            ult_hide: Vec::new(),
+            ult_seen: Vec::new(),
+            ult_hide_r: Vec::new(),
+            ult_at_r: Vec::new(),
+            unbounded: false,
             #[cfg(feature = "debug-tools")]
             trace: Trace::from_env(),
             regs: vec![0; 0x400],
@@ -486,6 +636,17 @@ impl Gx {
             }
         }
         self.swap_cur = None;
+    }
+
+    /// Closes the open run of a replaced model's polygons.
+    fn ult_close(&mut self) {
+        if let Some((s0, i)) = self.ult_open.take() {
+            let n = self.build.polys.len();
+            if n > s0 {
+                self.ult_hide.push((s0, n));
+                self.ult_seen[i].4 += n - s0;
+            }
+        }
     }
 
     fn update_clip(&mut self) {
@@ -648,7 +809,7 @@ impl Gx {
         if n < 3 {
             return false;
         }
-        if self.build.polys.len() >= 2048 || self.build.nverts_ds + n as u32 > 6144 {
+        if !self.unbounded && (self.build.polys.len() >= 2048 || self.build.nverts_ds + n as u32 > 6144) {
             return true;
         }
         let fmt = (self.tex_param >> 26) & 7;
@@ -697,6 +858,9 @@ impl Gx {
         let (ytop, ybot) = (ytop.clamp(0, 255) as u32, ybot.clamp(0, 255) as u32);
         poly.sortkey = ybot << 8 | ytop;
         self.build.polys.push(poly);
+        if self.unbounded {
+            return false;
+        }
         if let Some(s) = self.build.srcs.last_mut() {
             s.1 += 1;
         }
@@ -742,6 +906,97 @@ impl Nds {
         }
         self.gx.swap_cache.insert((tex, pal), r);
         r
+    }
+
+    /// BEGIN_VTXS: is the batch a replaced model's?
+    fn ult_begin(&mut self) {
+        if self.gx.ult.is_empty() {
+            return;
+        }
+        self.gx.ult_close();
+        let (src, now) = (self.gx.cmd_src, self.gx.swaps);
+        let mut files = std::mem::take(&mut self.gx.files);
+        let found = self.model_of(&mut files, src, now).and_then(|(fi, mesh)| {
+            let f = &mut files.list[fi];
+            let ult = &self.gx.ult;
+            let u = *f.ult.get_or_insert_with(|| ult.iter().position(|u| u.model == f.model && u.size.is_none_or(|s| s == f.size)));
+            u.map(|u| (u, mesh))
+        });
+        self.gx.files = files;
+        let Some((u, mesh)) = found else { return };
+        let g = &mut self.gx;
+        if g.ult[u].only_mesh && g.ult[u].anchor != Some(mesh) {
+            return;
+        }
+        g.update_clip();
+        let (m, attr) = (g.mtx_clip, g.attr_pending);
+        let i = match g.ult_seen.iter().position(|c| c.0 == u && c.1 == mesh && c.2 == m) {
+            Some(i) => i,
+            None => {
+                g.ult_seen.push((u, mesh, m, attr, 0));
+                g.ult_seen.len() - 1
+            }
+        };
+        g.ult_open = Some((g.build.polys.len(), i));
+    }
+
+    /// The VBlank of a swap: the frame's replaced batches go with its lists.
+    fn ult_swap(&mut self) {
+        let g = &mut self.gx;
+        g.ult_close();
+        g.ult_hide_r = std::mem::take(&mut g.ult_hide);
+        g.ult_at_r.clear();
+        for u in 0..g.ult.len() {
+            // the anchor mesh's matrix (of its batches, the one with most polygons); with no anchor named, the mesh with most
+            let anchor = g.ult[u].anchor;
+            let best = g.ult_seen.iter().filter(|c| c.0 == u && c.4 > 0 && anchor.is_none_or(|a| a == c.1)).max_by_key(|c| c.4);
+            if let Some(c) = best {
+                g.ult_at_r.push((u, c.2, c.3));
+            }
+        }
+        g.ult_seen.clear();
+    }
+
+    /// At the start of rendering: the replaced models' polygons out, the replacements in.
+    fn ult_apply(&mut self, draw: bool) {
+        if !draw {
+            return; // kept: the game may not swap before the frame that is drawn
+        }
+        let g = &mut self.gx;
+        let hide = std::mem::take(&mut g.ult_hide_r);
+        let at = std::mem::take(&mut g.ult_at_r);
+        if hide.is_empty() || at.is_empty() {
+            return;
+        }
+        let mut i = 0;
+        g.render.polys.retain(|_| {
+            i += 1;
+            !hide.iter().any(|&(a, b)| i > a && i - 1 < b)
+        });
+        let saved = (g.attr, g.tex_param, g.pltt_base);
+        std::mem::swap(&mut g.render, &mut g.build);
+        g.unbounded = true;
+        for (u, m, attr) in at {
+            // opaque, both faces (the model may wind either way), no texture yet
+            (self.gx.attr, self.gx.tex_param) = ((attr | 0xC0) & !(0x1F << 16) | 31 << 16, 0);
+            let tris = std::mem::take(&mut self.gx.ult[u].tris);
+            for t in &tris {
+                let v = t.map(|(q, c)| {
+                    let mut nv = V::default();
+                    for i in 0..4 {
+                        nv.p[i] = (q[0] * m[i] as f64 + q[1] * m[4 + i] as f64 + q[2] * m[8 + i] as f64 + m[12 + i] as f64).round() as i32;
+                    }
+                    nv.c = c.map(|c| c << 4 | if c != 0 { 0xF } else { 0 });
+                    nv
+                });
+                self.gx_submit(&v, 3);
+            }
+            self.gx.ult[u].tris = tris;
+        }
+        let g = &mut self.gx;
+        g.unbounded = false;
+        std::mem::swap(&mut g.render, &mut g.build);
+        (g.attr, g.tex_param, g.pltt_base) = saved;
     }
 
     fn swap_begin(&mut self) {
@@ -1219,6 +1474,7 @@ impl Nds {
                 g.nstrip = 0;
                 g.strip_count = 0;
                 self.swap_begin();
+                self.ult_begin();
             }
             0x41 => {} // END_VTXS: nothing on the DS either
             0x50 => {
@@ -1460,6 +1716,8 @@ impl Nds {
         let g = &mut self.gx;
         g.swap_pending = false;
         // the swapped batches of the frame that goes to the rendering engine
+        self.ult_swap();
+        let g = &mut self.gx;
         g.swap_close();
         g.swap_hide_r = std::mem::take(&mut g.swap_hide);
         g.swap_at_r = g.swap.as_mut().and_then(|sw| {
@@ -1493,6 +1751,7 @@ impl Nds {
     /// memory) and drawn, to be shown in the next frame.
     pub(super) fn gx_render_start(&mut self) {
         let t = std::time::Instant::now();
+        self.ult_apply(self.gpu.on);
         self.swap_apply(self.gpu.on);
         let t = super::note_hw(0, t);
         if !self.gpu.on {

@@ -3873,6 +3873,22 @@ mod tests {
     }
 
     #[test]
+    fn lists_past_the_ds_limits_draw_the_same() {
+        // a replaced model's polygons do not count against the DS's 2 048 polygons and 6 144 vertices
+        // (`gx.rs`, `Ult`): 20 000 small triangles in rows, colour and depth by place
+        let mut j = empty_job();
+        for i in 0..20_000u32 {
+            let (x, y) = ((i % 200) as f32 * 1.25 + 2.0, (i / 200) as f32 * 1.8 + 3.0);
+            let z = 0x1000 + (i % 7) as i32 * 0x300;
+            let c = |k: u32| ((i * k) % 32) as f32;
+            j.verts.extend([vert(x, y, z, 0x1000, c(3), c(5), c(7)), vert(x + 3.0, y + 0.5, z, 0x1000, c(5), c(7), c(3)), vert(x + 1.0, y + 4.0, z, 0x1000, c(7), c(3), c(5))]);
+            j.polys.push(GxPoly { first: 3 * i, n: 3, attr: 31 << 16 | (i % 64) << 24, tex: 0, pal: 0, translucent: false, sortkey: 0 });
+        }
+        both(&j, 1);
+        both(&j, 2);
+    }
+
+    #[test]
     fn the_auxiliary_maps_follow_the_opaque_and_translucent_polygons() {
         // an opaque square (id 5), a translucent square (id 7, alpha 15) over its right half, and a
         // translucent square (id 9, alpha 20, depth write) over part of both: `oid` stays the opaque
