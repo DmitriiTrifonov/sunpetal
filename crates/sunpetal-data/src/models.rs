@@ -8,6 +8,7 @@
 //!          per vertex 8 × f32: position xyz (in the DS object's own units: the manifest's orientation, scale and shift are baked in), normal xyz, texture uv (0..1, v up),
 //!          per index u32 (triangles, three to each)
 //! ```
+//! `SPM2` (`spm2.rs`) is the fuller format: materials, vertex colours, bones, bound to a DS model file.
 //! A model's texture is not in it: pictures go through the `TEXS` part (by the key of the DS texture the
 //! model replaces, `has_key`). Models are made by `tools/ps2/mkmodels.py` and put in by `sunpetal-pack-models`.
 use std::path::Path;
@@ -132,37 +133,56 @@ pub fn pack_dir(dir: &Path) -> Result<Vec<u8>, String> {
         .filter(|n| n.ends_with(".spm"))
         .collect();
     names.sort();
-    let mut out = MAGIC.to_vec();
-    out.extend_from_slice(&(names.len() as u32).to_le_bytes());
+    let mut all = Vec::new();
     for n in &names {
         let stem = &n[..n.len() - 4];
         let data = std::fs::read(dir.join(n)).map_err(|e| format!("{}: {}", n, e))?;
-        Model::decode(stem, &data)?;
-        out.extend_from_slice(&(stem.len() as u16).to_le_bytes());
-        out.extend_from_slice(stem.as_bytes());
-        out.extend_from_slice(&(data.len() as u32).to_le_bytes());
-        out.extend_from_slice(&data);
+        if data.starts_with(crate::spm2::MAGIC) {
+            crate::spm2::Model::decode(stem, &data)?;
+        } else {
+            Model::decode(stem, &data)?;
+        }
+        all.push((stem, data));
     }
-    Ok(out)
+    Ok(pack(&all))
 }
 
-/// The models of a section.
-pub fn unpack(d: &[u8]) -> Result<Vec<Model>, String> {
+/// Models' bytes (`SPM1` or `SPM2`, each under its name) as a section.
+pub fn pack<N: AsRef<str>>(models: &[(N, Vec<u8>)]) -> Vec<u8> {
+    let mut out = MAGIC.to_vec();
+    out.extend_from_slice(&(models.len() as u32).to_le_bytes());
+    for (name, data) in models {
+        let name = name.as_ref();
+        out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        out.extend_from_slice(data);
+    }
+    out
+}
+
+/// A section's entries as they lie: the name and the model's bytes, of either format.
+pub fn entries(d: &[u8]) -> Result<Vec<(String, &[u8])>, String> {
     let bad = || "models part: cut short or not one".to_string();
     if d.len() < 8 || &d[..4] != MAGIC {
         return Err(bad());
     }
     let n = u32::from_le_bytes(d[4..8].try_into().unwrap()) as usize;
-    let (mut at, mut out) = (8, Vec::new());
+    let (mut at, mut out) = (8usize, Vec::new());
     for _ in 0..n {
         let nl = u16::from_le_bytes(d.get(at..at + 2).ok_or_else(bad)?.try_into().unwrap()) as usize;
         let name = String::from_utf8_lossy(d.get(at + 2..at + 2 + nl).ok_or_else(bad)?).into_owned();
         at += 2 + nl;
         let len = u32::from_le_bytes(d.get(at..at + 4).ok_or_else(bad)?.try_into().unwrap()) as usize;
-        out.push(Model::decode(&name, d.get(at + 4..at + 4 + len).ok_or_else(bad)?)?);
+        out.push((name, d.get(at + 4..at + 4 + len).ok_or_else(bad)?));
         at += 4 + len;
     }
     Ok(out)
+}
+
+/// The `SPM1` models of a section (the `SPM2` ones: `spm2::unpack`).
+pub fn unpack(d: &[u8]) -> Result<Vec<Model>, String> {
+    entries(d)?.into_iter().filter(|(_, b)| !b.starts_with(crate::spm2::MAGIC)).map(|(n, b)| Model::decode(&n, b)).collect()
 }
 
 #[cfg(test)]

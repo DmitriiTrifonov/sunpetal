@@ -12,5 +12,6 @@ pub mod nitrofs;
 pub mod pack2d;
 pub mod report;
 pub mod script;
+pub mod spm2;
 pub mod tools;
 pub mod translate;
