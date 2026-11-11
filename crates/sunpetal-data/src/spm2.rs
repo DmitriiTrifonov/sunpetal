@@ -344,6 +344,14 @@ mod tests {
         assert!(Model::decode("x", &flags).is_err(), "anchor-only with no binding");
     }
 
+    /// A file made by `tools/ult/ee2spm.py` from the PS2 export: `SPM2_SAMPLE=file cargo test -p sunpetal-data`.
+    #[test]
+    fn a_converted_sample_decodes() {
+        let Ok(path) = std::env::var("SPM2_SAMPLE") else { return };
+        let m = Model::decode("sample", &std::fs::read(path).unwrap()).unwrap();
+        assert!(!m.verts.is_empty() && !m.idx.is_empty());
+    }
+
     #[test]
     fn a_section_holds_both_formats() {
         let old =
