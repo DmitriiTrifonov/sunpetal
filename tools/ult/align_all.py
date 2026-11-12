@@ -2,12 +2,12 @@
 """Every DS area model against every PS2 scene model, as `align_area.py`'s first pass does one
 (docs/ULTIMATE-IMPORT.md, У4.1 and У4.2): is the DS model a PS2 one shifted, and by how much.
 
-    align_all.py ROM.nds EXPORT_DIR OUT.toml [--eps E] [--jobs N] [--only A46,A00...]
+    align_all.py ROM.nds EXPORT_DIR OUT.toml [--eps E] [--jobs N] [--only A46,A00...] [--all-models]
 
 Writes OUT.toml (`data/ult/areas.toml`): per DS area file the PS2 model, the share of the DS vertices with a
 PS2 vertex within `--eps` (0.3), the shift into the DS model's space, the anchor mesh and the place for
 `ee2spm.py` (in that mesh's display-list units). An area with no model at a share of 0.5 is marked `ds-only`
-with its best guess. Twins (PS2 models at the same share) are listed in `also`.
+with its best guess. `--all-models`: not the scenes' GIG slots alone but every model of the export. Twins (PS2 models at the same share) are listed in `also`.
 
 Reads the ROM and the export; writes OUT.toml and a cache of the PS2 clouds beside it in `build/ult/`.
 """
@@ -30,8 +30,9 @@ from ndskit import rom as ndsrom
 CLOUDS = None
 
 
-def ps_clouds(export, cache):
-    """{model id: sorted unique vertices} of the scenes' GIG models (cached: the export's manifest names the cache)."""
+def ps_clouds(export, cache, every=False):
+    """{model id: sorted unique vertices} of the scenes' GIG models, or of `every` model of the export
+    (cached: the export's manifest names the cache)."""
     stamp = os.path.getmtime(os.path.join(export, 'manifest.json'))
     if os.path.exists(cache):
         with open(cache, 'rb') as f:
@@ -42,6 +43,8 @@ def ps_clouds(export, cache):
     for f in sorted(glob.glob(export + '/scenes/*.json')):
         for s in json.load(open(f))['scene3d']:
             ids.update(mid for slot, mid in s['models'].items() if slot == 'GIG')
+    if every:
+        ids = {os.path.basename(f)[:-5] for f in glob.glob(export + '/models/*.json')}
     clouds = {}
     for mid in sorted(ids):
         try:
@@ -105,8 +108,9 @@ def main(argv):
     eps = float(argv[argv.index('--eps') + 1]) if '--eps' in argv else 0.3
     jobs = int(argv[argv.index('--jobs') + 1]) if '--jobs' in argv else max(1, (os.cpu_count() or 2) - 2)
     only = argv[argv.index('--only') + 1].split(',') if '--only' in argv else None
-    cache = os.path.join('build', 'ult', 'ps2_clouds.pickle')
-    clouds = ps_clouds(export, cache)
+    every = '--all-models' in argv
+    cache = os.path.join('build', 'ult', 'ps2_clouds_all.pickle' if every else 'ps2_clouds.pickle')
+    clouds = ps_clouds(export, cache, every)
     print(len(clouds), 'PS2 scene models', file=sys.stderr)
     rom = ndsrom.Rom(open(rom_path, 'rb').read())
     paths = sorted(p for p, _ in nsbmd.rom_models(rom) if '/Area/' in p and (not only or any('/' + a + '/' in p for a in only)))

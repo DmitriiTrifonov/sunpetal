@@ -15,22 +15,28 @@
 - place для `ee2spm.py` — в единицах display list якорного меша (делить на `pos_scale`): `--anchor 37 --place 0.0078125 0 0 0 0.0078125 0 0 0 0.0078125 0.124981 -0.14531 -0.101563`;
 - `ee2spm.py --pack ПАПКА` кладёт картинки материалов в пакет текстур; `nsbmd.py`: исправлен `VTX_DIFF` (×8 был ошибкой — отсюда «выбросы» модели DS).
 
-Ничего из этого не закоммичено (коммиты — по слову автора). Изменены: `crates/sunpetal-runtime/src/nds/gx.rs` (якорь с 0 полигонов), `tools/ult/align_area.py`, `tools/ult/ee2spm.py`, `tools/ds/nsbmd.py`, `tools/ds/test_nsbmd.py`, документы.
+Закоммичено (`68679b0`, `4c73afa`). После этого, **не закоммичено** (У4.5, частично): `tools/ult/build_areas.py`, `compare_shots.py`, `sweep_scenes.py`, `align_all.py --all-models`, `ee2spm.py` (картинки без палитры), пересобранная `data/ult/areas.toml`, журнал.
 
-Команды, чтобы повторить кадр:
+Что есть: модели всех карт с парой собираются и грузятся разом; начала глав 1–18 — 17 сцен с подменой проходят сравнение контуров (0,85–0,94 при пороге 0,8), слепой прогон 30 000 кадров чист, GPU = софт. Пары кадров: `artifacts/ult/u49_*`, `u50_*`.
+
+Команды:
 
 ```
 EX=~/Developer/games/sunpetal-ee/out/export/v1
-python3 tools/ult/align_area.py РОМ Model/Area/A46/A46_00.nsbmd.z $EX --only f1940d2707
-python3 tools/ult/ee2spm.py $EX/models f1940d2707 build/ult/hotel/hotel402.spm --bind no46_room_402r --anchor 37 --place … --pack build/ult/pack402
-SUNPETAL_TEXTURE_PACK=build/ult/pack402 SUNPETAL_ULT_MODELS=build/ult/hotel ./target/release/sunpetal-debug РОМ --save build/ult/u46.sav --goto C02_01 --scale 3 --shot artifacts/ult/uNN.png
+python3 tools/ult/align_all.py РОМ $EX data/ult/areas.toml --all-models     # ~15 мин, таблица карт
+python3 tools/ult/build_areas.py РОМ $EX build/ult/areas                     # модели и пакет картинок
+python3 tools/ult/sweep_scenes.py РОМ build/full100.sav build/ult/areas build/ult/sweep C01_01,C13_01
+SUNPETAL_ULT_MODELS=build/ult/areas/models SUNPETAL_TEXTURE_PACK=build/ult/areas/pack ./target/release/sunpetal-debug РОМ --save КОПИЯ.sav --goto C02_01 --scale 3 --shot artifacts/ult/uNN.png
 ```
 
-(отладчик: `cargo build --release -p sunpetal-runtime --features debug-tools --bin sunpetal-debug`).
+(отладчик: `cargo build --release -p sunpetal-runtime --features debug-tools --bin sunpetal-debug`; безголовый с GPU: `--features gpu,debug-tools --bin sunpetal-headless`, пакет ему — ключом `--texture-pack`, рендерер `software|gpu`).
 
 ## Следующее (по порядку)
 
-0. **У4.2, довести таблицу карт** (`data/ult/areas.toml`, собрана `tools/ult/align_all.py`: 61 карта `swap`, 24 `ds-only`). Сделать: (а) глазами проверить 3–4 пары из 61 тем же приёмом, что комнату 402 (собрать `SPM2` с `--pack`, кадр «DS / PS2»; для карты вне комнаты 402 нужен маршрут или закладка автора); (б) семь карт с долей 0,42–0,50 (A02, A03, A65, A69, A73, A78, A79) — посмотреть, чего не хватает (поднять `--eps`, вид сверху двух облаков); (в) 17 карт с долей < 0,35 — пробовать модели PS2 не из слотов GIG и другой масштаб; (г) назвать, какая карта DS — парковка (КТ У4.1).
+0. **Уличные карты (парковка и ещё 21)** — сильной моделью, разведка: ни одна из 250 моделей выгрузки не совпадает с ними даже по габаритам. Смотреть, как PS2 собирает улицу: записи `Scene3D` сцены вступления (`scenes/R00.json`, какие модели в каких слотах, есть ли матрицы постановки), слоты `GIG4`/`GIG5`, блок окружения (X-18). Без этого КТ У4.5 «парковка» и У4.7–У4.9 недостижимы.
+0а. Щит кинотеатра на C13 (`artifacts/ult/u50_C13_01_*`): вместо афиши повторяющаяся красная картинка — uv или не та картинка материала.
+0б. Две модели DS одной сцены PS2 в кадре (A00 `bg_room_402r_obj` и A46 → одна модель PS2): проверить, грузит ли игра обе сразу; если да — рисовать сцену один раз.
+0в. Рутинное: семь карт с долей 0,42–0,50 (A02, A03, A65, A69, A73, A78, A79) — вид сверху двух облаков, чего не хватает.
 1. **Свет и цвет подмены** (сильной моделью): сцена PS2 темнее DS. Проверить, как PS2 считает цвет (текстура × цвет вершины, 0x80 = 1,0; у нас значения выше 0x80 срезаются до 31; свет сцены — У6.4) — спросить формулу у `sunpetal-ee`, сравнить с кадром PS2-эмулятора, если есть.
 2. **Вырез и полупрозрачность материалов** (сильной моделью): цветы в вазе рисуются зелёным блоком (картинка без альфы, нужен альфа-тест/режим смешивания из `gs_state` выгрузки — X-16 у `sunpetal-ee`); сейчас всё непрозрачное с вырезом по альфе картинки.
 3. Меши узла `W02` модели DS не совпадают с PS2 (срединное 0,7–5 юн.) — разобрать (анимация воды?), нужно для чистоты У4.2.
@@ -39,7 +45,8 @@ SUNPETAL_TEXTURE_PACK=build/ult/pack402 SUNPETAL_ULT_MODELS=build/ult/hotel ./ta
 
 ## Ждёт автора
 
-- Коммит сегодняшней работы (У4.1) — по слову автора.
+- Коммит работы по У4.5 — по слову автора.
+- В очереди `sunpetal-ee` по слову автора подняты X-16, X-13, X-14, X-15 (свет и состояние GS): от них зависят пункты 1 и 2.
 - Открытые ручные проверки — колонка «Проверка» в `docs/KANBAN.md` (5 карточек), их ТЗ в `docs/qa/` (не закоммичены: чужая незавершённая работа, не трогать).
 
 ## Что знать, чтобы не наступить

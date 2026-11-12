@@ -93,7 +93,7 @@ for i, m in enumerate(mats):
         with open(src, "rb") as f:
             head = f.read(24)
         w, h = struct.unpack(">II", head[16:24])
-        data, pal = (int(x, 16) for x in t.split("_"))
+        data, pal = (int(x, 16) if x != "-" else 0 for x in t.split("_"))  # "-": a picture with no palette
         os.makedirs(a.pack, exist_ok=True)
         dst = os.path.join(a.pack, "%dx%d_200_%016x_%016x.png" % (w, h, data, pal))
         if not os.path.exists(dst):
