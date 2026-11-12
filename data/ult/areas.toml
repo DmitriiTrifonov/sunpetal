@@ -1,0 +1,1142 @@
+# DS area models and the PS2 scene models they were made from (tools/ult/align_all.py; do not edit by hand).
+# share: the part of the DS vertices with a PS2 vertex within 0.3; shift: PS2 model -> DS model space;
+# place: PS2 model -> the anchor mesh's display-list units (for ee2spm.py --anchor --place).
+
+[[area]]
+file = "Model/Area/A00/A00_00.nsbmd"
+model = "bg_room_402r_obj"
+vertices = 1068
+status = "swap"
+ps2 = "f1940d2707"
+share = 1.000
+middle = 0.0096
+next = 0.927
+also = ["cab0edb6cf"]
+shift = [16, -18.5996, -13]
+anchor = 26
+place = [1, 0, 0, 0, 1, 0, 0, 0, 1, 16, -18.5996, -13]
+
+[[area]]
+file = "Model/Area/A01/A01_00.nsbmd.z"
+model = "no01_airturo"
+vertices = 1916
+status = "ds-only"
+ps2 = "1f473994c8"
+share = 0.042
+middle = 0.1699
+next = 0.031
+also = ["e287a64818", "372c98412f", "0e0f6c204e", "31e12ef5cd"]
+shift = [-40.2696, 0.31646, 38.9503]
+anchor = 3
+place = [0.00390625, 0, 0, 0, 0.00390625, 0, 0, 0, 0.00390625, -0.157303, 0.00123617, 0.15215]
+
+[[area]]
+file = "Model/Area/A02/A02_00.nsbmd.z"
+model = "no02_airport"
+vertices = 1352
+status = "ds-only"
+ps2 = "0e0f6c204e"
+share = 0.462
+middle = 0.0563
+next = 0.004
+shift = [7.15256e-06, -1.19209e-07, 0]
+anchor = 4
+place = [0.00195312, 0, 0, 0, 0.00195312, 0, 0, 0, 0.00195312, 1.39698e-08, -2.32831e-10, 0]
+
+[[area]]
+file = "Model/Area/A03/A03_00.nsbmd.z"
+model = "no03_capsule"
+vertices = 820
+status = "ds-only"
+ps2 = "537f125ba5"
+share = 0.418
+middle = 0.0826
+next = 0.407
+also = ["ab6e82d393", "0f68c83d1a", "1f473994c8"]
+shift = [131.467, 0.025, 125.459]
+anchor = 13
+place = [0.015625, 0, 0, 0, 0.015625, 0, 0, 0, 0.015625, 2.05418, 0.000390625, 1.96029]
+
+[[area]]
+file = "Model/Area/A04/A04_00.nsbmd.z"
+model = "no04_Cavern1"
+vertices = 832
+status = "swap"
+ps2 = "aa8076ed4a"
+share = 0.936
+middle = 0.0575
+next = 0.489
+also = ["0eb346c6b1"]
+shift = [0.00517952, 3.21865e-07, -1.19209e-07]
+anchor = 16
+place = [0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, 0.00129488, 8.04663e-08, -2.98023e-08]
+
+[[area]]
+file = "Model/Area/A05/A05_00.nsbmd.z"
+model = "no05_Cavern2"
+vertices = 693
+status = "swap"
+ps2 = "aa8076ed4a"
+share = 0.696
+middle = 0.0619
+next = 0.455
+also = ["0eb346c6b1"]
+shift = [0.00424209, 3.21865e-07, -16]
+anchor = 16
+place = [0.125, 0, 0, 0, 0.125, 0, 0, 0, 0.125, 0.000530262, 4.02331e-08, -2]
+
+[[area]]
+file = "Model/Area/A06/A06_00.nsbmd.z"
+model = "no06_Cavern3"
+vertices = 701
+status = "swap"
+ps2 = "aa8076ed4a"
+share = 0.586
+middle = 0.0709
+next = 0.452
+also = ["0eb346c6b1"]
+shift = [0.00348541, 3.21865e-07, -16]
+anchor = 16
+place = [0.125, 0, 0, 0, 0.125, 0, 0, 0, 0.125, 0.000435676, 4.02331e-08, -2]
+
+[[area]]
+file = "Model/Area/A07/A07_00.nsbmd.z"
+model = "no07_Cavern4"
+vertices = 853
+status = "swap"
+ps2 = "aa8076ed4a"
+share = 0.910
+middle = 0.0596
+next = 0.496
+also = ["0eb346c6b1"]
+shift = [0.00449293, 3.21865e-07, -1.19209e-07]
+anchor = 16
+place = [0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, 0.00112323, 8.04663e-08, -2.98023e-08]
+
+[[area]]
+file = "Model/Area/A08/A08_00.nsbmd.z"
+model = "no08_church"
+vertices = 1248
+status = "ds-only"
+ps2 = "e287a64818"
+share = 0.144
+middle = 0.1551
+next = 0.122
+also = ["1f473994c8"]
+shift = [-34.6115, 0.107014, 1.00739]
+anchor = 15
+place = [0.0625, 0, 0, 0, 0.0625, 0, 0, 0, 0.0625, -2.16322, 0.00668836, 0.0629619]
+
+[[area]]
+file = "Model/Area/A09/A09_00.nsbmd.Z"
+model = "no09_daina"
+vertices = 1467
+status = "ds-only"
+ps2 = "f1940d2707"
+share = 0.042
+middle = 0.1416
+next = 0.032
+also = ["cab0edb6cf", "bcbc0035b4", "e287a64818", "1f473994c8", "2c1bcff252", "cf4061c951", "bec2cba39e", "6457dcf407"]
+shift = [7.47258, -16.3871, -11.0075]
+anchor = 18
+place = [0.00390625, 0, 0, 0, 0.00390625, 0, 0, 0, 0.00390625, 0.0291897, -0.0640123, -0.042998]
+
+[[area]]
+file = "Model/Area/A10/A10_00.nsbmd.z"
+model = "no10_daina_in"
+vertices = 1538
+status = "swap"
+ps2 = "6fce1287e9"
+share = 0.919
+middle = 0.0179
+next = 0.460
+shift = [0.000245623, 0.00202044, 0.000171076]
+anchor = 6
+place = [0.0078125, 0, 0, 0, 0.0078125, 0, 0, 0, 0.0078125, 1.91893e-06, 1.57847e-05, 1.33653e-06]
+
+[[area]]
+file = "Model/Area/A11/A11_00.nsbmd.z"
+model = "no11_electric"
+vertices = 1131
+status = "ds-only"
+ps2 = "0f68c83d1a"
+share = 0.111
+middle = 0.1183
+next = 0.052
+shift = [-0.00755982, -0.000976667, -2.59427]
+anchor = 25
+place = [0.015625, 0, 0, 0, 0.015625, 0, 0, 0, 0.015625, -0.000118122, -1.52604e-05, -0.0405355]
+
+[[area]]
+file = "Model/Area/A12/A12_00.nsbmd.z"
+model = "no12_electric3"
+vertices = 1232
+status = "ds-only"
+ps2 = "0f68c83d1a"
+share = 0.334
+middle = 0.0128
+next = 0.032
+shift = [-9.68575e-08, -0.000976533, -4.84288e-07]
+anchor = 8
+place = [0.015625, 0, 0, 0, 0.015625, 0, 0, 0, 0.015625, -1.5134e-09, -1.52583e-05, -7.567e-09]
+
+[[area]]
+file = "Model/Area/A13/A13_00.nsbmd.z"
+model = "no13_entrance"
+vertices = 1007
+status = "ds-only"
+ps2 = "0e0f6c204e"
+share = 0.166
+middle = 0.0308
+next = 0.088
+shift = [3.76254e-07, 0.0572722, -3.76254e-07]
+anchor = 16
+place = [0.00390625, 0, 0, 0, 0.00390625, 0, 0, 0, 0.00390625, 1.46974e-09, 0.00022372, -1.46974e-09]
+
+[[area]]
+file = "Model/Area/A14/A14_00.nsbmd.z"
+model = "no14_entrance_b"
+vertices = 1043
+status = "ds-only"
+ps2 = "0e0f6c204e"
+share = 0.174
+middle = 0.0285
+next = 0.077
+shift = [-6.61033e-07, 0.0624984, -7.52509e-07]
+anchor = 10
+place = [0.00390625, 0, 0, 0, 0.00390625, 0, 0, 0, 0.00390625, -2.58216e-09, 0.000244134, -2.93949e-09]
+
+[[area]]
+file = "Model/Area/A15/A15_00.nsbmd.z"
+model = "no15_fune"
+vertices = 404
+status = "swap"
+ps2 = "b11cac75a0"
+share = 0.943
+middle = 0.0154
+next = 0.072
+shift = [-0.00090558, -6.04571e-05, 0.000406875]
+anchor = 1
+place = [0.0078125, 0, 0, 0, 0.0078125, 0, 0, 0, 0.0078125, -7.07484e-06, -4.72321e-07, 3.17871e-06]
+
+[[area]]
+file = "Model/Area/A16/A16_00.nsbmd.z"
+model = "no16_hatake"
+vertices = 1004
+status = "ds-only"
+ps2 = "f13a780221"
+share = 0.290
+middle = 0.1044
+next = 0.043
+shift = [0.00144429, -0.00776394, 0.00132797]
+anchor = 2
+place = [0.0078125, 0, 0, 0, 0.0078125, 0, 0, 0, 0.0078125, 1.12835e-05, -6.06558e-05, 1.03747e-05]
+
+[[area]]
+file = "Model/Area/A18/A18_00.nsbmd.z"
+model = "no18_hole"
+vertices = 1233
+status = "swap"
+ps2 = "a0440adc8f"
+share = 0.745
+middle = 0.0020
+next = 0.027
+shift = [-9.16166e-07, 0.000140287, -3.89031e-06]
+anchor = 0
+place = [0.0625, 0, 0, 0, 0.0625, 0, 0, 0, 0.0625, -5.72604e-08, 8.76791e-06, -2.43145e-07]
+
+[[area]]
+file = "Model/Area/A19/A19_00.nsbmd.z"
+model = "no19_1F_Front"
+vertices = 1283
+status = "swap"
+ps2 = "132b63fb13"
+share = 0.904
+middle = 0.0136
+next = 0.812
+also = ["8735af623b", "efd6c8afd9"]
+shift = [0, 0.000205003, -4.47035e-08]
+anchor = 54
+place = [0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, 0, 5.12507e-05, -1.11759e-08]
+
+[[area]]
+file = "Model/Area/A20/A20_00.nsbmd.z"
+model = "no20_1F_Front2"
+vertices = 1283
+status = "swap"
+ps2 = "132b63fb13"
+share = 0.904
+middle = 0.0136
+next = 0.812
+also = ["8735af623b", "efd6c8afd9"]
+shift = [0, 0.000205003, -4.47035e-08]
+anchor = 46
+place = [0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, 0, 5.12507e-05, -1.11759e-08]
+
+[[area]]
+file = "Model/Area/A21/A21_00.nsbmd.z"
+model = "no21_1f_stroom"
+vertices = 843
+status = "swap"
+ps2 = "8defd5a82f"
+share = 0.991
+middle = 0.0100
+next = 0.509
+shift = [-0.000195548, -1.11759e-08, 0.000195421]
+anchor = 24
+place = [0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, -4.8887e-05, -2.79397e-09, 4.88553e-05]
+
+[[area]]
+file = "Model/Area/A22/A22_00.nsbmd.z"
+model = "no22_hotel_b"
+vertices = 1418
+status = "swap"
+ps2 = "3320f342fa"
+share = 0.696
+middle = 0.0125
+next = 0.016
+shift = [0, -0.000508237, 2.38419e-07]
+anchor = 21
+place = [0.0078125, 0, 0, 0, 0.0078125, 0, 0, 0, 0.0078125, 0, -3.9706e-06, 1.86265e-09]
+
+[[area]]
+file = "Model/Area/A23/A23_00.nsbmd.z"
+model = "no23_hotel_f"
+vertices = 1363
+status = "swap"
+ps2 = "29fb092334"
+share = 0.528
+middle = 0.0031
+next = 0.054
+also = ["e71a52c95b"]
+shift = [0.000390464, -2.98023e-08, -100]
+anchor = 4
+place = [0.03125, 0, 0, 0, 0.03125, 0, 0, 0, 0.03125, 1.2202e-05, -9.31323e-10, -3.125]
+
+[[area]]
+file = "Model/Area/A24/A24_00.nsbmd.z"
+model = "no24_hotel_f2"
+vertices = 1363
+status = "swap"
+ps2 = "29fb092334"
+share = 0.525
+middle = 0.0031
+next = 0.054
+also = ["e71a52c95b"]
+shift = [0.000390476, -2.98023e-08, -100]
+anchor = 5
+place = [0.03125, 0, 0, 0, 0.03125, 0, 0, 0, 0.03125, 1.22024e-05, -9.31323e-10, -3.125]
+
+[[area]]
+file = "Model/Area/A25/A25_00.nsbmd.z"
+model = "no25_hotel_koya"
+vertices = 1447
+status = "swap"
+ps2 = "c5e8223bd5"
+share = 0.887
+middle = 0.0089
+next = 0.054
+shift = [-1.93715e-07, -0.000541888, 4.87834e-05]
+anchor = 21
+place = [0.015625, 0, 0, 0, 0.015625, 0, 0, 0, 0.015625, -3.0268e-09, -8.467e-06, 7.62241e-07]
+
+[[area]]
+file = "Model/Area/A26/A26_00.nsbmd.z"
+model = "no26_ht_rest1f"
+vertices = 1355
+status = "swap"
+ps2 = "ee92b428ab"
+share = 0.987
+middle = 0.0022
+next = 0.506
+shift = [0.000234679, 1.11759e-10, 2.38419e-07]
+anchor = 36
+place = [0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, 5.86696e-05, 2.79397e-11, 5.96046e-08]
+
+[[area]]
+file = "Model/Area/A27/A27_00.nsbmd.z"
+model = "no27_ht_rest2f"
+vertices = 1293
+status = "swap"
+ps2 = "3a6507fafb"
+share = 0.972
+middle = 0.0105
+next = 0.510
+shift = [-8.90996e-05, 0.00158189, -0.000195015]
+anchor = 1
+place = [0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, -2.22749e-05, 0.000395473, -4.87538e-05]
+
+[[area]]
+file = "Model/Area/A28/A28_00.nsbmd.z"
+model = "no28_ht_roof"
+vertices = 1315
+status = "swap"
+ps2 = "19e4ca4599"
+share = 0.919
+middle = 0.0255
+next = 0.147
+also = ["f8875a3a59", "76ecfa4e24"]
+shift = [0.00234713, 0.0124996, 2.20314e-06]
+anchor = 16
+place = [0.0078125, 0, 0, 0, 0.0078125, 0, 0, 0, 0.0078125, 1.83369e-05, 9.7653e-05, 1.7212e-08]
+
+[[area]]
+file = "Model/Area/A29/A29_00.nsbmd.z"
+model = "no29_ht_roof3"
+vertices = 1319
+status = "swap"
+ps2 = "19e4ca4599"
+share = 0.916
+middle = 0.0255
+next = 0.221
+also = ["f8875a3a59", "76ecfa4e24"]
+shift = [0.00234713, 0.0124996, 2.20314e-06]
+anchor = 39
+place = [0.0078125, 0, 0, 0, 0.0078125, 0, 0, 0, 0.0078125, 1.83369e-05, 9.7653e-05, 1.7212e-08]
+
+[[area]]
+file = "Model/Area/A30/A30_00.nsbmd.z"
+model = "no30_ht_stairs"
+vertices = 1639
+status = "swap"
+ps2 = "dadf6c967f"
+share = 0.658
+middle = 0.0281
+next = 0.401
+shift = [-8.04663e-08, -2.38419e-07, -3.63588e-06]
+anchor = 27
+place = [0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, -2.01166e-08, -5.96046e-08, -9.08971e-07]
+
+[[area]]
+file = "Model/Area/A33/A33_00.nsbmd.z"
+model = "no33_movie_room"
+vertices = 1819
+status = "swap"
+ps2 = "5597400474"
+share = 0.963
+middle = 0.0211
+next = 0.261
+shift = [-1.04308e-07, -4.02331e-07, 0.00023438]
+anchor = 26
+place = [0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, -2.6077e-08, -1.00583e-07, 5.85949e-05]
+
+[[area]]
+file = "Model/Area/A34/A34_00.nsbmd.z"
+model = "no34_2f_passage"
+vertices = 1347
+status = "swap"
+ps2 = "28849ac7d7"
+share = 0.989
+middle = 0.0210
+next = 0.805
+shift = [2.75671e-07, 0.0128913, 0.000251168]
+anchor = 14
+place = [0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, 6.89179e-08, 0.00322282, 6.2792e-05]
+
+[[area]]
+file = "Model/Area/A35/A35_00.nsbmd.z"
+model = "no35_3f_passage"
+vertices = 1308
+status = "swap"
+ps2 = "6784404f54"
+share = 0.994
+middle = 0.0226
+next = 0.975
+also = ["9b9b060134"]
+shift = [-2.23517e-07, 0.148495, 3.51667e-07]
+anchor = 32
+place = [0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, -5.58794e-08, 0.0371238, 8.79169e-08]
+
+[[area]]
+file = "Model/Area/A36/A36_00.nsbmd.z"
+model = "no36_4f_passage"
+vertices = 1308
+status = "swap"
+ps2 = "9b9b060134"
+share = 0.982
+middle = 0.0223
+next = 0.963
+also = ["6784404f54"]
+shift = [-2.23517e-07, -0.00035276, 5.38677e-07]
+anchor = 5
+place = [0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, -5.58794e-08, -8.81899e-05, 1.34669e-07]
+
+[[area]]
+file = "Model/Area/A37/A37_00.nsbmd.z"
+model = "no37_room_204e"
+vertices = 900
+status = "swap"
+ps2 = "d1d312bde2"
+share = 0.997
+middle = 0.0112
+next = 0.599
+also = ["72501a931d"]
+shift = [-0.00101685, 0.000183765, -5.84031e-05]
+anchor = 1
+place = [0.5, 0, 0, 0, 0.5, 0, 0, 0, 0.5, -0.000508424, 9.18824e-05, -2.92015e-05]
+
+[[area]]
+file = "Model/Area/A38/A38_00.nsbmd.z"
+model = "no38_room_204r"
+vertices = 1159
+status = "swap"
+ps2 = "470dc15daf"
+share = 0.884
+middle = 0.0389
+next = 0.838
+shift = [-0.0125832, -0.0036561, -2.6077e-07]
+anchor = 28
+place = [0.0078125, 0, 0, 0, 0.0078125, 0, 0, 0, 0.0078125, -9.83066e-05, -2.85633e-05, -2.03727e-09]
+
+[[area]]
+file = "Model/Area/A39/A39_00.nsbmd.z"
+model = "no39_room_301e"
+vertices = 935
+status = "swap"
+ps2 = "1313bdf27b"
+share = 0.989
+middle = 0.0061
+next = 0.973
+shift = [3.31551e-07, -6.20019, 7.07805e-08]
+anchor = 15
+place = [0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, 8.28877e-08, -1.55005, 1.76951e-08]
+
+[[area]]
+file = "Model/Area/A40/A40_00.nsbmd.z"
+model = "no40_room_301r"
+vertices = 1177
+status = "swap"
+ps2 = "a914d5189a"
+share = 0.912
+middle = 0.0187
+next = 0.326
+shift = [0.000613634, 0.000292775, 8.9705e-07]
+anchor = 29
+place = [0.0078125, 0, 0, 0, 0.0078125, 0, 0, 0, 0.0078125, 4.79402e-06, 2.2873e-06, 7.0082e-09]
+
+[[area]]
+file = "Model/Area/A41/A41_00.nsbmd.z"
+model = "no41_room_304e"
+vertices = 938
+status = "swap"
+ps2 = "6f04a39952"
+share = 0.994
+middle = 0.0543
+next = 0.611
+also = ["042faf1137"]
+shift = [6.48087, -12.4, -5.54505]
+anchor = 2
+place = [1, 0, 0, 0, 1, 0, 0, 0, 1, 6.48087, -12.4, -5.54505]
+
+[[area]]
+file = "Model/Area/A42/A42_00.nsbmd.z"
+model = "no42_room_304r"
+vertices = 1185
+status = "swap"
+ps2 = "bcbc0035b4"
+share = 0.878
+middle = 0.0232
+next = 0.819
+also = ["f1940d2707", "cab0edb6cf"]
+shift = [0.00431159, 0.00664954, -2.6077e-07]
+anchor = 36
+place = [0.0078125, 0, 0, 0, 0.0078125, 0, 0, 0, 0.0078125, 3.36843e-05, 5.19496e-05, -2.03727e-09]
+
+[[area]]
+file = "Model/Area/A44/A44_00.nsbmd.z"
+model = "no44_401r_kaigao"
+vertices = 647
+status = "swap"
+ps2 = "ab6e82d393"
+share = 0.992
+middle = 0.0117
+next = 0.575
+shift = [-0.000193575, -9.79413e-05, 1.2666e-07]
+anchor = 4
+place = [0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, -4.83938e-05, -2.44853e-05, 3.1665e-08]
+
+[[area]]
+file = "Model/Area/A45/A45_00.nsbmd.z"
+model = "no45_room_402e"
+vertices = 945
+status = "swap"
+ps2 = "21e620ccc1"
+share = 0.998
+middle = 0.0082
+next = 0.631
+shift = [19.3079, -18.5999, -5.54541]
+anchor = 26
+place = [1, 0, 0, 0, 1, 0, 0, 0, 1, 19.3079, -18.5999, -5.54541]
+
+[[area]]
+file = "Model/Area/A46/A46_00.nsbmd.z"
+model = "no46_room_402r"
+vertices = 1173
+status = "swap"
+ps2 = "f1940d2707"
+share = 0.925
+middle = 0.0169
+next = 0.829
+also = ["cab0edb6cf"]
+shift = [15.9976, -18.5996, -13]
+anchor = 37
+place = [0.0078125, 0, 0, 0, 0.0078125, 0, 0, 0, 0.0078125, 0.124981, -0.14531, -0.101563]
+
+[[area]]
+file = "Model/Area/A47/A47_00.nsbmd.z"
+model = "no47_room_402r2"
+vertices = 1177
+status = "swap"
+ps2 = "cab0edb6cf"
+share = 0.925
+middle = 0.0169
+next = 0.832
+also = ["f1940d2707"]
+shift = [15.9976, -18.5997, -13]
+anchor = 6
+place = [0.0078125, 0, 0, 0, 0.0078125, 0, 0, 0, 0.0078125, 0.124982, -0.14531, -0.101563]
+
+[[area]]
+file = "Model/Area/A50/A50_00.nsbmd.z"
+model = "no50_room_403r"
+vertices = 992
+status = "swap"
+ps2 = "7b1ebd2f30"
+share = 0.958
+middle = 0.0426
+next = 0.298
+shift = [1.19209e-07, -0.000200191, 3.7998e-07]
+anchor = 15
+place = [0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, 2.98023e-08, -5.00478e-05, 9.49949e-08]
+
+[[area]]
+file = "Model/Area/A51/A51_00.nsbmd.z"
+model = "no51_room_404e"
+vertices = 890
+status = "swap"
+ps2 = "042faf1137"
+share = 0.997
+middle = 0.0613
+next = 0.634
+also = ["6f04a39952"]
+shift = [-0.00737517, 8.66868e-05, -1.00583e-07]
+anchor = 11
+place = [0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, -0.00184379, 2.16717e-05, -2.51457e-08]
+
+[[area]]
+file = "Model/Area/A52/A52_00.nsbmd.z"
+model = "no52_room_404r"
+vertices = 1185
+status = "swap"
+ps2 = "ca2b6cf46e"
+share = 0.932
+middle = 0.0198
+next = 0.859
+shift = [-0.000291735, -0.00510739, -0.000438173]
+anchor = 28
+place = [0.0078125, 0, 0, 0, 0.0078125, 0, 0, 0, 0.0078125, -2.27918e-06, -3.99015e-05, -3.42323e-06]
+
+[[area]]
+file = "Model/Area/A53/A53_00.nsbmd.z"
+model = "no53_room_405e"
+vertices = 938
+status = "swap"
+ps2 = "a3cbbb35ea"
+share = 0.998
+middle = 0.0042
+next = 0.677
+shift = [-0.000511431, -7.20046e-05, -0.000446439]
+anchor = 13
+place = [0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, -0.000127858, -1.80012e-05, -0.00011161]
+
+[[area]]
+file = "Model/Area/A54/A54_00.nsbmd.z"
+model = "no54_room_405r"
+vertices = 1166
+status = "swap"
+ps2 = "b67c954d41"
+share = 0.892
+middle = 0.0223
+next = 0.852
+shift = [0.0061658, -0.00549802, -2.6077e-07]
+anchor = 11
+place = [0.0078125, 0, 0, 0, 0.0078125, 0, 0, 0, 0.0078125, 4.81703e-05, -4.29533e-05, -2.03727e-09]
+
+[[area]]
+file = "Model/Area/A55/A55_00.nsbmd.z"
+model = "no55_room_407e"
+vertices = 891
+status = "swap"
+ps2 = "72501a931d"
+share = 0.997
+middle = 0.0100
+next = 0.569
+also = ["d1d312bde2"]
+shift = [-0.00175798, 8.6683e-05, -7.82311e-08]
+anchor = 23
+place = [0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, -0.000439494, 2.16708e-05, -1.95578e-08]
+
+[[area]]
+file = "Model/Area/A56/A56_00.nsbmd.z"
+model = "no56_room_407r"
+vertices = 1182
+status = "swap"
+ps2 = "e111c81d6e"
+share = 0.869
+middle = 0.0243
+next = 0.810
+shift = [0.00723894, -0.00549802, -1.86265e-07]
+anchor = 13
+place = [0.0078125, 0, 0, 0, 0.0078125, 0, 0, 0, 0.0078125, 5.65543e-05, -4.29533e-05, -1.45519e-09]
+
+[[area]]
+file = "Model/Area/A57/A57_00.nsbmd.z"
+model = "no57_room_408b"
+vertices = 763
+status = "swap"
+ps2 = "9ca60eac83"
+share = 0.963
+middle = 0.0092
+next = 0.490
+shift = [-1.2517e-07, 0.000230107, -0.000152379]
+anchor = 31
+place = [0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, -3.12924e-08, 5.75268e-05, -3.80948e-05]
+
+[[area]]
+file = "Model/Area/A58/A58_00.nsbmd.z"
+model = "no58_room_408e"
+vertices = 215
+status = "swap"
+ps2 = "642c4da62d"
+share = 0.991
+middle = 0.0409
+next = 0.502
+shift = [7.3463e-05, -0.000195627, 0.000195403]
+anchor = 3
+place = [0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, 1.83658e-05, -4.89067e-05, 4.88507e-05]
+
+[[area]]
+file = "Model/Area/A59/A59_00.nsbmd.z"
+model = "no59_room_408r"
+vertices = 1078
+status = "swap"
+ps2 = "be21178290"
+share = 0.960
+middle = 0.0373
+next = 0.283
+shift = [-0.000375067, 0.000330811, 3.27826e-07]
+anchor = 41
+place = [0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, -9.37667e-05, 8.27027e-05, 8.19564e-08]
+
+[[area]]
+file = "Model/Area/A60/A60_00.nsbmd.z"
+model = "no60_iseki"
+vertices = 390
+status = "ds-only"
+ps2 = "b1df13daa6"
+share = 0.164
+middle = 0.0259
+next = 0.154
+also = ["e287a64818", "1f473994c8", "85f5dcbc80", "5d16680de0"]
+shift = [9.57392e-07, -0.00482887, -0.991292]
+anchor = 6
+place = [0.00390625, 0, 0, 0, 0.00390625, 0, 0, 0, 0.00390625, 3.73981e-09, -1.88628e-05, -0.00387223]
+
+[[area]]
+file = "Model/Area/A61/A61_00.nsbmd.z"
+model = "no61_jet_in"
+vertices = 1224
+status = "swap"
+ps2 = "e287a64818"
+share = 0.997
+middle = 0.0395
+next = 0.275
+also = ["1f473994c8"]
+shift = [-0.000287733, -4.55425e-08, -0.000151372]
+anchor = 4
+place = [0.5, 0, 0, 0, 0.5, 0, 0, 0, 0.5, -0.000143866, -2.27713e-08, -7.5686e-05]
+
+[[area]]
+file = "Model/Area/A62/A62_00.nsbmd.z"
+model = "no62_light_house"
+vertices = 1156
+status = "swap"
+ps2 = "2c1bcff252"
+share = 0.755
+middle = 0.0280
+next = 0.029
+also = ["cf4061c951"]
+shift = [5.58794e-07, -0.000586012, -0.000468674]
+anchor = 38
+place = [0.00390625, 0, 0, 0, 0.00390625, 0, 0, 0, 0.00390625, 2.18279e-09, -2.28911e-06, -1.83076e-06]
+
+[[area]]
+file = "Model/Area/A63/A63_00.nsbmd.z"
+model = "no63_light_house"
+vertices = 1169
+status = "swap"
+ps2 = "cf4061c951"
+share = 0.682
+middle = 0.0275
+next = 0.624
+shift = [2.06381e-06, 0.000331745, -0.000468765]
+anchor = 35
+place = [0.00390625, 0, 0, 0, 0.00390625, 0, 0, 0, 0.00390625, 8.06176e-09, 1.29588e-06, -1.83111e-06]
+
+[[area]]
+file = "Model/Area/A64/A64_00.nsbmd.z"
+model = "no64_maze_a"
+vertices = 922
+status = "swap"
+ps2 = "dd8a2935dc"
+share = 0.792
+middle = 0.0267
+next = 0.047
+shift = [-5.66114e-06, 0.025, -0.00156327]
+anchor = 0
+place = [0.00390625, 0, 0, 0, 0.00390625, 0, 0, 0, 0.00390625, -2.21138e-08, 9.76562e-05, -6.10652e-06]
+
+[[area]]
+file = "Model/Area/A65/A65_00.nsbmd.z"
+model = "no65_maze_b"
+vertices = 559
+status = "ds-only"
+ps2 = "47b0b74d53"
+share = 0.479
+middle = 0.0280
+next = 0.073
+shift = [0.00120306, -0.0100003, -5.49816e-06]
+anchor = 8
+place = [0.00390625, 0, 0, 0, 0.00390625, 0, 0, 0, 0.00390625, 4.69944e-06, 0.00191406, -2.14772e-08]
+
+[[area]]
+file = "Model/Area/A66/A66_00.nsbmd.z"
+model = "no66_maze_c"
+vertices = 122
+status = "swap"
+ps2 = "a8026186ba"
+share = 0.557
+middle = 0.1090
+next = 0.066
+shift = [-0.303509, 0.0280434, -0.160116]
+anchor = 3
+place = [0.0621703, 0, 0, 0, 0.0621829, 0, 0, 0, 0.0621703, -0.0188692, 0.00174382, -0.00995444]
+
+[[area]]
+file = "Model/Area/A67/A67_00.nsbmd.z"
+model = "no67_palavision"
+vertices = 532
+status = "swap"
+ps2 = "cc83811c61"
+share = 0.962
+middle = 0.0021
+next = 0.154
+shift = [0, -1.49012e-08, 8.44581e-05]
+anchor = 20
+place = [0.0625, 0, 0, 0, 0.0625, 0, 0, 0, 0.0625, 0, -9.31323e-10, 5.27863e-06]
+
+[[area]]
+file = "Model/Area/A68/A68_00.nsbmd.z"
+model = "no68_parking"
+vertices = 1015
+status = "ds-only"
+ps2 = "aa8076ed4a"
+share = 0.109
+middle = 0.1771
+next = 0.094
+also = ["0eb346c6b1"]
+shift = [62.3987, 1.87125, -2.51093]
+anchor = 13
+place = [0.0078125, 0, 0, 0, 0.0078125, 0, 0, 0, 0.0078125, 0.48749, 0.0146191, -0.0196167]
+
+[[area]]
+file = "Model/Area/A69/A69_00.nsbmd.z"
+model = "no69_road_loop"
+vertices = 793
+status = "ds-only"
+ps2 = "10d154ebbb"
+share = 0.494
+middle = 0.0039
+next = 0.005
+shift = [-177, 0, -0.000253022]
+anchor = 0
+place = [0.03125, 0, 0, 0, 0.03125, 0, 0, 0, 0.03125, 5.65109e-06, 0, -7.90694e-06]
+
+[[area]]
+file = "Model/Area/A70/A70_00.nsbmd.z"
+model = "no70_rooppassage"
+vertices = 460
+status = "swap"
+ps2 = "9b9b060134"
+share = 0.635
+middle = 0.1308
+next = 0.524
+also = ["6784404f54"]
+shift = [-12.5142, -18.5868, 0.00244411]
+anchor = 6
+place = [0.5, 0, 0, 0, 0.5, 0, 0, 0, 0.5, 7.54295, -9.29341, 0.00122205]
+
+[[area]]
+file = "Model/Area/A71/A71_00.nsbmd.z"
+model = "no71_spiceshop"
+vertices = 973
+status = "swap"
+ps2 = "62d8aa2687"
+share = 0.651
+middle = 0.0304
+next = 0.219
+shift = [-0.000151291, -2.98023e-08, 1.63913e-06]
+anchor = 25
+place = [0.00390625, 0, 0, 0, 0.00390625, 0, 0, 0, 0.00390625, -5.90982e-07, -1.16415e-10, 6.40284e-09]
+
+[[area]]
+file = "Model/Area/A72/A72_00.nsbmd.z"
+model = "no72_spiceshop2"
+vertices = 1273
+status = "swap"
+ps2 = "537f125ba5"
+share = 0.822
+middle = 0.0595
+next = 0.101
+shift = [0.000392205, 0, 2.01166e-06]
+anchor = 6
+place = [0.03125, 0, 0, 0, 0.03125, 0, 0, 0, 0.03125, 1.22564e-05, 0, 6.28643e-08]
+
+[[area]]
+file = "Model/Area/A73/A73_00.nsbmd.z"
+model = "no73_spiceshop3"
+vertices = 1157
+status = "ds-only"
+ps2 = "37064fcc82"
+share = 0.497
+middle = 0.1008
+next = 0.243
+shift = [1.87755e-06, -4.47035e-08, 1.53482e-06]
+anchor = 19
+place = [0.00390625, 0, 0, 0, 0.00390625, 0, 0, 0, 0.00390625, 7.33417e-09, -1.74623e-10, 5.99539e-09]
+
+[[area]]
+file = "Model/Area/A74/A74_00.nsbmd.z"
+model = "no74_tollgate"
+vertices = 1513
+status = "ds-only"
+ps2 = "372c98412f"
+share = 0.151
+middle = 0.1066
+next = 0.061
+shift = [0.000531074, 1.4536, -4.39286e-05]
+anchor = 5
+place = [0.000976562, 0, 0, 0, 0.000976562, 0, 0, 0, 0.000976562, 5.18627e-07, 0.00141953, -4.2899e-08]
+
+[[area]]
+file = "Model/Area/A75/A75_00.nsbmd.z"
+model = "no75_tunnel"
+vertices = 445
+status = "swap"
+ps2 = "8d01d89db3"
+share = 1.000
+middle = 0.0073
+next = 0.189
+shift = [264, 6.79955, 2.76323e-06]
+anchor = 3
+place = [0.015625, 0, 0, 0, 0.015625, 0, 0, 0, 0.015625, -6.49485e-07, -7.84849e-06, 4.31755e-08]
+
+[[area]]
+file = "Model/Area/A77/A77_00.nsbmd.z"
+model = "no77_WcM_Room"
+vertices = 835
+status = "swap"
+ps2 = "c880da25d2"
+share = 0.988
+middle = 0.0003
+next = 0.337
+shift = [6.88434e-07, -5.22922e-05, -1.92238e-05]
+anchor = 11
+place = [0.5, 0, 0, 0, 0.5, 0, 0, 0, 0.5, 3.44217e-07, -2.61461e-05, -9.61191e-06]
+
+[[area]]
+file = "Model/Area/A78/A78_00.nsbmd.z"
+model = "no78_wed_road"
+vertices = 1014
+status = "ds-only"
+ps2 = "85f5dcbc80"
+share = 0.472
+middle = 0.0085
+next = 0.025
+also = ["5d16680de0"]
+shift = [-0.000586577, 0.00127323, 0.000401668]
+anchor = 16
+place = [0.015625, 0, 0, 0, 0.015625, 0, 0, 0, 0.015625, -9.16527e-06, 1.98942e-05, 6.27606e-06]
+
+[[area]]
+file = "Model/Area/A79/A79_00.nsbmd.z"
+model = "no79_wed_road_yo"
+vertices = 1016
+status = "ds-only"
+ps2 = "5d16680de0"
+share = 0.469
+middle = 0.0821
+next = 0.025
+also = ["85f5dcbc80"]
+shift = [0.0327418, 0.00551251, 0.00893431]
+anchor = 18
+place = [0.0198265, 0, 0, 0, 0.0198265, 0, 0, 0, 0.0198265, 0.000649155, 0.000109294, 0.000177136]
+
+[[area]]
+file = "Model/Area/A80/A80_00.nsbmd.z"
+model = "no80_chuch_in"
+vertices = 1035
+status = "swap"
+ps2 = "e66eb82174"
+share = 0.976
+middle = 0.0012
+next = 0.411
+shift = [-2.98023e-08, -0.000195277, 2.23517e-07]
+anchor = 19
+place = [0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, -7.45058e-09, -4.88192e-05, 5.58794e-08]
+
+[[area]]
+file = "Model/Area/A81/A81_00.nsbmd.z"
+model = "no82_light_house"
+vertices = 858
+status = "swap"
+ps2 = "cf4061c951"
+share = 0.895
+middle = 0.0269
+next = 0.823
+shift = [2.71946e-06, 0.000330833, -0.000471847]
+anchor = 25
+place = [0.00390625, 0, 0, 0, 0.00390625, 0, 0, 0, 0.00390625, 1.06229e-08, 1.29231e-06, -1.84315e-06]
+
+[[area]]
+file = "Model/Area/A82/A82_00.nsbmd.z"
+model = "no82_light_house"
+vertices = 858
+status = "swap"
+ps2 = "cf4061c951"
+share = 0.895
+middle = 0.0269
+next = 0.823
+shift = [2.71946e-06, 0.000330833, -0.000471847]
+anchor = 25
+place = [0.00390625, 0, 0, 0, 0.00390625, 0, 0, 0, 0.00390625, 1.06229e-08, 1.29231e-06, -1.84315e-06]
+
+[[area]]
+file = "Model/Area/A83/A83_00.nsbmd.z"
+model = "no83_electric2"
+vertices = 1011
+status = "swap"
+ps2 = "274cfe63e3"
+share = 0.697
+middle = 0.0019
+next = 0.151
+shift = [1.50502e-05, 0.000468702, -7.07805e-08]
+anchor = 10
+place = [0.0625, 0, 0, 0, 0.0625, 0, 0, 0, 0.0625, 9.40636e-07, 2.92939e-05, -4.42378e-09]
+
+[[area]]
+file = "Model/Area/A84/A84_00.nsbmd.z"
+model = "no84_tollgate_st"
+vertices = 874
+status = "ds-only"
+ps2 = "372c98412f"
+share = 0.229
+middle = 0.0829
+next = 0.025
+shift = [-425, -22.8954, -2780.01]
+anchor = 0
+place = [0.00195312, 0, 0, 0, 0.00195312, 0, 0, 0, 0.00195312, 8.46171e-07, 0.00271812, -1.22856e-05]
+
+[[area]]
+file = "Model/Area/A85/A85_00.nsbmd.z"
+model = "no85_tollgate_st"
+vertices = 678
+status = "ds-only"
+ps2 = "0e0f6c204e"
+share = 0.139
+middle = 0.0634
+next = 0.006
+also = ["372c98412f"]
+shift = [-426, 0.00014019, -1800.01]
+anchor = 5
+place = [0.00195312, 0, 0, 0, 0.00195312, 0, 0, 0, 0.00195312, 5.42321e-08, 2.73809e-07, -1.77651e-05]
+
+[[area]]
+file = "Model/Area/A86/A86_00.nsbmd.z"
+model = "no86_tollgate_st"
+vertices = 678
+status = "ds-only"
+ps2 = "0e0f6c204e"
+share = 0.139
+middle = 0.0634
+next = 0.006
+also = ["372c98412f"]
+shift = [2.77668e-05, 0.00014019, -800.009]
+anchor = 5
+place = [0.00195312, 0, 0, 0, 0.00195312, 0, 0, 0, 0.00195312, 5.42321e-08, 2.73809e-07, -1.77651e-05]
+
+[[area]]
+file = "Model/Area/A87/A87_00.nsbmd.z"
+model = "no87_tollgate_st"
+vertices = 1027
+status = "ds-only"
+ps2 = "372c98412f"
+share = 0.187
+middle = 0.1383
+next = 0.031
+shift = [-424.95, -23.3371, -4200]
+anchor = 0
+place = [0.000976562, 0, 0, 0, 0.000976562, 0, 0, 0, 0.000976562, 4.85835e-05, 0.00092773, 3.58321e-06]
+
+[[area]]
+file = "Model/Area/A88/A88_00.nsbmd.z"
+model = "no88_hotel_koya2"
+vertices = 1399
+status = "swap"
+ps2 = "c5e8223bd5"
+share = 0.976
+middle = 0.0003
+next = 0.376
+shift = [7.07805e-08, 9.36136e-05, -3.42727e-08]
+anchor = 7
+place = [0.5, 0, 0, 0, 0.5, 0, 0, 0, 0.5, 3.53903e-08, 4.68068e-05, -1.71363e-08]
+
+[[area]]
+file = "Model/Area/A89/A89_00.nsbmd.z"
+model = "no89_tollgate_st"
+vertices = 395
+status = "ds-only"
+ps2 = "372c98412f"
+share = 0.124
+middle = 0.0652
+next = 0.010
+also = ["0e0f6c204e"]
+shift = [-0.00979514, -8.01408, -800.009]
+anchor = 0
+place = [0.00195312, 0, 0, 0, 0.00195312, 0, 0, 0, 0.00195312, -1.91311e-05, -0.0156525, -1.77651e-05]
+
+[[area]]
+file = "Model/Area/A90/A90_00.nsbmd.z"
+model = "no90_skybox"
+vertices = 134
+status = "ds-only"
+ps2 = "0e0f6c204e"
+share = 0.090
+middle = 0.2363
+next = 0.015
+shift = [-1.27299e-06, -192.688, 5.11591e-14]
+anchor = 0
+place = [0.03125, 0, 0, 0, 0.03125, 0, 0, 0, 0.03125, -3.9781e-08, -6.02148, 1.59872e-15]
+
+[[area]]
+file = "Model/Area/A91/A91_00.nsbmd.z"
+model = "no91_airturo2"
+vertices = 1076
+status = "swap"
+ps2 = "0be99d32eb"
+share = 0.814
+middle = 0.0568
+next = 0.081
+shift = [25, 0.000451742, -100]
+anchor = 3
+place = [0.015625, 0, 0, 0, 0.015625, 0, 0, 0, 0.015625, 0.390625, 7.05847e-06, -1.5625]
