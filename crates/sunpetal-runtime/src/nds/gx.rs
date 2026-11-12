@@ -438,6 +438,32 @@ impl Ult {
 
 /// Of the frame's replacements, the first of each source stays: the DS models that stand on one PS2 scene are
 /// all hidden, and the scene is drawn once.
+/// The "on air" scenes of the DS darken the whole 3D picture with a black see-through polygon over the screen,
+/// and the DS rooms are lit to make up for it. A PS2 room carries its own light in the vertices, so under a
+/// replacement the darkening is taken out (the picture is then the PS2's). It is known by what goes with it:
+/// other see-through polygons without a picture (the bars and stripes). `SUNPETAL_ULT_DIM=keep` leaves it.
+fn ult_undim(r: &mut Lists) {
+    static KEEP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *KEEP.get_or_init(|| std::env::var_os("SUNPETAL_ULT_DIM").is_some_and(|v| v == "keep")) {
+        return;
+    }
+    let plain = |p: &GxPoly| (p.tex >> 26) & 7 == 0 && (1..31).contains(&((p.attr >> 16) & 31));
+    let dim = |p: &GxPoly, v: &[GxVertex]| {
+        let v = &v[p.first as usize..(p.first + p.n) as usize];
+        let (x0, x1) = (v.iter().map(|g| g.ix).min().unwrap_or(0), v.iter().map(|g| g.ix).max().unwrap_or(0));
+        let (y0, y1) = (v.iter().map(|g| g.iy).min().unwrap_or(0), v.iter().map(|g| g.iy).max().unwrap_or(0));
+        plain(p)
+            && (12..=20).contains(&((p.attr >> 16) & 31))
+            && x1 as i32 - x0 as i32 >= 256
+            && y1 as i32 - y0 as i32 >= 192
+            && v.iter().all(|g| g.r < 1.0 && g.g < 1.0 && g.b < 1.0)
+    };
+    let verts = &r.verts;
+    if r.polys.iter().any(|p| plain(p) && !dim(p, verts)) {
+        r.polys.retain(|p| !dim(p, verts));
+    }
+}
+
 fn ult_once<T>(at: &mut Vec<T>, source: impl Fn(&T) -> u64) {
     let mut seen: Vec<u64> = Vec::new();
     at.retain(|c| {
@@ -1095,6 +1121,7 @@ impl Nds {
             i += 1;
             !hide.iter().any(|&(a, b)| i > a && i - 1 < b)
         });
+        ult_undim(&mut g.render);
         let saved = (g.attr, g.tex_param, g.pltt_base);
         std::mem::swap(&mut g.render, &mut g.build);
         g.unbounded = true;
