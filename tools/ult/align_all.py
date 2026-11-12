@@ -5,8 +5,8 @@
     align_all.py ROM.nds EXPORT_DIR OUT.toml [--eps E] [--jobs N] [--only A46,A00...] [--all-models]
 
 Writes OUT.toml (`data/ult/areas.toml`): per DS area file the PS2 model, the share of the DS vertices with a
-PS2 vertex within `--eps` (0.3), the shift into the DS model's space, the anchor mesh and the place for
-`ee2spm.py` (in that mesh's display-list units). An area with no model at a share of 0.5 is marked `ds-only`
+PS2 vertex within `--eps` (0.3) and within a wider distance (`loose`: a fiftieth of the area's size, 3 units at most; the outdoor areas were modelled anew), the shift into the DS model's space, the anchor mesh and the place for
+`ee2spm.py` (in that mesh's display-list units). An area with no model at a share of 0.5 or a loose share of 0.75 is marked `ds-only`
 with its best guess. `--all-models`: not the scenes' GIG slots alone but every model of the export. Twins (PS2 models at the same share) are listed in `also`.
 
 Reads the ROM and the export; writes OUT.toml and a cache of the PS2 clouds beside it in `build/ult/`.
@@ -59,16 +59,6 @@ def ps_clouds(export, cache, every=False):
     return clouds
 
 
-def peak(ds, ps, sample=30, step=0.5):
-    """A quick look: the most votes one shift gets from `sample` DS vertices."""
-    votes = {}
-    for d in aa.thin(ds, sample):
-        for p in ps:
-            k = (round((d[0] - p[0]) / step), round((d[1] - p[1]) / step), round((d[2] - p[2]) / step))
-            votes[k] = votes.get(k, 0) + 1
-    return max(votes.values())
-
-
 def one(job):
     rom_path, path, cache, eps = job
     global CLOUDS
@@ -84,19 +74,18 @@ def one(job):
         return {'file': path, 'model': name, 'vertices': len(ds), 'error': 'too few vertices'}
     found = []
     for mid, ps in CLOUDS.items():
-        n = min(30, len(ds))
-        if peak(ds, ps) < max(4, n // 5):
-            continue
-        share, dist, shift = aa.same_model(ds, ps, eps)
-        found.append((share, -dist, mid, shift))
+        share, dist, shift, wide = aa.same_model(ds, ps, eps, least=0.3)
+        if wide > 0.0:
+            # an exact match first; a model modelled anew (the vertices differ) is marked a quarter lower
+            found.append((max(share, wide - 0.25), share, -dist, mid, shift, wide))
     found.sort(reverse=True)
     out = {'file': path, 'model': name, 'vertices': len(ds), 'anchor': anchor}
     if found:
-        share, dist, mid, shift = found[0]
+        mark, share, dist, mid, shift, wide = found[0]
         rows, sh = aa.into_mesh([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], shift, mesh)
-        out.update(ps2=mid, share=share, middle=-dist, shift=shift, place=[x for r in rows for x in r] + sh,
-                   also=[m for s, _, m, _ in found[1:] if s >= share - 0.01][:8],
-                   next=next((s for s, _, m, _ in found[1:] if s < share - 0.01), 0.0))
+        out.update(ps2=mid, share=share, loose=wide, middle=-dist, shift=shift, place=[x for r in rows for x in r] + sh,
+                   also=[f[3] for f in found[1:] if f[0] >= mark - 0.01][:8],
+                   next=next((f[0] for f in found[1:] if f[0] < mark - 0.01), 0.0))
     return out
 
 
@@ -118,10 +107,11 @@ def main(argv):
         rows = []
         for r in pool.imap(one, [(rom_path, p, cache, eps) for p in paths]):
             rows.append(r)
-            print(r['file'], r.get('ps2', '-'), round(r.get('share', 0.0), 3), r.get('error', ''), file=sys.stderr, flush=True)
+            print(r['file'], r.get('ps2', '-'), round(r.get('share', 0.0), 3), round(r.get('loose', 0.0), 3), r.get('error', ''), file=sys.stderr, flush=True)
     num = lambda v: ', '.join(f'{x:.6g}' for x in v)
     lines = ['# DS area models and the PS2 scene models they were made from (tools/ult/align_all.py; do not edit by hand).',
-             f'# share: the part of the DS vertices with a PS2 vertex within {eps}; shift: PS2 model -> DS model space;',
+             f'# share: the part of the DS vertices with a PS2 vertex within {eps}; loose: within a fiftieth of its size, 3 at most (an area modelled anew for the DS',
+             '# in the same place has a low share and a high loose); swap: share >= 0.5 or loose >= 0.75; shift: PS2 model -> DS model space;',
              "# place: PS2 model -> the anchor mesh's display-list units (for ee2spm.py --anchor --place).", '']
     for r in rows:
         lines.append('[[area]]')
@@ -135,9 +125,10 @@ def main(argv):
         elif 'ps2' not in r:
             lines.append('status = "ds-only"')
         else:
-            lines.append(f'status = "{"swap" if r["share"] >= 0.5 else "ds-only"}"')
+            lines.append(f'status = "{"swap" if r["share"] >= 0.5 or r["loose"] >= 0.75 else "ds-only"}"')
             lines.append(f'ps2 = "{r["ps2"]}"')
             lines.append(f'share = {r["share"]:.3f}')
+            lines.append(f'loose = {r["loose"]:.3f}')
             lines.append(f'middle = {r["middle"]:.4f}')
             lines.append(f'next = {r["next"]:.3f}')
             if r['also']:
@@ -149,7 +140,7 @@ def main(argv):
     os.makedirs(os.path.dirname(out) or '.', exist_ok=True)
     with open(out, 'w') as f:
         f.write('\n'.join(lines))
-    ok = sum(1 for r in rows if r.get('share', 0.0) >= 0.5)
+    ok = sum(1 for r in rows if r.get('share', 0.0) >= 0.5 or r.get('loose', 0.0) >= 0.75)
     print(f'{len(rows)} areas: {ok} swap, {len(rows) - ok} ds-only or error -> {out}')
     return 0
 

@@ -7,8 +7,9 @@ DS_PATH: the area's model file in the ROM (`Model/Area/A46/A46_00.nsbmd.z`). EXP
 `out/export/v1`. Every PS2 scene model (the GIG slots of the scenes' Scene3D records) is tried. First as the
 same model in the same units and axes (the DS areas were made from the PS2 ones: room 402 is the PS2 model
 shifted by its `Base` node's place): the shift is the commonest difference between a DS vertex and a PS2 one,
-and the mark is the share of DS vertices with a PS2 vertex within `--eps` (0.3) of them. If no model passes
-(half the vertices), the old way: by the proportions of its box, then the best few by all 48 axis orders and
+and the mark is the share of DS vertices with a PS2 vertex within `--eps` (0.3) of them; the outdoor areas were
+modelled anew for the DS in the same place (the vertices differ), so the share within a wider distance (a fiftieth of the area's size, 3 units at most) is a second mark.
+If no model passes (half the vertices, or three quarters within 3), the old way: by the proportions of its box, then the best few by all 48 axis orders and
 signs, with one scale and a shift from the boxes, scored by how much of each cloud lies in cells the other
 fills (a rough guess: look at it before use). Prints the candidates and, for the best,
 the `--anchor MESH --place ...` line for `ee2spm.py` (rows x, y, z of the 3 x 3, then the shift).
@@ -150,15 +151,22 @@ def score(a, b, cells=20):
     return (sum(near(c, gb) for c in ga) / len(ga) + sum(near(c, ga) for c in gb) / len(gb)) / 2
 
 
-def near_share(ds, ps, eps):
-    """The share of the points `ds` with a point of `ps` within `eps`, and the middle distance of those."""
+def cells(ps, size):
     grid = {}
     for p in ps:
-        grid.setdefault(tuple(int(p[i] // eps) for i in range(3)), []).append(p)
+        grid.setdefault((int(p[0] // size), int(p[1] // size), int(p[2] // size)), []).append(p)
+    return grid
+
+
+def near_share(ds, ps, eps, shift=(0.0, 0.0, 0.0), grid=None):
+    """The share of the points `ds` with a point of `ps` + `shift` within `eps`, and the middle distance of those
+    (`grid`: `cells(ps, eps)`, to save making it again)."""
+    grid = grid or cells(ps, eps)
     found = []
     for d in ds:
-        c = tuple(int(d[i] // eps) for i in range(3))
-        best = min((sum((p[i] - d[i]) ** 2 for i in range(3))
+        q = (d[0] - shift[0], d[1] - shift[1], d[2] - shift[2])
+        c = (int(q[0] // eps), int(q[1] // eps), int(q[2] // eps))
+        best = min((sum((p[i] - q[i]) ** 2 for i in range(3))
                     for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)
                     for p in grid.get((c[0] + dx, c[1] + dy, c[2] + dz), ())), default=None)
         if best is not None and best <= eps * eps:
@@ -167,37 +175,68 @@ def near_share(ds, ps, eps):
     return len(found) / max(1, len(ds)), (found[len(found) // 2] if found else 0.0)
 
 
-def same_model(ds, ps, eps, sample=120, step=0.5):
-    """The PS2 cloud as the DS one but for a shift: (share of DS vertices matched, middle distance, shift)."""
+def loose_eps(ds, eps):
+    """The second, wider mark's distance for a DS cloud: a fiftieth of its middle part's size, from `eps` to 3
+    (in a room of ten units everything is within 3 of everything)."""
+    lo, hi = box(ds, 0.1)
+    return min(3.0, max(eps, 0.02 * max(hi[i] - lo[i] for i in range(3))))
+
+
+def same_model(ds, ps, eps, sample=120, step=0.5, loose=None, least=0.0):
+    """The PS2 cloud as the DS one but for a shift: (share of DS vertices matched within `eps`, middle distance,
+    shift, share within `loose`). The shift is the best of no shift and the commonest differences between a DS
+    vertex and a PS2 one (the commonest alone may be a dense clump of PS2 vertices, not the model), by the
+    share within `loose`; below `least` there the model is given up early."""
     ds, ps = sorted(set(ds)), sorted(set(ps))
     if not ds or not ps:
-        return 0.0, 0.0, [0.0, 0.0, 0.0]
+        return 0.0, 0.0, [0.0, 0.0, 0.0], 0.0
     votes = {}
     for d in thin(ds, sample):
         for p in ps:
-            k = tuple(round((d[i] - p[i]) / step) for i in range(3))
+            k = (round((d[0] - p[0]) / step), round((d[1] - p[1]) / step), round((d[2] - p[2]) / step))
             votes[k] = votes.get(k, 0) + 1
-    k = max(votes, key=votes.get)
-    shift = [k[i] * step for i in range(3)]
-    for _ in range(3):
+    tops = sorted(votes, key=votes.get, reverse=True)[:6]
+    loose = loose or loose_eps(ds, eps)
+    wide, tight = cells(ps, loose), cells(ps, step)
+    few = thin(ds, 200)
+    # a candidate's mark: the exact share, or the wide one less a quarter (the same vertices before a likeness)
+    mark = lambda c: max(near_share(few, ps, step, c, tight)[0], near_share(few, ps, loose, c, wide)[0] - 0.25)
+    quick, shift = max((mark(c), c) for c in [(0.0, 0.0, 0.0)] + [tuple(k[i] * step for i in range(3)) for k in tops])
+    if quick < least - 0.25:
+        return 0.0, 0.0, list(shift), 0.0
+    exact_start = near_share(few, ps, step, shift, tight)[0] >= 0.3
+    shift = list(shift)
+    for r in ((step, step, step) if exact_start else (loose, step, step)):
         # the shift made exact: the middle of the differences of the pairs it brings together
-        grid = {}
-        for p in ps:
-            q = tuple(p[i] + shift[i] for i in range(3))
-            grid.setdefault(tuple(int(q[i] // step) for i in range(3)), []).append(p)
+        grid = wide if r == loose else tight
         diffs = []
         for d in ds:
-            c = tuple(int(d[i] // step) for i in range(3))
-            best = min(((sum((p[i] + shift[i] - d[i]) ** 2 for i in range(3)), p)
+            q = (d[0] - shift[0], d[1] - shift[1], d[2] - shift[2])
+            c = (int(q[0] // r), int(q[1] // r), int(q[2] // r))
+            best = min(((sum((p[i] - q[i]) ** 2 for i in range(3)), p)
                         for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)
                         for p in grid.get((c[0] + dx, c[1] + dy, c[2] + dz), ())), default=None)
-            if best is not None and best[0] <= step * step:
+            if best is not None and best[0] <= r * r:
                 diffs.append([d[i] - best[1][i] for i in range(3)])
-        if not diffs:
-            break
+        if len(diffs) < 10:
+            continue
         shift = [sorted(x[i] for x in diffs)[len(diffs) // 2] for i in range(3)]
-    share, mid = near_share(ds, [tuple(p[i] + shift[i] for i in range(3)) for p in ps], eps)
-    return share, mid, shift
+    share, mid = near_share(ds, ps, eps, shift)
+    if len(diffs) >= 10:
+        # the same vertices give one difference over and over: the commonest (to 1/32, the DS's step), if it matches more
+        exact = []
+        for i in range(3):
+            count = {}
+            for x in diffs:
+                k = round(x[i] * 32)
+                count[k] = count.get(k, 0) + 1
+            k = max(count, key=count.get)
+            close = [x[i] for x in diffs if abs(x[i] * 32 - k) <= 1.5]
+            exact.append(sum(close) / len(close))
+        share2, mid2 = near_share(ds, ps, eps, exact)
+        if share2 > share:
+            share, mid, shift = share2, mid2, exact
+    return share, mid, shift, near_share(ds, ps, loose, shift, wide)[0]
 
 
 def thin(pts, n):
@@ -269,10 +308,11 @@ def main(argv):
         if len(ps) >= 30:
             same.append((same_model(ds, ps, eps), mid))
     same.sort(reverse=True)
-    for (share, dist, shift), mid in same[:top]:
-        print(f'  {mid} the same model: {share:.3f} of the DS vertices within {eps} (middle {dist:.3f}), shift {[round(x, 3) for x in shift]}')
-    if same and same[0][0][0] >= 0.5:
-        (share, dist, shift), mid = same[0]
+    same.sort(key=lambda c: (max(c[0][0], c[0][3] - 0.25), c[0][0]), reverse=True)
+    for (share, dist, shift, wide), mid in same[:top]:
+        print(f'  {mid} the same model: {share:.3f} of the DS vertices within {eps} (middle {dist:.3f}), {wide:.3f} within the wider distance, shift {[round(x, 3) for x in shift]}')
+    if same and (same[0][0][0] >= 0.5 or same[0][0][3] >= 0.75):
+        (share, dist, shift, wide), mid = same[0]
         nxt = f' (next {same[1][0][0]:.3f})' if len(same) > 1 else ''
         print(f'best: {mid}, the same model shifted: {share:.3f}{nxt}')
         out_place([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], shift)
