@@ -1046,7 +1046,8 @@ impl Nds {
         for u in 0..g.ult.len() {
             // the anchor mesh's matrix (of its batches, the one with most polygons); with no anchor named, the mesh with most
             let anchor = g.ult[u].anchor;
-            let best = g.ult_seen.iter().filter(|c| c.0 == u && c.4 > 0 && anchor.is_none_or(|a| a == c.1)).max_by_key(|c| c.4);
+            // (a named anchor's matrix holds even when all its polygons were clipped away)
+            let best = g.ult_seen.iter().filter(|c| c.0 == u && anchor.map_or(c.4 > 0, |a| a == c.1)).max_by_key(|c| c.4);
             if let Some(c) = best {
                 g.ult_at_r.push((u, c.2, c.3));
             }

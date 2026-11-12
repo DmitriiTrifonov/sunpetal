@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
 """Which PS2 scene model a DS area model is, and how it sits in the DS model's space (docs/ULTIMATE-IMPORT.md, У4.1).
 
-    align_area.py ROM.nds DS_PATH EXPORT_DIR [--top N] [--only ID,ID...] [--textures TEX,TEX...]
+    align_area.py ROM.nds DS_PATH EXPORT_DIR [--top N] [--only ID,ID...] [--textures TEX,TEX...] [--anchor MESH] [--eps E]
 
 DS_PATH: the area's model file in the ROM (`Model/Area/A46/A46_00.nsbmd.z`). EXPORT_DIR: `sunpetal-ee`'s
-`out/export/v1`. Every PS2 scene model (the GIG slots of the scenes' Scene3D records) is tried: first by the
-proportions of its box, then the best few by all 48 axis orders and signs, with one scale and a shift from the
-boxes, scored by how much of each cloud lies in cells the other fills. Prints the candidates and, for the best,
-the `--place` line for `ee2spm.py` (rows x, y, z of the 3 x 3, then the shift: PS2 model space -> DS model space).
+`out/export/v1`. Every PS2 scene model (the GIG slots of the scenes' Scene3D records) is tried. First as the
+same model in the same units and axes (the DS areas were made from the PS2 ones: room 402 is the PS2 model
+shifted by its `Base` node's place): the shift is the commonest difference between a DS vertex and a PS2 one,
+and the mark is the share of DS vertices with a PS2 vertex within `--eps` (0.3) of them. If no model passes
+(half the vertices), the old way: by the proportions of its box, then the best few by all 48 axis orders and
+signs, with one scale and a shift from the boxes, scored by how much of each cloud lies in cells the other
+fills (a rough guess: look at it before use). Prints the candidates and, for the best,
+the `--anchor MESH --place ...` line for `ee2spm.py` (rows x, y, z of the 3 x 3, then the shift).
+
+The game draws a mesh's display list under its node's matrix and POSSCALE, and the runtime puts a replacement
+through the anchor mesh's matrix: so the place printed leads from the PS2 model's space into the anchor mesh's
+display-list units (model space, back through the node's matrix, over `pos_scale`), not into model space. The
+anchor is the biggest mesh of those under the commonest node matrix (`--anchor MESH` names another).
 
 `--textures`: only the PS2 triangles with these pictures (ids of `textures.tsv`) are compared — for a PS2
 model that holds more than the DS area (a whole building against one room); the pictures come from the known
@@ -29,8 +38,9 @@ import nsbmd
 from ndskit import rom as ndsrom
 
 
-def ds_points(rom_path, path):
-    """The area model's vertices in its own space (the root node's), and its name."""
+def ds_points(rom_path, path, anchor=None):
+    """The area model's vertices in its own space (the root node's), its name, the anchor mesh, and that
+    mesh's matrix: display-list units -> model space (`pos_scale`, then its node's world matrix)."""
     rom = ndsrom.Rom(open(rom_path, 'rb').read())
     for p, b in nsbmd.rom_models(rom):
         if p == path or p.endswith(path):
@@ -41,7 +51,19 @@ def ds_points(rom_path, path):
                 w = m.nodes[d['node']]['world']
                 for _, tri in nsbmd.triangles(b, s['dl'][0], s['dl'][1], m.pos_scale):
                     pts.extend(nsbmd.apply(w, v) for v in tri)
-            return m.name, pts
+            if anchor is None:
+                # the meshes under the commonest node matrix; of them, the one with the longest display list
+                key = lambda d: tuple(round(x, 6) for r in m.nodes[d['node']]['world'] for x in r)
+                groups = {}
+                for d in m.draws:
+                    groups.setdefault(key(d), []).append(d)
+                common = max(groups.values(), key=len)
+                anchor = max(common, key=lambda d: m.shapes[d['shape']]['dl'][1])['shape']
+            node = next((d['node'] for d in m.draws if d['shape'] == anchor), None)
+            if node is None:
+                raise SystemExit(f'mesh {anchor} is not drawn by the model')
+            w = m.nodes[node]['world']
+            return m.name, pts, anchor, [[x * m.pos_scale for x in r] for r in w[:3]] + [list(w[3])]
     raise SystemExit('no such file in the ROM: ' + path)
 
 
@@ -82,12 +104,26 @@ def ps2_points(export, mid, tex=None):
             continue
         ws = worlds[s['object']]
         for i in range(s['first_vertex'], s['first_vertex'] + s['count']):
-            x, y, z = struct.unpack_from('<3f', raw, 36 * i)
-            slot = raw[36 * i + 32]
+            x, y, z = struct.unpack_from('<3f', raw, 40 * i)
+            slot = raw[40 * i + 36]
             bone = s['bones'][slot] if slot < len(s['bones']) else s['bones'][0]
             r, t = ws[bone] if bone < len(ws) else ws[0]
             pts.append(tuple((r[a][0] * x + r[a][1] * y + r[a][2] * z + t[a]) * k for a in range(3)))
     return pts
+
+
+def into_mesh(rows, shift, mesh):
+    """A place into model space -> the same place into a mesh's display-list units (`mesh`: units -> model, row vectors)."""
+    a = mesh[:3]
+    det = sum(a[0][i] * (a[1][(i + 1) % 3] * a[2][(i + 2) % 3] - a[1][(i + 2) % 3] * a[2][(i + 1) % 3]) for i in range(3))
+    if abs(det) < 1e-12:
+        raise SystemExit("the anchor mesh's matrix cannot be turned back")
+    inv = [[(a[(j + 1) % 3][(i + 1) % 3] * a[(j + 2) % 3][(i + 2) % 3] - a[(j + 1) % 3][(i + 2) % 3] * a[(j + 2) % 3][(i + 1) % 3]) / det
+            for j in range(3)] for i in range(3)]
+    # v = (p - t) * inv, p = rows * q + shift
+    r2 = [[sum(inv[i][j] * rows[i][c] for i in range(3)) for c in range(3)] for j in range(3)]
+    s2 = [sum(inv[i][j] * (shift[i] - mesh[3][i]) for i in range(3)) for j in range(3)]
+    return r2, s2
 
 
 def box(pts, cut=0.02):
@@ -112,6 +148,56 @@ def score(a, b, cells=20):
         return 0.0
     near = lambda c, g: any((c[0] + dx, c[1] + dy, c[2] + dz) in g for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1))
     return (sum(near(c, gb) for c in ga) / len(ga) + sum(near(c, ga) for c in gb) / len(gb)) / 2
+
+
+def near_share(ds, ps, eps):
+    """The share of the points `ds` with a point of `ps` within `eps`, and the middle distance of those."""
+    grid = {}
+    for p in ps:
+        grid.setdefault(tuple(int(p[i] // eps) for i in range(3)), []).append(p)
+    found = []
+    for d in ds:
+        c = tuple(int(d[i] // eps) for i in range(3))
+        best = min((sum((p[i] - d[i]) ** 2 for i in range(3))
+                    for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)
+                    for p in grid.get((c[0] + dx, c[1] + dy, c[2] + dz), ())), default=None)
+        if best is not None and best <= eps * eps:
+            found.append(best ** 0.5)
+    found.sort()
+    return len(found) / max(1, len(ds)), (found[len(found) // 2] if found else 0.0)
+
+
+def same_model(ds, ps, eps, sample=120, step=0.5):
+    """The PS2 cloud as the DS one but for a shift: (share of DS vertices matched, middle distance, shift)."""
+    ds, ps = sorted(set(ds)), sorted(set(ps))
+    if not ds or not ps:
+        return 0.0, 0.0, [0.0, 0.0, 0.0]
+    votes = {}
+    for d in thin(ds, sample):
+        for p in ps:
+            k = tuple(round((d[i] - p[i]) / step) for i in range(3))
+            votes[k] = votes.get(k, 0) + 1
+    k = max(votes, key=votes.get)
+    shift = [k[i] * step for i in range(3)]
+    for _ in range(3):
+        # the shift made exact: the middle of the differences of the pairs it brings together
+        grid = {}
+        for p in ps:
+            q = tuple(p[i] + shift[i] for i in range(3))
+            grid.setdefault(tuple(int(q[i] // step) for i in range(3)), []).append(p)
+        diffs = []
+        for d in ds:
+            c = tuple(int(d[i] // step) for i in range(3))
+            best = min(((sum((p[i] + shift[i] - d[i]) ** 2 for i in range(3)), p)
+                        for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)
+                        for p in grid.get((c[0] + dx, c[1] + dy, c[2] + dz), ())), default=None)
+            if best is not None and best[0] <= step * step:
+                diffs.append([d[i] - best[1][i] for i in range(3)])
+        if not diffs:
+            break
+        shift = [sorted(x[i] for x in diffs)[len(diffs) // 2] for i in range(3)]
+    share, mid = near_share(ds, [tuple(p[i] + shift[i] for i in range(3)) for p in ps], eps)
+    return share, mid, shift
 
 
 def thin(pts, n):
@@ -155,7 +241,8 @@ def main(argv):
     top = int(argv[argv.index('--top') + 1]) if '--top' in argv else 8
     only = argv[argv.index('--only') + 1].split(',') if '--only' in argv else None
     tex = set(argv[argv.index('--textures') + 1].split(',')) if '--textures' in argv else None
-    name, ds = ds_points(rom, path)
+    anchor = int(argv[argv.index('--anchor') + 1], 0) if '--anchor' in argv else None
+    name, ds, anchor, mesh = ds_points(rom, path, anchor)
     dlo, dhi = box(ds)
     dext = sorted(dhi[i] - dlo[i] for i in range(3))
     print(f'DS {name}: {len(ds)} vertices, box {[round(dhi[i] - dlo[i], 3) for i in range(3)]}')
@@ -166,6 +253,31 @@ def main(argv):
             for slot, mid in s['models'].items():
                 if slot == 'GIG':
                     where.setdefault(mid, []).append(f"{j['scene']}#{s['record']}")
+    eps = float(argv[argv.index('--eps') + 1]) if '--eps' in argv else 0.3
+
+    def out_place(rows, shift):
+        print('into model space: ' + ' '.join(f'{v:.6g}' for v in [x for r in rows for x in r] + shift))
+        rows, shift = into_mesh(rows, shift, mesh)
+        print(f'--anchor {anchor} --place ' + ' '.join(f'{v:.6g}' for v in [x for r in rows for x in r] + shift))
+
+    same = []
+    for mid in (only or sorted(where)):
+        try:
+            ps = ps2_points(export, mid, tex)
+        except (OSError, KeyError, IndexError, struct.error):
+            continue
+        if len(ps) >= 30:
+            same.append((same_model(ds, ps, eps), mid))
+    same.sort(reverse=True)
+    for (share, dist, shift), mid in same[:top]:
+        print(f'  {mid} the same model: {share:.3f} of the DS vertices within {eps} (middle {dist:.3f}), shift {[round(x, 3) for x in shift]}')
+    if same and same[0][0][0] >= 0.5:
+        (share, dist, shift), mid = same[0]
+        nxt = f' (next {same[1][0][0]:.3f})' if len(same) > 1 else ''
+        print(f'best: {mid}, the same model shifted: {share:.3f}{nxt}')
+        out_place([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], shift)
+        return 0
+    print('no model is the DS one shifted; by the boxes (a rough guess):')
     cands = []
     for mid in (only or sorted(where)):
         try:
@@ -192,7 +304,7 @@ def main(argv):
     if out and out[0][3]:
         sc, mid, d, rows, shift, _ = out[0]
         print(f'best: {mid} score {sc:.3f} (next {out[1][0]:.3f})' if len(out) > 1 else f'best: {mid} score {sc:.3f}')
-        print('--place ' + ' '.join(f'{v:.6g}' for v in [x for r in rows for x in r] + shift))
+        out_place(rows, shift)
     return 0
 
 

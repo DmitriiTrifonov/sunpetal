@@ -1,10 +1,15 @@
 """sunpetal-ee export (models/<id>.json + .vtx.bin) -> SPM2 (crates/sunpetal-data/src/spm2.rs).
-usage: ee2spm.py MODELS_DIR ID OUT.spm [--bind DS_NAME [--size N] [--anchor MESH] [--place 12 floats]]
-Without --bind the model is unbound (flags 0). Pictures are not written yet (step У2.4): every material has none.
+usage: ee2spm.py MODELS_DIR ID OUT.spm [--bind DS_NAME [--size N] [--anchor MESH] [--place 12 floats]] [--textures ID,ID...] [--pack DIR [--pictures TEXTURES_DIR]]
+Without --bind the model is unbound (flags 0).
+--pack DIR: the materials' pictures (TEXTURES_DIR/<id>.png, by default the export's `textures` beside MODELS_DIR)
+are copied to DIR under the texture pack's names, `WxH_200_<picture>_<palette>.png`, and the materials name
+them; without it every material has no picture. The two hashes are the two halves of the export's picture id
+(`5d514401b0_d3760673` -> 0000005d514401b0, 00000000d3760673) until the Rust reader hashes the PS2 bytes itself.
 Several objects are merged: their bones follow one another, a vertex's bone is the series' bone for its slot."""
 import argparse
 import json
 import os
+import shutil
 import struct
 
 ap = argparse.ArgumentParser()
@@ -15,6 +20,9 @@ ap.add_argument("--bind")
 ap.add_argument("--size", type=int, default=0)
 ap.add_argument("--anchor", type=lambda s: int(s, 0), default=0xFFFF)
 ap.add_argument("--place", type=float, nargs=12, default=[1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0])
+ap.add_argument("--textures", default="", help="keep only series whose material's picture is one of these ids (comma separated)")
+ap.add_argument("--pack", help="a texture pack folder the materials' pictures are copied to")
+ap.add_argument("--pictures", help="the export's pictures (default: MODELS_DIR/../textures)")
 a = ap.parse_args()
 
 j = json.load(open(os.path.join(a.dir, a.id + ".json")))
@@ -38,8 +46,13 @@ for ob in j["objects"]:
         par = q["parent"]
         bones.append((par + off if par >= 0 else -1, q["std"] if q.get("std") is not None else -1, q["init_key"]))
 
+tex = set(x for x in a.textures.split(",") if x)
+mats = j["materials"]
+
 verts, by_mat = [], {}
 for s in j["series"]:
+    if tex and mats[s["material"]].get("texture") not in tex:
+        continue
     ob, bs, n = s["object"], s["bones"], s["count"]
     first = len(verts)
     for v in range(s["first_vertex"], s["first_vertex"] + n):
@@ -55,7 +68,6 @@ for s in j["series"]:
             continue
         by_mat.setdefault((s["pass"], s["material"]), []).extend(first + x for x in t)
 
-mats = j["materials"]
 order = sorted(by_mat)  # by pass, then material
 idx, parts = [], []
 for key in order:
@@ -71,8 +83,26 @@ o += struct.pack("<H", len(bones))
 for par, std, k in bones:
     o += struct.pack("<hhh6f", par, std, -1, *k)
 o += struct.pack("<H", len(mats))
-for m in mats:
-    o += bytes([0, m["pass"], 255, 1])  # no picture, pass, blend not known, both sides
+used = {m for m, _, _ in parts}
+pics = a.pictures or os.path.join(a.dir, "..", "textures")
+copied = 0
+for i, m in enumerate(mats):
+    t = m.get("texture")
+    src = os.path.join(pics, t + ".png") if t else None
+    if a.pack and i in used and src and os.path.exists(src) and len(t.split("_")) == 2:
+        with open(src, "rb") as f:
+            head = f.read(24)
+        w, h = struct.unpack(">II", head[16:24])
+        data, pal = (int(x, 16) for x in t.split("_"))
+        os.makedirs(a.pack, exist_ok=True)
+        dst = os.path.join(a.pack, "%dx%d_200_%016x_%016x.png" % (w, h, data, pal))
+        if not os.path.exists(dst):
+            shutil.copyfile(src, dst)
+            copied += 1
+        o += bytes([1]) + struct.pack("<QQHH", data, pal, w, h)
+    else:
+        o += bytes([0])
+    o += bytes([m["pass"], 255, 1])  # pass, blend not known, both sides
 o += struct.pack("<I", len(verts))
 for p, nrm, c, uv, b in verts:
     o += struct.pack("<3f3f4B2fHH", *p, *nrm, *c, *uv, b, 0)
@@ -82,3 +112,5 @@ for m, f, c in parts:
 o += struct.pack("<I", len(idx)) + struct.pack("<%dI" % len(idx), *idx)
 open(a.out, "wb").write(o)
 print(a.id, len(bones), "bones", len(mats), "materials", len(verts), "vertices", len(idx) // 3, "triangles ->", a.out)
+if a.pack:
+    print(copied, "pictures copied to", a.pack)
