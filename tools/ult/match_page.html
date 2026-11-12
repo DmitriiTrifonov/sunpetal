@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Сопоставление карт DS и PS2</title>
+<style>
+  :root { --bg: #f4f2ee; --panel: #fffdf9; --ink: #22201c; --dim: #7a756c; --line: #d9d4ca; --ds: #c8321e; --ps: #2a50c8; --also: #7fa2ee; --ok: #2f7d3c; --warn: #b07a12; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #191817; --panel: #22211f; --ink: #ece8df; --dim: #99948a; --line: #3a3835; --ds: #ff6a52; --ps: #6f95ff; --also: #3d5796; --ok: #6cc47b; --warn: #e0b04a; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px/1.4 -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); height: 100vh; display: grid; grid-template-columns: 250px 1fr 340px; overflow: hidden; }
+  aside { background: var(--panel); border-right: 1px solid var(--line); overflow: auto; }
+  aside.right { border-right: 0; border-left: 1px solid var(--line); padding: 10px; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 14px 0 6px; }
+  aside.left h2 { margin: 10px 10px 6px; }
+  .row { padding: 4px 10px; cursor: pointer; display: flex; gap: 6px; align-items: baseline; border-left: 3px solid transparent; }
+  .row:hover { background: var(--bg); }
+  .row.on { border-left-color: var(--ds); background: var(--bg); }
+  .row .id { font-weight: 600; width: 34px; }
+  .row .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .sc { font-variant-numeric: tabular-nums; color: var(--dim); }
+  .tag { font-size: 10px; padding: 0 4px; border-radius: 3px; border: 1px solid var(--line); color: var(--dim); }
+  .tag.swap { color: var(--ok); border-color: var(--ok); } .tag.ds { color: var(--warn); border-color: var(--warn); } .tag.mine { color: var(--ps); border-color: var(--ps); }
+  main { position: relative; min-width: 0; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; }
+  .hud { position: absolute; left: 10px; top: 8px; right: 10px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; pointer-events: none; }
+  .hud > * { pointer-events: auto; }
+  .pill { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 3px 8px; }
+  .score { font-variant-numeric: tabular-nums; font-weight: 600; }
+  button, select, input { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 3px 7px; }
+  button { cursor: pointer; } button:hover { border-color: var(--dim); } button.on { border-color: var(--ps); color: var(--ps); }
+  input[type=number] { width: 78px; }
+  .grid3 { display: grid; grid-template-columns: 18px 1fr auto auto; gap: 4px; align-items: center; margin-bottom: 4px; }
+  .cand { padding: 3px 6px; cursor: pointer; display: flex; gap: 6px; border-radius: 4px; font-variant-numeric: tabular-nums; }
+  .cand:hover { background: var(--bg); } .cand.on { outline: 1px solid var(--ps); }
+  .cand .w { color: var(--dim); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  textarea { width: 100%; height: 150px; font: 11px/1.35 ui-monospace, Menlo, monospace; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 6px; }
+  .dim { color: var(--dim); } .help { color: var(--dim); font-size: 11px; margin: 4px 0; }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 3px; vertical-align: -1px; }
+  #list { max-height: 260px; overflow: auto; border: 1px solid var(--line); border-radius: 4px; }
+</style>
+</head>
+<body>
+<aside class="left">
+  <h2>Карты DS <span id="nAreas" class="dim"></span></h2>
+  <div style="display:flex; gap:4px; padding:0 10px 6px"><button data-f="all" class="on">все</button><button data-f="rest">без пары</button><button data-f="mine">мои</button></div>
+  <div id="areas"></div>
+</aside>
+<main>
+  <canvas id="cv"></canvas>
+  <canvas id="gl" style="display:none"></canvas>
+  <div class="pill" id="hint3d" style="position:absolute; left:10px; bottom:8px; display:none">W A S D — полёт · Q / E — вниз / вверх · мышь — взгляд · колесо — скорость · 1 / 2 / 3 — DS / PS2 / оба (DS полупрозрачно поверх) · Shift + мышь — двигать PS2 · <span id="speed"></span></div>
+  <div id="mid" style="position:absolute; top:0; bottom:0; left:50%; width:1px; background:var(--line); display:none"></div>
+  <div class="hud">
+    <span class="pill" id="title"></span>
+    <span class="pill score" id="score"></span>
+    <button id="vTop" class="on">сверху</button><button id="vSide">сбоку</button><button id="vFront">спереди</button><button id="v3d">3D</button><button id="v3d2">3D два окна</button><span id="layers" style="display:none"><button data-show="1">DS</button><button data-show="2">PS2</button><button data-show="3">оба</button></span>
+    <button id="fit">вписать</button>
+    <span class="pill legend"><i style="background:var(--ds)"></i>DS <i style="background:var(--ps)"></i>PS2 <i style="background:var(--also)"></i>уже привязанные</span>
+  </div>
+</main>
+<aside class="right">
+  <h2>Модель PS2</h2>
+  <div style="display:flex; gap:6px; margin-bottom:6px">
+    <select id="scene" title="Сцена PS2"></select>
+    <select id="record" title="Запись Scene3D" style="flex:1; min-width:0"></select>
+  </div>
+  <div class="help" id="where"></div>
+  <h2>Модели PS2 без пары <span id="nFree" class="dim"></span></h2>
+  <div class="help">Ни одна карта DS на них не ссылается — ни в таблице, ни в ваших привязках. Крупные сверху.</div>
+  <div id="free" style="max-height:150px; overflow:auto; border:1px solid var(--line); border-radius:4px"></div>
+  <h2>Постановка (PS2 → пространство DS)</h2>
+  <div id="shift"></div>
+  <div style="display:flex; gap:6px; align-items:center; margin:6px 0">
+    <span class="dim">поворот</span><button data-yaw="0">0°</button><button data-yaw="90">90°</button><button data-yaw="180">180°</button><button data-yaw="270">270°</button>
+    <button id="mirror">зеркало</button>
+  </div>
+  <div style="display:flex; gap:6px; flex-wrap:wrap">
+    <button id="zero">сдвиг 0</button><button id="refine">подогнать сдвиг</button><button id="table">как в таблице</button>
+  </div>
+  <div class="help">Перетаскивание — вид, колесо — масштаб. С зажатым Shift перетаскивается модель PS2.</div>
+  <h2>Кандидаты <button id="rank" style="float:right; margin-top:-4px">ранжировать все</button></h2>
+  <label class="help"><input type="checkbox" id="allrot"> пробовать 4 поворота и зеркало (в 8 раз дольше)</label>
+  <div id="list"></div>
+  <h2>Привязки</h2>
+  <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px">
+    <button id="bind">привязать к карте</button><button id="add">добавить вторую модель</button><button id="unbind">снять с карты</button>
+  </div>
+  <textarea id="out" readonly></textarea>
+  <div class="help">Текст — для <code>data/ult/areas_extra.toml</code>. Привязки хранятся в этом браузере.</div>
+</aside>
+<script src="data.js"></script>
+<script>
+'use strict';
+const D = window.DATA;
+const f32 = s => { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return new Float32Array(u.buffer); };
+const cache = new Map();
+const pts = o => { if (!cache.has(o)) cache.set(o, f32(o.pts)); return cache.get(o); };
+const modelById = new Map(D.models.map(m => [m.id, m]));
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+const st = { area: 0, model: null, shift: [0, 0, 0], yaw: 0, mirror: false, view: 0, zoom: 1, cx: 0, cy: 0, ranked: null };
+let binds = {};
+try { binds = JSON.parse(localStorage.getItem('sunpetal-ult-binds') || '{}'); } catch (e) { binds = {}; }
+const saveBinds = () => { try { localStorage.setItem('sunpetal-ult-binds', JSON.stringify(binds)); } catch (e) {} };
+
+// PS2 point -> DS space: mirror x, turn about y by quarter turns, shift (the same as build_areas.py)
+function placed(src, yaw, mirror, shift) {
+  const o = new Float32Array(src.length), k = (yaw / 90) | 0;
+  for (let i = 0; i < src.length; i += 3) {
+    let x = mirror ? -src[i] : src[i], z = src[i + 2];
+    for (let t = 0; t < k; t++) { const nx = z; z = -x; x = nx; }
+    o[i] = x + shift[0]; o[i + 1] = src[i + 1] + shift[1]; o[i + 2] = z + shift[2];
+  }
+  return o;
+}
+const key = (a, b, c) => ((a + 16384) * 32768 + (b + 16384)) * 32768 + (c + 16384);
+function cells(p, size) {
+  const g = new Map();
+  for (let i = 0; i < p.length; i += 3) {
+    const k = key(Math.floor(p[i] / size), Math.floor(p[i + 1] / size), Math.floor(p[i + 2] / size));
+    let a = g.get(k); if (!a) g.set(k, a = []); a.push(i);
+  }
+  return g;
+}
+// nearest point of p (grid g of cell eps) to (x, y, z): [squared distance, index] or null
+function nearest(p, g, eps, x, y, z) {
+  const cx = Math.floor(x / eps), cy = Math.floor(y / eps), cz = Math.floor(z / eps);
+  let best = eps * eps, at = -1;
+  for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+    const a = g.get(key(cx + dx, cy + dy, cz + dz)); if (!a) continue;
+    for (const i of a) { const e = (p[i] - x) ** 2 + (p[i + 1] - y) ** 2 + (p[i + 2] - z) ** 2; if (e <= best) { best = e; at = i; } }
+  }
+  return at < 0 ? null : [best, at];
+}
+function share(ds, p, g, eps, sh, stride) {
+  let n = 0, all = 0;
+  for (let i = 0; i < ds.length; i += 3 * (stride || 1)) { all++; if (nearest(p, g, eps, ds[i] - sh[0], ds[i + 1] - sh[1], ds[i + 2] - sh[2])) n++; }
+  return all ? n / all : 0;
+}
+function looseEps(ds) {
+  let m = 0;
+  for (let a = 0; a < 3; a++) { const v = []; for (let i = a; i < ds.length; i += 3) v.push(ds[i]); v.sort((x, y) => x - y); m = Math.max(m, v[Math.floor(0.9 * (v.length - 1))] - v[Math.floor(0.1 * (v.length - 1))]); }
+  return Math.min(3, Math.max(0.3, 0.02 * m));
+}
+const median = v => { v.sort((a, b) => a - b); return v[v.length >> 1]; };
+// the best shift for a PS2 cloud p (already turned) against ds: {mark, exact, loose, shift}
+function fit(ds, p, loose, quick) {
+  const step = 0.5, votes = new Map(), n = ds.length / 3, sample = quick ? 30 : 80;
+  const pstride = quick ? Math.max(1, Math.floor(p.length / 3 / 3000)) : 1;
+  for (let s = 0; s < sample; s++) {
+    const i = 3 * Math.floor(s * n / sample);
+    for (let j = 0; j < p.length; j += 3 * pstride) {
+      const k = key(Math.round((ds[i] - p[j]) / step), Math.round((ds[i + 1] - p[j + 1]) / step), Math.round((ds[i + 2] - p[j + 2]) / step));
+      votes.set(k, (votes.get(k) || 0) + 1);
+    }
+  }
+  const tops = [...votes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k]) => {
+    const c = k % 32768, b = Math.floor(k / 32768) % 32768, a = Math.floor(k / 32768 / 32768);
+    return [(a - 16384) * step, (b - 16384) * step, (c - 16384) * step];
+  });
+  const gw = cells(p, loose), gt = cells(p, step), stride = Math.max(1, Math.floor(n / 200));
+  let best = null;
+  for (const c of [[0, 0, 0], ...tops]) {
+    const e = share(ds, p, gt, step, c, stride), w = share(ds, p, gw, loose, c, stride), m = Math.max(e, w - 0.25);
+    if (!best || m > best.mark) best = { mark: m, shift: c, exactStart: e >= 0.3 };
+  }
+  if (quick && best.mark < 0.05) return { mark: best.mark, exact: 0, loose: 0, shift: best.shift };
+  let sh = best.shift.slice();
+  for (const r of (best.exactStart ? [step, step, step] : [loose, step, step])) {
+    const g = r === loose ? gw : gt, d = [[], [], []];
+    for (let i = 0; i < ds.length; i += 3) {
+      const q = nearest(p, g, r, ds[i] - sh[0], ds[i + 1] - sh[1], ds[i + 2] - sh[2]);
+      if (q) for (let a = 0; a < 3; a++) d[a].push(ds[i + a] - p[q[1] + a]);
+    }
+    if (d[0].length >= 10) sh = d.map(median);
+  }
+  const ge = cells(p, 0.3), exact = share(ds, p, ge, 0.3, sh), wide = share(ds, p, gw, loose, sh);
+  return { mark: Math.max(exact, wide - 0.25), exact, loose: wide, shift: sh };
+}
+
+// ---- drawing
+const cv = $('cv'), cx = cv.getContext('2d');
+const axes = () => [[0, 2], [2, 1], [0, 1]][Math.min(st.view, 2)];
+const VIEWS = [$('vTop'), $('vSide'), $('vFront'), $('v3d'), $('v3d2')];
+const flipY = () => st.view !== 0;
+function size() { const r = cv.parentElement.getBoundingClientRect(), d = devicePixelRatio || 1; cv.width = glc.width = r.width * d; cv.height = glc.height = r.height * d; if (st.view < 3) draw(); }
+function dots(p, color, s) {
+  const [a, b] = axes(), d = devicePixelRatio || 1, w = cv.width, h = cv.height, z = st.zoom * d, f = flipY() ? -1 : 1;
+  cx.fillStyle = color;
+  for (let i = 0; i < p.length; i += 3) {
+    const x = w / 2 + (p[i + a] - st.cx) * z, y = h / 2 + f * (p[i + b] - st.cy) * z;
+    if (x > -2 && y > -2 && x < w && y < h) cx.fillRect(x, y, s * d, s * d);
+  }
+}
+let cur = null; // the PS2 cloud as placed now
+function draw() {
+  cx.clearRect(0, 0, cv.width, cv.height);
+  const a = D.areas[st.area];
+  for (const b of (binds[a.file] || [])) if (!st.model || b.ps2 !== st.model.id) { const m = modelById.get(b.ps2); if (m) dots(placed(pts(m), b.yaw || 0, !!b.mirror, b.shift), css('--also'), 1.2); }
+  if (cur) dots(cur, css('--ps'), 1.4);
+  dots(pts(a), css('--ds'), 2.4);
+}
+function fitView() {
+  const p = pts(D.areas[st.area]), [a, b] = axes();
+  const lo = [], hi = [];
+  for (const k of [a, b]) { const v = []; for (let i = k; i < p.length; i += 3) v.push(p[i]); v.sort((x, y) => x - y); lo.push(v[Math.floor(0.02 * (v.length - 1))]); hi.push(v[Math.floor(0.98 * (v.length - 1))]); }
+  st.cx = (lo[0] + hi[0]) / 2; st.cy = (lo[1] + hi[1]) / 2;
+  const r = cv.parentElement.getBoundingClientRect();
+  st.zoom = Math.max(1e-6, 0.8 * Math.min(r.width / Math.max(hi[0] - lo[0], 1), r.height / Math.max(hi[1] - lo[1], 1)));
+}
+
+
+// ---- 3D: the DS area and the PS2 model as textured triangles, one flying camera
+const glc = $('gl'), gl = glc.getContext('webgl', { antialias: true });
+const keys = new Set(), cam = { p: [0, 0, 0], yaw: 0, pitch: 0, speed: 10 };
+let show = { ds: false, ps: true }, prog = null, running = false, last = 0;
+const loaded = new Map(), asked = new Map();
+window.SCENE = (k, d) => { loaded.set(k, d); const a = asked.get(k); if (a) a.done(d); };
+function load(k, path) {
+  if (!asked.has(k)) { const a = {}; a.promise = new Promise((done, fail) => { a.done = done; const s = document.createElement('script'); s.src = path; s.onerror = () => fail(new Error(path)); document.head.appendChild(s); }); asked.set(k, a); }
+  return asked.get(k).promise;
+}
+const u8 = s => { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; };
+function buffer(data) { const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW); return b; }
+function texture(src, nearest) {
+  const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([128, 128, 128, 255]));
+  const img = new Image();
+  img.onload = () => {
+    gl.bindTexture(gl.TEXTURE_2D, t); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    const pow2 = !(img.width & (img.width - 1)) && !(img.height & (img.height - 1)), wrap = pow2 ? gl.REPEAT : gl.CLAMP_TO_EDGE;
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, nearest ? gl.NEAREST : gl.LINEAR);
+    if (pow2) { gl.generateMipmap(gl.TEXTURE_2D); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR); } else gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  };
+  img.src = src;
+  return t;
+}
+const meshes = new Map();   // key -> parts on the video card (when ready)
+function mesh(k, path, ds) {
+  if (meshes.has(k)) return meshes.get(k).parts;
+  const m = { parts: null }; meshes.set(k, m);
+  load(k, path).then(async d => {
+    const texs = await Promise.all(d.textures.map(async t => texture(t.url || await load('tex:' + t.name, `tex/${t.name}.js`), ds)));
+    m.parts = d.parts.map(p => ({ n: p.n, tex: p.tex >= 0 ? texs[p.tex] : null, pos: buffer(f32(p.pos)), uv: buffer(f32(p.uv)), col: buffer(u8(p.col)) }));
+  }).catch(e => { $('score').textContent = 'нет файла 3D: ' + e.message + ' (пересоберите страницу match_page.py)'; });
+  return null;
+}
+function program() {
+  gl.getExtension('OES_standard_derivatives');
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+  const p = gl.createProgram();
+  gl.attachShader(p, sh(gl.VERTEX_SHADER, `attribute vec3 aPos; attribute vec2 aUV; attribute vec3 aCol; uniform mat4 uVP, uM; varying vec2 vUV; varying vec3 vCol, vW;
+    void main() { vec4 w = uM * vec4(aPos, 1.0); vW = w.xyz; vUV = aUV; vCol = aCol; gl_Position = uVP * w; }`));
+  gl.attachShader(p, sh(gl.FRAGMENT_SHADER, `#extension GL_OES_standard_derivatives : enable
+    precision highp float; uniform sampler2D uTex; uniform float uHasTex, uColScale, uAlpha; varying vec2 vUV; varying vec3 vCol, vW;
+    void main() { vec4 t = uHasTex > 0.5 ? texture2D(uTex, vUV) : vec4(0.8, 0.8, 0.8, 1.0); if (t.a < 0.35) discard;
+      vec3 n = normalize(cross(dFdx(vW), dFdy(vW))); float l = 0.7 + 0.3 * abs(dot(n, normalize(vec3(0.4, 0.8, 0.3))));
+      gl_FragColor = vec4(t.rgb * min(vCol * uColScale, vec3(1.5)) * l, uAlpha); }`));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const o = { p }; for (const n of ['aPos', 'aUV', 'aCol']) o[n] = gl.getAttribLocation(p, n); for (const n of ['uVP', 'uM', 'uTex', 'uHasTex', 'uColScale', 'uAlpha']) o[n] = gl.getUniformLocation(p, n);
+  return o;
+}
+// column-major 4 x 4
+const mul = (a, b) => { const o = new Float32Array(16); for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) { let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k]; o[c * 4 + r] = s; } return o; };
+function viewProj(aspect) {
+  const f = [Math.sin(cam.yaw) * Math.cos(cam.pitch), Math.sin(cam.pitch), Math.cos(cam.yaw) * Math.cos(cam.pitch)];
+  const r = [Math.cos(cam.yaw), 0, -Math.sin(cam.yaw)], u = [f[1] * r[2] - f[2] * r[1], f[2] * r[0] - f[0] * r[2], f[0] * r[1] - f[1] * r[0]];
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], p = cam.p;
+  // the camera looks along f; r is to its left (a right-handed world, y up), u is up
+  const v = new Float32Array([-r[0], u[0], -f[0], 0, -r[1], u[1], -f[1], 0, -r[2], u[2], -f[2], 0, dot(r, p), -dot(u, p), dot(f, p), 1]);
+  const near = Math.max(0.02, cam.unit * 0.0005), far = Math.max(4000, cam.unit * 40), t = 1 / Math.tan(0.5), pr = new Float32Array([t / aspect, 0, 0, 0, 0, t, 0, 0, 0, 0, (far + near) / (near - far), -1, 0, 0, 2 * far * near / (near - far), 0]);
+  return mul(pr, v);
+}
+function placeMatrix(b) {
+  let m = [[b.mirror ? -1 : 1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  for (let k = 0; k < ((b.yaw || 0) / 90 | 0); k++) m = [m[2], m[1], m[0].map(x => -x)];
+  return new Float32Array([m[0][0], m[1][0], m[2][0], 0, m[0][1], m[1][1], m[2][1], 0, m[0][2], m[1][2], m[2][2], 0, b.shift[0], b.shift[1], b.shift[2], 1]);
+}
+const IDENT = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+function drawParts(parts, m, scale) {
+  if (!parts) return;
+  gl.uniformMatrix4fv(prog.uM, false, m); gl.uniform1f(prog.uColScale, scale);
+  for (const p of parts) {
+    gl.bindBuffer(gl.ARRAY_BUFFER, p.pos); gl.vertexAttribPointer(prog.aPos, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, p.uv); gl.vertexAttribPointer(prog.aUV, 2, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, p.col); gl.vertexAttribPointer(prog.aCol, 3, gl.UNSIGNED_BYTE, true, 0, 0);
+    gl.uniform1f(prog.uHasTex, p.tex ? 1 : 0); if (p.tex) gl.bindTexture(gl.TEXTURE_2D, p.tex);
+    gl.drawArrays(gl.TRIANGLES, 0, p.n);
+  }
+}
+function frame(now) {
+  if (st.view < 3) { running = false; return; }
+  const dt = Math.min(0.1, (now - last) / 1000 || 0); last = now;
+  if (![...cam.p, cam.yaw, cam.pitch, cam.speed].every(Number.isFinite)) home();
+  const f = [Math.sin(cam.yaw) * Math.cos(cam.pitch), Math.sin(cam.pitch), Math.cos(cam.yaw) * Math.cos(cam.pitch)], r = [Math.cos(cam.yaw), 0, -Math.sin(cam.yaw)];
+  const go = (a, b) => (keys.has(a) ? 1 : 0) - (keys.has(b) ? 1 : 0), k = cam.speed * dt * (keys.has('ShiftLeft') || keys.has('ShiftRight') ? 4 : 1);
+  const fw = go('KeyW', 'KeyS') + go('ArrowUp', 'ArrowDown'), sd = go('KeyA', 'KeyD') + go('ArrowLeft', 'ArrowRight'), up = go('KeyE', 'KeyQ') + go('Space', 'KeyC');
+  for (let i = 0; i < 3; i++) cam.p[i] += (f[i] * fw + r[i] * sd) * k;
+  cam.p[1] += up * k;
+  $('speed').textContent = `скорость ${cam.speed < 10 ? cam.speed.toFixed(1) : Math.round(cam.speed)} юн./с`;
+  const a = D.areas[st.area], W = glc.width, H = glc.height, split = st.view === 4;
+  const bg = css('--bg').match(/[0-9a-f]{2}/gi).map(x => parseInt(x, 16) / 255);
+  gl.enable(gl.DEPTH_TEST); gl.enable(gl.SCISSOR_TEST); gl.useProgram(prog.p); gl.uniform1i(prog.uTex, 0);
+  for (const n of ['aPos', 'aUV', 'aCol']) gl.enableVertexAttribArray(prog[n]);
+  const ds = mesh('ds:' + a.id, `areas/${a.id}.js`, true);
+  const ps = [];
+  if (st.model) ps.push([mesh('ps2:' + st.model.id, `models/${st.model.id}.js`, false), placeMatrix(st)]);
+  for (const b of (binds[a.file] || [])) if (!st.model || b.ps2 !== st.model.id) ps.push([mesh('ps2:' + b.ps2, `models/${b.ps2}.js`, false), placeMatrix(b)]);
+  for (const [x, w, what] of (split ? [[0, W >> 1, 'ds'], [W >> 1, W - (W >> 1), 'ps']] : [[0, W, 'both']])) {
+    gl.viewport(x, 0, w, H); gl.scissor(x, 0, w, H); gl.clearColor(bg[0], bg[1], bg[2], 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.uniformMatrix4fv(prog.uVP, false, viewProj(w / H));
+    const both = what === 'both' && show.ds && show.ps;
+    gl.uniform1f(prog.uAlpha, 1); gl.disable(gl.BLEND); gl.depthMask(true); gl.disable(gl.POLYGON_OFFSET_FILL);
+    if (what === 'ps' || (what === 'both' && show.ps)) for (const [parts, m] of ps) drawParts(parts, m, 2);
+    if (both) {
+      // the two lie in the same planes: the DS one goes over the PS2 one half see-through, a step nearer, and leaves the depth alone
+      gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(-2, -2); gl.uniform1f(prog.uAlpha, 0.5);
+    }
+    if (what === 'ds' || (what === 'both' && show.ds)) drawParts(ds, IDENT, 1);
+    gl.depthMask(true); gl.disable(gl.BLEND);
+  }
+  requestAnimationFrame(frame);
+}
+function layers(n) { show = { ds: n !== 2, ps: n !== 1 }; document.querySelectorAll('[data-show]').forEach(b => b.classList.toggle('on', +b.dataset.show === n)); }
+document.querySelectorAll('[data-show]').forEach(b => b.onclick = () => layers(+b.dataset.show));
+function want3d() { if (!prog) prog = program(); if (!running) { running = true; requestAnimationFrame(frame); } }
+// the camera to the middle of the DS area, a little above it
+function home(i) {
+  const p = pts(D.areas[i == null ? st.area : i]), c = [], e = [];
+  for (let a = 0; a < 3; a++) { const v = []; for (let k = a; k < p.length; k += 3) v.push(p[k]); v.sort((x, y) => x - y); const lo = v[Math.floor(0.1 * (v.length - 1))], hi = v[Math.floor(0.9 * (v.length - 1))]; c.push((lo + hi) / 2); e.push(hi - lo); }
+  cam.unit = Math.max(e[0], e[2], 1); cam.p = [c[0], c[1] + Math.max(0.1 * e[1], 0.02 * cam.unit), c[2] - 0.3 * cam.unit]; cam.yaw = 0; cam.pitch = -0.1; cam.speed = Math.max(1, cam.unit * 0.3);
+}
+cam.unit = 100;
+layers(2);
+
+// ---- state -> page
+function update(rescore) {
+  const a = D.areas[st.area], ds = pts(a);
+  cur = st.model ? placed(pts(st.model), st.yaw, st.mirror, st.shift) : null;
+  $('title').textContent = `${a.id} ${a.model} · ${a.n} вершин` + (st.model ? ` ↔ ${st.model.id} · ${st.model.n}` : '');
+  if (cur && rescore !== false) {
+    const le = looseEps(ds), e = share(ds, cur, cells(cur, 0.3), 0.3, [0, 0, 0]), w = share(ds, cur, cells(cur, le), le, [0, 0, 0]);
+    st.score = { exact: e, loose: w, eps: le };
+    $('score').textContent = `в 0,3 юн.: ${(e * 100).toFixed(1)} %  ·  в ${le.toFixed(1)} юн.: ${(w * 100).toFixed(1)} %`;
+  } else if (!cur) $('score').textContent = 'модель PS2 не выбрана';
+  $('where').textContent = st.model ? 'Стоит в: ' + (st.model.where.length ? st.model.where.slice(0, 12).join(', ') + (st.model.where.length > 12 ? '…' : '') : 'ни в одной сцене') : '';
+  ['x', 'y', 'z'].forEach((n, i) => { const el = $('s' + n); if (document.activeElement !== el) el.value = +st.shift[i].toFixed(3); });
+  document.querySelectorAll('[data-yaw]').forEach(b => b.classList.toggle('on', +b.dataset.yaw === st.yaw));
+  $('mirror').classList.toggle('on', st.mirror);
+  VIEWS.forEach((b, i) => b.classList.toggle('on', i === st.view));
+  const three = st.view >= 3;
+  cv.style.display = three ? 'none' : ''; glc.style.display = three ? '' : 'none'; $('hint3d').style.display = three ? '' : 'none'; $('mid').style.display = st.view === 4 ? '' : 'none'; $('layers').style.display = st.view === 3 ? '' : 'none';
+  if (three) want3d(); else draw();
+}
+let filter = 'all';
+const paired = a => (binds[a.file] || []).length > 0 || a.status === 'swap';
+// the PS2 models no DS area stands on: not in the table (the twins too), not in the pairs made here
+function freeList() {
+  const used = new Set();
+  for (const a of D.areas) { if (a.status === 'swap') { used.add(a.ps2); (a.also || []).forEach(m => used.add(m)); } (binds[a.file] || []).forEach(b => used.add(b.ps2)); }
+  const free = D.models.filter(m => !used.has(m.id) && m.n >= 300).sort((x, y) => y.n - x.n);
+  $('nFree').textContent = `· ${free.length} из ${D.models.filter(m => m.n >= 300).length} (от 300 вершин)`;
+  const box = $('free'); box.innerHTML = '';
+  for (const m of free) {
+    const r = document.createElement('div'); r.className = 'cand' + (st.model && st.model.id === m.id ? ' on' : ''); r.dataset.id = m.id;
+    r.innerHTML = `<span>${m.id}</span><span class="dim">${m.n}</span><span class="w" title="${m.where.join(', ')}">${m.where.slice(0, 3).join(', ') || 'ни в одной сцене'}</span>`;
+    r.onclick = () => setModel(m.id, st.shift, st.yaw, st.mirror);
+    box.appendChild(r);
+  }
+}
+function areasList() {
+  $('areas').innerHTML = '';
+  const rest = D.areas.filter(a => !paired(a)).length;
+  $('nAreas').textContent = `· без пары ${rest} из ${D.areas.length}`;
+  document.querySelectorAll('[data-f]').forEach(b => b.classList.toggle('on', b.dataset.f === filter));
+  freeList();
+  D.areas.forEach((a, i) => {
+    if (i !== st.area && ((filter === 'rest' && paired(a)) || (filter === 'mine' && !(binds[a.file] || []).length))) return;
+    const r = document.createElement('div'); r.className = 'row' + (i === st.area ? ' on' : '');
+    const mine = (binds[a.file] || []).length;
+    r.innerHTML = `<span class="id">${a.id}</span><span class="nm" title="${a.model}">${a.model.replace(/^no\d+_/, '')}</span>` +
+      (mine ? `<span class="tag mine">моя ${mine}</span>` : `<span class="tag ${a.status === 'swap' ? 'swap' : 'ds'}">${a.status === 'swap' ? 'пара' : 'нет'}</span>`) +
+      `<span class="sc">${a.loose != null ? Math.round(Math.max(a.share, a.loose) * 100) : ''}</span>`;
+    r.onclick = () => pickArea(i);
+    $('areas').appendChild(r);
+  });
+}
+function pickArea(i) {
+  st.area = i; st.ranked = null; if (st.view >= 3) home(i); $('list').innerHTML = '<div class="help" style="padding:6px">Нажмите «ранжировать все», чтобы страница сравнила карту со всеми моделями PS2.</div>';
+  const a = D.areas[i], mine = (binds[a.file] || [])[0];
+  if (mine) setModel(mine.ps2, mine.shift, mine.yaw || 0, !!mine.mirror, false);
+  else if (a.ps2 && modelById.has(a.ps2)) setModel(a.ps2, a.shift || [0, 0, 0], 0, false, false);
+  else { st.model = null; }
+  areasList(); fitView(); update();
+}
+function setModel(id, shift, yaw, mirror, upd) {
+  st.model = modelById.get(id) || null; st.shift = shift.slice(); st.yaw = yaw; st.mirror = mirror;
+  document.querySelectorAll('.cand').forEach(c => c.classList.toggle('on', c.dataset.id === id));
+  if (upd !== false) update();
+}
+function outText() {
+  let t = '';
+  for (const a of D.areas) {
+    const b = binds[a.file]; if (!b || !b.length) continue;
+    t += `[[area]]\nfile = "${a.file}"\nmodel = "${a.model}"\nmodels = [\n` + b.map(m => `  { ps2 = "${m.ps2}", shift = [${m.shift.map(x => +x.toFixed(4)).join(', ')}]` + (m.yaw ? `, yaw = ${m.yaw}` : '') + (m.mirror ? ', mirror = true' : '') + ` },  # ${(m.exact * 100).toFixed(0)} % / ${(m.loose * 100).toFixed(0)} %`).join('\n') + '\n]\n\n';
+  }
+  $('out').value = t || '# привязок пока нет';
+}
+function bind(add) {
+  if (!st.model) return;
+  const a = D.areas[st.area], b = { ps2: st.model.id, shift: st.shift.slice(), yaw: st.yaw, mirror: st.mirror, exact: st.score.exact, loose: st.score.loose };
+  const old = (binds[a.file] || []).filter(m => m.ps2 !== b.ps2);
+  binds[a.file] = add ? [...old, b] : [b];
+  saveBinds(); areasList(); outText(); draw();
+}
+async function rank() {
+  const a = D.areas[st.area], ds = pts(a), le = looseEps(ds), all = $('allrot').checked, res = [];
+  const turns = all ? [0, 90, 180, 270].flatMap(y => [[y, false], [y, true]]) : [[st.yaw, st.mirror]];
+  $('rank').disabled = true;
+  for (let i = 0; i < D.models.length; i++) {
+    const m = D.models[i];
+    if (m.n < 60) continue;
+    for (const [yaw, mir] of turns) {
+      const f = fit(ds, placed(pts(m), yaw, mir, [0, 0, 0]), le, true);
+      if (f.mark >= 0.05) res.push({ id: m.id, yaw, mirror: mir, ...f });
+    }
+    if (i % 8 === 0) { $('rank').textContent = `${Math.round(100 * i / D.models.length)} %`; await new Promise(r => setTimeout(r)); }
+  }
+  res.sort((x, y) => y.mark - x.mark);
+  st.ranked = res.slice(0, 25);
+  $('rank').disabled = false; $('rank').textContent = 'ранжировать все';
+  const box = $('list'); box.innerHTML = '';
+  for (const c of st.ranked) {
+    const m = modelById.get(c.id), r = document.createElement('div'); r.className = 'cand'; r.dataset.id = c.id;
+    r.innerHTML = `<b>${(c.exact * 100).toFixed(0)}</b>/<span>${(c.loose * 100).toFixed(0)}</span><span>${c.id}</span><span class="w" title="${m.where.join(', ')}">${c.yaw || c.mirror ? `${c.yaw}°${c.mirror ? ' зерк.' : ''} ` : ''}${m.where[0] || '—'}</span>`;
+    r.onclick = () => setModel(c.id, c.shift, c.yaw, c.mirror);
+    box.appendChild(r);
+  }
+  if (!st.ranked.length) box.innerHTML = '<div class="help" style="padding:6px">Ни одна модель не похожа.</div>';
+}
+
+// ---- controls
+$('shift').innerHTML = ['x', 'y', 'z'].map((n, i) => `<div class="grid3"><span class="dim">${n}</span><input type="number" step="0.5" id="s${n}"><button data-n="${i}" data-d="-1">−</button><button data-n="${i}" data-d="1">+</button></div>`).join('') +
+  '<div class="help">шаг кнопок <select id="step"><option>0.1</option><option selected>1</option><option>10</option><option>100</option></select> юн.</div>';
+['x', 'y', 'z'].forEach((n, i) => $('s' + n).oninput = e => { st.shift[i] = parseFloat(e.target.value) || 0; update(); });
+document.querySelectorAll('[data-n]').forEach(b => b.onclick = () => { st.shift[+b.dataset.n] += +b.dataset.d * parseFloat($('step').value); update(); });
+document.querySelectorAll('[data-yaw]').forEach(b => b.onclick = () => { st.yaw = +b.dataset.yaw; update(); });
+$('mirror').onclick = () => { st.mirror = !st.mirror; update(); };
+$('zero').onclick = () => { st.shift = [0, 0, 0]; update(); };
+$('refine').onclick = () => { if (!st.model) return; const ds = pts(D.areas[st.area]); st.shift = fit(ds, placed(pts(st.model), st.yaw, st.mirror, [0, 0, 0]), looseEps(ds), false).shift; update(); };
+$('table').onclick = () => { const a = D.areas[st.area]; if (a.ps2) setModel(a.ps2, a.shift || [0, 0, 0], 0, false); };
+$('rank').onclick = rank;
+document.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { filter = b.dataset.f; areasList(); });
+$('bind').onclick = () => bind(false); $('add').onclick = () => bind(true);
+$('unbind').onclick = () => { delete binds[D.areas[st.area].file]; saveBinds(); areasList(); outText(); draw(); };
+VIEWS.forEach((b, i) => b.onclick = () => { const was = st.view; st.view = i; if (i < 3) fitView(); else if (was < 3) home(); update(false); });
+$('fit').onclick = () => { if (st.view >= 3) home(); else { fitView(); draw(); } };
+$('scene').innerHTML = '<option value="">сцена PS2…</option>' + D.scenes.map((s, i) => `<option value="${i}">${s.scene}</option>`).join('');
+$('scene').onchange = () => {
+  const s = D.scenes[$('scene').value];
+  $('record').innerHTML = s ? s.records.flatMap(r => Object.entries(r.models).map(([slot, id]) => `<option value="${id}"${modelById.has(id) ? '' : ' disabled'}>#${r.record} ${slot} ${id}${modelById.has(id) ? ` · ${modelById.get(id).n}` : ' (мелкая)'}</option>`)).join('') : '';
+  if (s) $('record').onchange();
+};
+$('record').onchange = () => { const id = $('record').value; if (modelById.has(id)) setModel(id, st.shift, st.yaw, st.mirror); };
+let drag = null;
+cv.onmousedown = e => { drag = { x: e.clientX, y: e.clientY, py: e.clientY, move: e.shiftKey }; cv.style.cursor = 'grabbing'; };
+window.onmouseup = () => { if (drag && drag.move) update(); drag = null; cv.style.cursor = 'grab'; };
+window.onmousemove = e => {
+  if (!drag) return;
+  if (st.view >= 3) {
+    // in pixels: the flat views' zoom has nothing to do with the camera
+    const px = e.clientX - drag.x, py = e.clientY - drag.py;
+    drag.x = e.clientX;
+    if (drag.move && st.model) { const k = cam.speed * 0.004, r = [Math.cos(cam.yaw), -Math.sin(cam.yaw)], f = [Math.sin(cam.yaw), Math.cos(cam.yaw)]; st.shift[0] += (px * r[0] - py * f[0]) * k; st.shift[2] += (px * r[1] - py * f[1]) * k; update(false); }
+    else { cam.yaw -= px * 0.004; cam.pitch = Math.max(-1.5, Math.min(1.5, cam.pitch - py * 0.004)); }
+    drag.py = e.clientY; return;
+  }
+  const dx = (e.clientX - drag.x) / st.zoom, dy = (e.clientY - drag.y) / st.zoom * (flipY() ? -1 : 1), [a, b] = axes();
+  drag.x = e.clientX; drag.y = e.clientY;
+  if (drag.move && st.model) { st.shift[a] += dx; st.shift[b] += dy; update(false); }
+  else { st.cx -= dx; st.cy -= dy; draw(); }
+};
+cv.onwheel = e => { e.preventDefault(); st.zoom *= Math.exp(-e.deltaY * 0.0015); draw(); };
+glc.onmousedown = e => { drag = { x: e.clientX, y: e.clientY, py: e.clientY, move: e.shiftKey }; };
+glc.onwheel = e => { e.preventDefault(); cam.speed *= Math.exp(-e.deltaY * 0.002); };
+window.onresize = size;
+window.onkeyup = e => keys.delete(e.code);
+window.onblur = () => keys.clear();
+window.onkeydown = e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+  if (st.view >= 3) {
+    keys.add(e.code);
+    if (e.code === 'Digit1') layers(1); if (e.code === 'Digit2') layers(2); if (e.code === 'Digit3') layers(3);
+    if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
+    if (e.key !== 'j' && e.key !== 'k') return;
+  }
+  if (e.key === 'ArrowDown' || e.key === 'j') { pickArea(Math.min(D.areas.length - 1, st.area + 1)); e.preventDefault(); }
+  if (e.key === 'ArrowUp' || e.key === 'k') { pickArea(Math.max(0, st.area - 1)); e.preventDefault(); }
+};
+// a link may name the area and ask for the ranking: index.html#area=A68&rank=all (or rank=1: this turn only)
+const want = new URLSearchParams(location.hash.slice(1));
+size(); outText(); pickArea(Math.max(0, D.areas.findIndex(a => a.id === (want.get('area') || 'A00'))));
+if (want.get('view')) { st.view = want.get('view') === '3d2' ? 4 : 3; home(); update(false); }
+if (want.get('then')) setTimeout(() => pickArea(D.areas.findIndex(a => a.id === want.get('then'))), 3000);   // for tests: switch the area after a while
+if (want.get('rank')) { $('allrot').checked = want.get('rank') === 'all'; rank().then(() => { if (st.ranked && st.ranked[0]) { const c = st.ranked[0]; setModel(c.id, c.shift, c.yaw, c.mirror); } }); }
+</script>
+</body>
+</html>

@@ -268,6 +268,9 @@ struct Ult {
     size: Option<u32>,
     anchor: Option<u16>,
     only_mesh: bool,
+    /// What the model is made of, whatever it is bound to: two DS models may stand on one PS2 scene (a room and
+    /// its furniture), and the scene is then drawn once (`ult_once`).
+    source: u64,
     /// In the order of drawing (by pass).
     parts: Vec<UltPart>,
 }
@@ -387,7 +390,13 @@ impl Ult {
             let tris = m.idx[p.first as usize..(p.first + p.count) as usize].chunks_exact(3).map(|t| [texel(vert(t[0])), texel(vert(t[1])), texel(vert(t[2]))]).collect();
             parts.push(UltPart { key, tex, pal, tris });
         }
-        Some(Ult { model: b.model.clone(), size: b.size, anchor: b.mesh, only_mesh: b.only_mesh && b.mesh.is_some(), parts })
+        // FNV-1a over the places and the triangles
+        let mut source = 0xcbf2_9ce4_8422_2325u64;
+        let bytes = m.verts.iter().flat_map(|v| v.pos).flat_map(f32::to_le_bytes).chain(m.idx.iter().flat_map(|i| i.to_le_bytes()));
+        for x in bytes {
+            source = (source ^ x as u64).wrapping_mul(0x0100_0000_01b3);
+        }
+        Some(Ult { model: b.model.clone(), size: b.size, anchor: b.mesh, only_mesh: b.only_mesh && b.mesh.is_some(), source, parts })
     }
 
     fn from_env() -> Vec<Ult> {
@@ -425,6 +434,19 @@ impl Ult {
             }
         }
     }
+}
+
+/// Of the frame's replacements, the first of each source stays: the DS models that stand on one PS2 scene are
+/// all hidden, and the scene is drawn once.
+fn ult_once<T>(at: &mut Vec<T>, source: impl Fn(&T) -> u64) {
+    let mut seen: Vec<u64> = Vec::new();
+    at.retain(|c| {
+        let s = source(c);
+        !seen.contains(&s) && {
+            seen.push(s);
+            true
+        }
+    });
 }
 
 /// A batch whose display list was copied to GXFIFO by the CPU: where its polygons begin, its entry in the frame's
@@ -1052,6 +1074,8 @@ impl Nds {
                 g.ult_at_r.push((u, c.2, c.3));
             }
         }
+        let Gx { ult, ult_at_r, .. } = &mut *g;
+        ult_once(ult_at_r, |c| ult[c.0].source);
         g.ult_seen.clear();
     }
 
@@ -2021,6 +2045,21 @@ fn gpu_or_software(job: &super::render3d::Job, scale: usize, gpu: impl FnOnce() 
     match gpu() {
         Ok(v) => (v, None),
         Err(e) => (super::render3d::render(job, scale), Some(e)),
+    }
+}
+
+#[cfg(test)]
+mod ult_tests {
+    #[test]
+    fn two_ds_models_on_one_ps2_scene_draw_it_once() {
+        // replacements 0 and 2 are made of the same PS2 model, 1 of another
+        let source = [7u64, 9, 7];
+        let mut at = vec![(0usize, 'a'), (1, 'b'), (2, 'c')];
+        super::ult_once(&mut at, |c| source[c.0]);
+        assert_eq!(at, [(0, 'a'), (1, 'b')], "the first of each source, in the frame's order");
+        let mut none: Vec<(usize, char)> = Vec::new();
+        super::ult_once(&mut none, |c| source[c.0]);
+        assert!(none.is_empty());
     }
 }
 

@@ -1,0 +1,14 @@
+# DS areas that several PS2 models stand for together (by hand; tools/ult/build_areas.py reads it after areas.toml
+# and it wins). shift: PS2 model -> DS model space.
+#
+# The parking lot was tried on 2026-11-12 and is off: where the DS has the lot, the PS2 world has a garden
+# (docs/ULTIMATE-IMPORT.md, "парковка"; artifacts/ult/u52_parking_*). Kept as the pattern of an entry:
+#
+# [[area]]
+# file = "Model/Area/A68/A68_00.nsbmd.z"
+# model = "no68_parking"
+# models = [
+#   { ps2 = "3320f342fa", shift = [0.0, 0.0, 0.0] },  # the hotel's back
+#   { ps2 = "c5e8223bd5", shift = [0.0, 0.0, 0.0] },  # the hut
+#   { ps2 = "85f5dcbc80", shift = [0.0, 0.0, 0.0] },  # the road
+# ]
