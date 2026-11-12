@@ -79,6 +79,9 @@ struct Args {
     /// A 2D pack (a folder of pictures or a data file with a 2D part) that replaces sprites and background layers.
     #[arg(long, value_name = "DIR|FILE")]
     pack_2d: Option<PathBuf>,
+    /// A texture pack (a folder of pictures or a data file with a texture part) that replaces the 3D textures.
+    #[arg(long, value_name = "DIR|FILE")]
+    texture_pack: Option<PathBuf>,
     /// The variant of a 2D pack group to draw, `group=variant` (repeatable; `original` is the game's own sprites).
     #[arg(long, value_name = "GROUP=VARIANT")]
     pack_variant: Vec<String>,
@@ -445,6 +448,9 @@ fn run(a: Args) -> Result<(), String> {
     sunpetal_runtime::nds::set_wide(a.wide.unwrap_or(0));
     if let Some(n) = a.scale {
         sunpetal_runtime::nds::set_scale(n);
+    }
+    if let Some(p) = &a.texture_pack {
+        sunpetal_runtime::nds::set_texture_pack(Some(p))?;
     }
     if let Some(p) = &a.pack_2d {
         let n = sunpetal_runtime::nds::set_pack_2d(Some(p))?;
