@@ -604,37 +604,13 @@ fn mesh_triangles_add_up_to_the_exports_counts() {
 
 #[test]
 fn anim_section_holds_every_motion_and_round_trips() {
-    use sunpetal_data::anim::{key_from_hex, Anim};
-    use sunpetal_data::ps2::{gim, lf, sha1::sha1_hex};
+    use sunpetal_data::anim::Anim;
     let (Some(iso), Some(export)) = (env("SUNPETAL_PS2_ISO"), env("SUNPETAL_PS2_EXPORT")) else {
         return;
     };
     let roles = std::fs::read_to_string(export.join("../../assets/roles.tsv")).unwrap();
     let mut iso = Iso::open(File::open(iso).unwrap()).unwrap();
-    let mut files = std::collections::HashMap::new();
-    let mut anim = Anim::default();
-    for l in roles.lines().skip(1) {
-        let c: Vec<&str> = l.split('\t').collect();
-        if c[4] != "MotionPack" {
-            continue;
-        }
-        let path = load_file(&mut iso, &mut files, c[0]);
-        let raw = &files[&path];
-        let pk = lf::parse(raw).unwrap().data(raw, c[1].parse().unwrap()).unwrap().to_vec();
-        let items = gim::pack_items(&pk).unwrap();
-        for &(id, off) in &items {
-            if pk.get(off..off + 8) != Some(&gim::MAGIC[..]) {
-                continue;
-            }
-            let Ok(m) = gim::parse(&pk[off..]) else { continue };
-            let next = items.iter().map(|i| i.1).filter(|&x| x > off).min().unwrap_or(pk.len());
-            let key = key_from_hex(&sha1_hex(&pk[off..next])[..10]).unwrap();
-            if !anim.motions.iter().any(|x| x.0 == key) {
-                anim.motions.push((key, m));
-            }
-            anim.ids.push((c[0].to_string(), id, key));
-        }
-    }
+    let anim = Anim::from_disc(&mut iso, &roles).unwrap();
     let bytes = anim.encode();
     eprintln!("{} motions, {} ids, {} bytes", anim.motions.len(), anim.ids.len(), bytes.len());
     assert_eq!(anim.motions.len(), 399);

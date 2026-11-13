@@ -26,7 +26,7 @@ import sys
 
 ANY_PALETTE = (1 << 64) - 1
 MAGIC = b'SPDATA\0\1'
-NAME = re.compile(r'^(\d+)x(\d+)_(\d)_([0-9a-f]{16})_([0-9a-f]{16})\.png$')
+NAME = re.compile(r'^(\d+)x(\d+)_(\d+)_([0-9a-f]{16})_([0-9a-f]{16})\.png$')
 
 
 def file_name(key):

@@ -1,12 +1,14 @@
 //! The data builder: makes `sunpetal.data` from the player's own copies of the game.
 //!
 //!     sunpetal-build --rom GAME.nds [--disc GAME.iso] [--textures PACK.spdata] [--translation FILE.spdata]...
-//!                    [--out sunpetal.data] [--cache DIR] [--dump DIR] [--tools DIR] [--python python3]
+//!                    [--ult-export DIR] [--out sunpetal.data] [--cache DIR] [--dump DIR] [--tools DIR] [--python python3]
 //!
 //! The ROM goes in as it is (the `NDS ` section). With `--disc` the PS2 disc's pictures are matched
 //! with the DS textures by `tools/build-data.py` (a quarter of an hour the first time; the result is
 //! kept in `--cache` by the ROM and the disc, and used again). `--textures` takes a texture file
 //! already made. Each `--translation` file brings its translations in (they must be for this ROM).
+//! `--ult-export DIR` (with `--disc`; the export of `sunpetal-ee`, `out/export/v1`) adds the models stage: the PS2
+//! models of `data/ult/areas.toml` as `MODL`, their pictures as one more `TEXS`, and the disc's motions as `ANIM`.
 //! A part left out is not in the file. The result is whole or not there, and carries `META`.
 //! The file holds the game: it is for the machine it is built on and never shared.
 use std::path::PathBuf;
@@ -36,6 +38,7 @@ fn say(s: &str) {
 fn run() -> Result<(), String> {
     let mut args = std::env::args().skip(1);
     let (mut rom, mut disc, mut textures, mut out, mut cache, mut dump) = (None, None, None, PathBuf::from("sunpetal.data"), None, None);
+    let mut ult_export: Option<PathBuf> = None;
     let (mut tools, mut python) = (PathBuf::from("tools"), "python3".to_string());
     let mut translations: Vec<PathBuf> = Vec::new();
     while let Some(a) = args.next() {
@@ -45,6 +48,7 @@ fn run() -> Result<(), String> {
             "--disc" => disc = Some(PathBuf::from(v()?)),
             "--textures" => textures = Some(PathBuf::from(v()?)),
             "--translation" => translations.push(PathBuf::from(v()?)),
+            "--ult-export" => ult_export = Some(PathBuf::from(v()?)),
             "--out" => out = PathBuf::from(v()?),
             "--cache" => cache = Some(PathBuf::from(v()?)),
             "--dump" => dump = Some(PathBuf::from(v()?)),
@@ -58,6 +62,9 @@ fn run() -> Result<(), String> {
     };
     if disc.is_some() && textures.is_some() {
         return Err("--disc and --textures both give the textures: take one".into());
+    }
+    if ult_export.is_some() && disc.is_none() {
+        return Err("--ult-export needs --disc".into());
     }
     let t0 = Instant::now();
 
@@ -113,6 +120,44 @@ fn run() -> Result<(), String> {
         c.sections.extend(t.sections.into_iter().filter(|s| &s.tag == b"TEXS"));
     } else {
         say("PS2 textures: none (no --disc or --textures)");
+    }
+
+    if let (Some(export), Some(disc)) = (&ult_export, &disc) {
+        let t = Instant::now();
+        let cache = cache.clone().unwrap_or_else(|| PathBuf::from("build/cache"));
+        let work = cache.join(format!("ult-{:08X}-{}", crc, fingerprint(disc)?));
+        let run = |cmd: &mut Command, what: &str| -> Result<(), String> {
+            let st = cmd.status().map_err(|e| format!("{}: {}", python, e))?;
+            st.success().then_some(()).ok_or_else(|| format!("{} failed (see above)", what))
+        };
+        let areas = tools.join("ult").join("build_areas.py");
+        let pack_tool = tools.join("ps2").join("spdata.py");
+        for f in [&areas, &pack_tool] {
+            if !f.is_file() {
+                return Err(format!("{} not found (--tools DIR)", f.display()));
+            }
+        }
+        say(&format!("PS2 models: {} -> {}", export.display(), work.display()));
+        let _ = std::fs::remove_dir_all(&work);
+        run(Command::new(&python).arg(&areas).arg(&rom_path).arg(export).arg(&work), "build_areas.py")?;
+        let pictures = work.join("pictures.spdata");
+        run(Command::new(&python).arg(&pack_tool).arg("pack").arg(work.join("pack")).arg(&pictures), "spdata.py pack")?;
+        let part = sunpetal_data::models::pack_dir(&work.join("models"))?;
+        let n = sunpetal_data::models::entries(&part)?.len();
+        say(&format!("  {} models, {} bytes", n, part.len()));
+        c.add(sunpetal_data::models::TAG, part);
+        let pics = Container::read(&pictures)?;
+        let np = pics.all(b"TEXS").count();
+        c.sections.extend(pics.sections.into_iter().filter(|s| &s.tag == b"TEXS"));
+        say(&format!("  {} picture section", np));
+
+        let roles = std::fs::read_to_string(export.join("../../assets/roles.tsv")).map_err(|e| format!("roles.tsv beside the export: {}", e))?;
+        let mut iso = sunpetal_data::ps2::iso::Iso::open(std::fs::File::open(disc).map_err(|e| format!("{}: {}", disc.display(), e))?)?;
+        let anim = sunpetal_data::anim::Anim::from_disc(&mut iso, &roles)?;
+        let bytes = anim.pack();
+        say(&format!("  {} motions, {} ids, {} bytes", anim.motions.len(), anim.ids.len(), bytes.len()));
+        c.add(sunpetal_data::anim::TAG, bytes);
+        say(&format!("PS2 models stage: {:.1} s", t.elapsed().as_secs_f32()));
     }
 
     for p in &translations {

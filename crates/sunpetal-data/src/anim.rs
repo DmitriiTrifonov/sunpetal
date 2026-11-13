@@ -16,6 +16,8 @@
 use crate::ps2::gim::{Joint, Key, Motion};
 
 pub const VERSION: u32 = 2;
+/// The section tag; the section holds `pack()`: the encoding under `lz10`.
+pub const TAG: &[u8; 4] = b"ANIM";
 pub type MotionKey = [u8; 5];
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -38,6 +40,44 @@ pub fn key_from_hex(h: &str) -> Option<MotionKey> {
 }
 
 impl Anim {
+    /// Every motion of the disc's `MotionPack` records named by the export's `roles.tsv` (columns: file, record,
+    /// …, role at 4), one motion once whatever the number of scenes that name it.
+    pub fn from_disc<R: std::io::Read + std::io::Seek>(iso: &mut crate::ps2::iso::Iso<R>, roles: &str) -> Result<Anim, String> {
+        use crate::ps2::{gim, lf, sha1::sha1_hex};
+        let all: Vec<String> = iso.files()?.into_iter().map(|f| f.0).collect();
+        let mut files: std::collections::HashMap<String, Vec<u8>> = Default::default();
+        let mut anim = Anim::default();
+        for l in roles.lines().skip(1) {
+            let c: Vec<&str> = l.split('\t').collect();
+            if c.len() < 5 || c[4] != "MotionPack" {
+                continue;
+            }
+            // the tables name a file as "R00.BIN", "event/R03.BIN" (a folder per file on the disc): find it by name
+            let base = c[0].rsplit('/').next().unwrap().to_uppercase();
+            let path = all.iter().find(|p| p.to_uppercase().ends_with(&format!("/{base}"))).ok_or_else(|| format!("no {} on the disc", c[0]))?;
+            if !files.contains_key(path) {
+                files.insert(path.clone(), iso.file(path)?);
+            }
+            let raw = &files[path];
+            let rec = c[1].parse().map_err(|_| format!("roles: bad record {}", c[1]))?;
+            let pk = lf::parse(raw)?.data(raw, rec).ok_or_else(|| format!("{}: no record {rec}", c[0]))?.to_vec();
+            let items = gim::pack_items(&pk)?;
+            for &(id, off) in &items {
+                if pk.get(off..off + 8) != Some(&gim::MAGIC[..]) {
+                    continue;
+                }
+                let Ok(m) = gim::parse(&pk[off..]) else { continue };
+                let next = items.iter().map(|i| i.1).filter(|&x| x > off).min().unwrap_or(pk.len());
+                let key = key_from_hex(&sha1_hex(&pk[off..next])[..10]).ok_or("bad motion key")?;
+                if !anim.motions.iter().any(|x| x.0 == key) {
+                    anim.motions.push((key, m));
+                }
+                anim.ids.push((c[0].to_string(), id, key));
+            }
+        }
+        Ok(anim)
+    }
+
     pub fn encode(&self) -> Vec<u8> {
         let mut tracks: Vec<Vec<u8>> = Vec::new();
         let mut index = std::collections::HashMap::new();
@@ -82,6 +122,14 @@ impl Anim {
             o.extend_from_slice(key);
         }
         o
+    }
+
+    pub fn pack(&self) -> Vec<u8> {
+        crate::lz10::compress(&self.encode())
+    }
+
+    pub fn unpack(d: &[u8]) -> Result<Anim, String> {
+        Anim::decode(&crate::lz10::decompress(d)?)
     }
 
     pub fn decode(d: &[u8]) -> Result<Anim, String> {
@@ -245,6 +293,7 @@ mod tests {
     fn a_table_of_motions_round_trips() {
         let a = sample();
         assert_eq!(Anim::decode(&a.encode()).unwrap(), a);
+        assert_eq!(Anim::unpack(&a.pack()).unwrap(), a);
         assert_eq!(a.motion("R00", 366).unwrap().range, 9);
         assert!(a.motion("R00", 1).is_none());
     }

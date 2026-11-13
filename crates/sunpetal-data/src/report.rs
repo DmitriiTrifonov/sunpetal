@@ -28,6 +28,8 @@ pub fn report(path: &Path) -> Result<String, String> {
                     b"TEXS" => "PS2 textures",
                     b"TRAN" => "a translation",
                     b"2DPK" => "2D pictures",
+                    b"MODL" => "3D models",
+                    b"ANIM" => "PS2 motions",
                     _ => "(a part this program does not know)",
                 };
                 o += &format!("  {}  {:>9}  CRC-32 {:08X}  {}\n", String::from_utf8_lossy(&p.tag), size(p.len), p.crc, what);
