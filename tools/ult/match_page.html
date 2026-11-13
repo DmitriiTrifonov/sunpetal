@@ -48,7 +48,7 @@
 <main>
   <canvas id="cv"></canvas>
   <canvas id="gl" style="display:none"></canvas>
-  <div class="pill" id="hint3d" style="position:absolute; left:10px; bottom:8px; display:none">W A S D — полёт · Q / E — вниз / вверх · мышь — взгляд · колесо — скорость · 1 / 2 / 3 — DS / PS2 / оба (DS полупрозрачно поверх) · Shift + мышь — двигать PS2 · <span id="speed"></span></div>
+  <div class="pill" id="hint3d" style="position:absolute; left:10px; bottom:8px; display:none">W A S D — полёт · Q / E — вниз / вверх · мышь — взгляд · колесо — скорость · 1 / 2 / 3 — DS / PS2 / оба (DS полупрозрачно поверх) · Shift + мышь — двигать PS2 · клик по PS2 — выбрать текстуру, M — пометить «UV не так» · <span id="speed"></span></div>
   <div id="mid" style="position:absolute; top:0; bottom:0; left:50%; width:1px; background:var(--line); display:none"></div>
   <div class="hud">
     <span class="pill" id="title"></span>
@@ -81,6 +81,12 @@
   <h2>Кандидаты <button id="rank" style="float:right; margin-top:-4px">ранжировать все</button></h2>
   <label class="help"><input type="checkbox" id="allrot"> пробовать 4 поворота и зеркало (в 8 раз дольше)</label>
   <div id="list"></div>
+  <h2>Текстуры с кривым UV <span id="nMarks" class="dim"></span></h2>
+  <div class="help">В 3D кликните по поверхности PS2 (она подсветится жёлтым), «пометить» — красным; жми <b>M</b>, чтобы пометить выбранное. Пометки хранятся в браузере.</div>
+  <div class="help" id="sel"></div>
+  <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px"><input id="note" placeholder="заметка" style="flex:1; min-width:0"><button id="markBtn">пометить: UV не так</button><button id="doneBtn">исправлено ✓</button><button id="nextBtn">дальше ▶</button></div>
+  <div id="marks" style="max-height:150px; overflow:auto; border:1px solid var(--line); border-radius:4px"></div>
+  <textarea id="marksOut" readonly style="height:70px; margin-top:6px"></textarea>
   <h2>Привязки</h2>
   <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px">
     <button id="bind">привязать к карте</button><button id="add">добавить вторую модель</button><button id="unbind">снять с карты</button>
@@ -243,7 +249,7 @@ function mesh(k, path, ds) {
   const m = { parts: null }; meshes.set(k, m);
   load(k, path).then(async d => {
     const texs = await Promise.all(d.textures.map(async t => texture(t.url || await load('tex:' + t.name, `tex/${t.name}.js`), ds)));
-    m.parts = d.parts.map(p => ({ n: p.n, tex: p.tex >= 0 ? texs[p.tex] : null, pos: buffer(f32(p.pos)), uv: buffer(f32(p.uv)), col: buffer(u8(p.col)) }));
+    m.parts = d.parts.map(p => ({ id: k, name: p.tex >= 0 ? d.textures[p.tex].name : null, cpu: f32(p.pos), n: p.n, tex: p.tex >= 0 ? texs[p.tex] : null, pos: buffer(f32(p.pos)), uv: buffer(f32(p.uv)), col: buffer(u8(p.col)) }));
   }).catch(e => { $('score').textContent = 'нет файла 3D: ' + e.message + ' (пересоберите страницу match_page.py)'; });
   return null;
 }
@@ -254,13 +260,14 @@ function program() {
   gl.attachShader(p, sh(gl.VERTEX_SHADER, `attribute vec3 aPos; attribute vec2 aUV; attribute vec3 aCol; uniform mat4 uVP, uM; varying vec2 vUV; varying vec3 vCol, vW;
     void main() { vec4 w = uM * vec4(aPos, 1.0); vW = w.xyz; vUV = aUV; vCol = aCol; gl_Position = uVP * w; }`));
   gl.attachShader(p, sh(gl.FRAGMENT_SHADER, `#extension GL_OES_standard_derivatives : enable
-    precision highp float; uniform sampler2D uTex; uniform float uHasTex, uColScale, uAlpha; varying vec2 vUV; varying vec3 vCol, vW;
+    precision highp float; uniform sampler2D uTex; uniform float uHasTex, uColScale, uAlpha, uMark; varying vec2 vUV; varying vec3 vCol, vW;
     void main() { vec4 t = uHasTex > 0.5 ? texture2D(uTex, vUV) : vec4(0.8, 0.8, 0.8, 1.0); if (t.a < 0.35) discard;
       vec3 n = normalize(cross(dFdx(vW), dFdy(vW))); float l = 0.7 + 0.3 * abs(dot(n, normalize(vec3(0.4, 0.8, 0.3))));
-      gl_FragColor = vec4(t.rgb * min(vCol * uColScale, vec3(1.5)) * l, uAlpha); }`));
+      vec3 c = t.rgb * min(vCol * uColScale, vec3(1.5)) * l; if (uMark > 1.5) c = mix(c, vec3(1.0, 0.9, 0.1), 0.5); else if (uMark > 0.5) c = mix(c, vec3(1.0, 0.1, 0.1), 0.5);
+      gl_FragColor = vec4(c, uAlpha); }`));
   gl.linkProgram(p);
   if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
-  const o = { p }; for (const n of ['aPos', 'aUV', 'aCol']) o[n] = gl.getAttribLocation(p, n); for (const n of ['uVP', 'uM', 'uTex', 'uHasTex', 'uColScale', 'uAlpha']) o[n] = gl.getUniformLocation(p, n);
+  const o = { p }; for (const n of ['aPos', 'aUV', 'aCol']) o[n] = gl.getAttribLocation(p, n); for (const n of ['uVP', 'uM', 'uTex', 'uHasTex', 'uColScale', 'uAlpha', 'uMark']) o[n] = gl.getUniformLocation(p, n);
   return o;
 }
 // column-major 4 x 4
@@ -287,9 +294,92 @@ function drawParts(parts, m, scale) {
     gl.bindBuffer(gl.ARRAY_BUFFER, p.pos); gl.vertexAttribPointer(prog.aPos, 3, gl.FLOAT, false, 0, 0);
     gl.bindBuffer(gl.ARRAY_BUFFER, p.uv); gl.vertexAttribPointer(prog.aUV, 2, gl.FLOAT, false, 0, 0);
     gl.bindBuffer(gl.ARRAY_BUFFER, p.col); gl.vertexAttribPointer(prog.aCol, 3, gl.UNSIGNED_BYTE, true, 0, 0);
-    gl.uniform1f(prog.uHasTex, p.tex ? 1 : 0); if (p.tex) gl.bindTexture(gl.TEXTURE_2D, p.tex);
+    gl.uniform1f(prog.uMark, markOf(p)); gl.uniform1f(prog.uHasTex, p.tex ? 1 : 0); if (p.tex) gl.bindTexture(gl.TEXTURE_2D, p.tex);
     gl.drawArrays(gl.TRIANGLES, 0, p.n);
   }
+}
+function psItems() {
+  const a = D.areas[st.area], ps = [];
+  if (st.model) ps.push([mesh('ps2:' + st.model.id, `models/${st.model.id}.js`, false), placeMatrix(st), st.model.id]);
+  for (const b of (binds[a.file] || [])) if (!st.model || b.ps2 !== st.model.id) ps.push([mesh('ps2:' + b.ps2, `models/${b.ps2}.js`, false), placeMatrix(b), b.ps2]);
+  return ps;
+}
+// ---- marks: textures that lie wrong (UV), to go through again
+let marks = {}, picked = null;
+try { marks = JSON.parse(localStorage.getItem('sunpetal-ult-marks') || '{}'); } catch (e) { marks = {}; }
+const saveMarks = () => { try { localStorage.setItem('sunpetal-ult-marks', JSON.stringify(marks)); } catch (e) {} };
+const markKey = (id, name) => id + '|' + name;
+function markOf(p) {
+  if (!p.name) return 0;
+  const k = markKey(p.id, p.name);
+  if (picked && picked.key === k) return 2;
+  return marks[k] && !marks[k].done ? 1 : 0;
+}
+// the ray through a click (the camera of viewProj: f forward, r to the left, u up)
+function pickAt(e) {
+  const rc = glc.getBoundingClientRect(), d = devicePixelRatio || 1, W = glc.width, H = glc.height, x = (e.clientX - rc.left) * d, y = (e.clientY - rc.top) * d;
+  let x0 = 0, w = W;
+  if (st.view === 4) { if (x < W / 2) return; x0 = W >> 1; w = W - (W >> 1); }
+  const f = [Math.sin(cam.yaw) * Math.cos(cam.pitch), Math.sin(cam.pitch), Math.cos(cam.yaw) * Math.cos(cam.pitch)], r = [Math.cos(cam.yaw), 0, -Math.sin(cam.yaw)];
+  const u = [f[1] * r[2] - f[2] * r[1], f[2] * r[0] - f[0] * r[2], f[0] * r[1] - f[1] * r[0]], t = Math.tan(0.5), nx = ((x - x0) / w) * 2 - 1, ny = 1 - (y / H) * 2, asp = w / H;
+  const dir = [0, 1, 2].map(i => f[i] - r[i] * nx * asp * t + u[i] * ny * t), o = cam.p;
+  let best = null;
+  for (const [parts, m, id] of psItems()) {
+    if (!parts) continue;
+    for (const p of parts) {
+      if (!p.name) continue;
+      const c = p.cpu, v = new Float32Array(c.length);
+      for (let i = 0; i < c.length; i += 3) for (let a = 0; a < 3; a++) v[i + a] = m[a] * c[i] + m[4 + a] * c[i + 1] + m[8 + a] * c[i + 2] + m[12 + a];
+      for (let i = 0; i + 8 < v.length; i += 9) {
+        const e1 = [v[i + 3] - v[i], v[i + 4] - v[i + 1], v[i + 5] - v[i + 2]], e2 = [v[i + 6] - v[i], v[i + 7] - v[i + 1], v[i + 8] - v[i + 2]];
+        const pv = [dir[1] * e2[2] - dir[2] * e2[1], dir[2] * e2[0] - dir[0] * e2[2], dir[0] * e2[1] - dir[1] * e2[0]], det = e1[0] * pv[0] + e1[1] * pv[1] + e1[2] * pv[2];
+        if (Math.abs(det) < 1e-12) continue;
+        const tv = [o[0] - v[i], o[1] - v[i + 1], o[2] - v[i + 2]], a1 = (tv[0] * pv[0] + tv[1] * pv[1] + tv[2] * pv[2]) / det;
+        if (a1 < 0 || a1 > 1) continue;
+        const qv = [tv[1] * e1[2] - tv[2] * e1[1], tv[2] * e1[0] - tv[0] * e1[2], tv[0] * e1[1] - tv[1] * e1[0]], b1 = (dir[0] * qv[0] + dir[1] * qv[1] + dir[2] * qv[2]) / det;
+        if (b1 < 0 || a1 + b1 > 1) continue;
+        const dist = (e2[0] * qv[0] + e2[1] * qv[1] + e2[2] * qv[2]) / det;
+        if (dist > 0 && (!best || dist < best.dist)) best = { dist, id, name: p.name, key: markKey(id, p.name), pt: [0, 1, 2].map(k => o[k] + dir[k] * dist) };
+      }
+    }
+  }
+  picked = best; marksUi();
+}
+function toggleMark(note) {
+  if (!picked) return;
+  const k = picked.key;
+  if (marks[k]) delete marks[k];
+  else marks[k] = { model: picked.id, tex: picked.name, area: D.areas[st.area].id, pt: picked.pt, cam: { p: cam.p.slice(), yaw: cam.yaw, pitch: cam.pitch }, state: { shift: st.shift.slice(), yaw: st.yaw, mirror: st.mirror }, note: note || '', done: false, at: Date.now() };
+  saveMarks(); marksUi();
+}
+function goMark(k) {
+  const m = marks[k]; if (!m) return;
+  const i = D.areas.findIndex(a => a.id === m.area);
+  if (i >= 0 && i !== st.area) pickArea(i);
+  setModel(m.model, m.state.shift, m.state.yaw, m.state.mirror, false);
+  if (st.view < 3) { st.view = 3; }
+  home(); cam.p = m.cam.p.slice(); cam.yaw = m.cam.yaw; cam.pitch = m.cam.pitch; layers(2);
+  picked = { id: m.model, name: m.tex, key: k, pt: m.pt }; update(false); marksUi();
+}
+function nextMark() {
+  const open = Object.keys(marks).filter(k => !marks[k].done).sort((a, b) => marks[a].at - marks[b].at);
+  if (!open.length) return;
+  const at = picked ? open.indexOf(picked.key) : -1;
+  goMark(open[(at + 1) % open.length]);
+}
+function marksUi() {
+  const keys = Object.keys(marks), open = keys.filter(k => !marks[k].done);
+  $('sel').textContent = picked ? `${picked.id} · ${picked.name}` + (marks[picked.key] ? (marks[picked.key].done ? ' · помечена, исправлена' : ' · помечена') : '') : 'нажмите на поверхность PS2 в 3D';
+  $('markBtn').textContent = picked && marks[picked.key] ? 'снять пометку' : 'пометить: UV не так';
+  $('markBtn').disabled = !picked; $('doneBtn').disabled = !(picked && marks[picked.key]);
+  $('nMarks').textContent = `· открыто ${open.length} из ${keys.length}`;
+  const box = $('marks'); box.innerHTML = '';
+  for (const k of keys.sort((a, b) => marks[b].at - marks[a].at)) {
+    const m = marks[k], r = document.createElement('div'); r.className = 'cand' + (picked && picked.key === k ? ' on' : '');
+    r.innerHTML = `<span>${m.done ? '✓' : '●'}</span><span>${m.area}</span><span class="w" title="${m.model} ${m.tex}${m.note ? ' — ' + m.note : ''}">${m.model.slice(0, 6)} ${m.tex.slice(0, 14)}${m.note ? ' — ' + m.note : ''}</span>`;
+    r.onclick = () => goMark(k); box.appendChild(r);
+  }
+  $('marksOut').value = keys.map(k => `${marks[k].done ? 'done' : 'open'}\t${marks[k].area}\t${marks[k].model}\t${marks[k].tex}\t${marks[k].note}`).join('\n') || '# пометок нет';
 }
 function frame(now) {
   if (st.view < 3) { running = false; return; }
@@ -306,9 +396,7 @@ function frame(now) {
   gl.enable(gl.DEPTH_TEST); gl.enable(gl.SCISSOR_TEST); gl.useProgram(prog.p); gl.uniform1i(prog.uTex, 0);
   for (const n of ['aPos', 'aUV', 'aCol']) gl.enableVertexAttribArray(prog[n]);
   const ds = mesh('ds:' + a.id, `areas/${a.id}.js`, true);
-  const ps = [];
-  if (st.model) ps.push([mesh('ps2:' + st.model.id, `models/${st.model.id}.js`, false), placeMatrix(st)]);
-  for (const b of (binds[a.file] || [])) if (!st.model || b.ps2 !== st.model.id) ps.push([mesh('ps2:' + b.ps2, `models/${b.ps2}.js`, false), placeMatrix(b)]);
+  const ps = psItems();
   for (const [x, w, what] of (split ? [[0, W >> 1, 'ds'], [W >> 1, W - (W >> 1), 'ps']] : [[0, W, 'both']])) {
     gl.viewport(x, 0, w, H); gl.scissor(x, 0, w, H); gl.clearColor(bg[0], bg[1], bg[2], 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.uniformMatrix4fv(prog.uVP, false, viewProj(w / H));
@@ -467,7 +555,7 @@ $('scene').onchange = () => {
 $('record').onchange = () => { const id = $('record').value; if (modelById.has(id)) setModel(id, st.shift, st.yaw, st.mirror); };
 let drag = null;
 cv.onmousedown = e => { drag = { x: e.clientX, y: e.clientY, py: e.clientY, move: e.shiftKey }; cv.style.cursor = 'grabbing'; };
-window.onmouseup = () => { if (drag && drag.move) update(); drag = null; cv.style.cursor = 'grab'; };
+window.onmouseup = e => { if (drag && drag.move) update(); if (drag && drag.sx != null && !drag.move && st.view >= 3 && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 4) pickAt(e); drag = null; cv.style.cursor = 'grab'; };
 window.onmousemove = e => {
   if (!drag) return;
   if (st.view >= 3) {
@@ -484,7 +572,10 @@ window.onmousemove = e => {
   else { st.cx -= dx; st.cy -= dy; draw(); }
 };
 cv.onwheel = e => { e.preventDefault(); st.zoom *= Math.exp(-e.deltaY * 0.0015); draw(); };
-glc.onmousedown = e => { drag = { x: e.clientX, y: e.clientY, py: e.clientY, move: e.shiftKey }; };
+glc.onmousedown = e => { drag = { x: e.clientX, y: e.clientY, py: e.clientY, sx: e.clientX, sy: e.clientY, move: e.shiftKey }; };
+$('markBtn').onclick = () => { toggleMark($('note').value); $('note').value = ''; };
+$('doneBtn').onclick = () => { if (picked && marks[picked.key]) { marks[picked.key].done = !marks[picked.key].done; saveMarks(); marksUi(); } };
+$('nextBtn').onclick = nextMark;
 glc.onwheel = e => { e.preventDefault(); cam.speed *= Math.exp(-e.deltaY * 0.002); };
 window.onresize = size;
 window.onkeyup = e => keys.delete(e.code);
@@ -493,6 +584,7 @@ window.onkeydown = e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
   if (st.view >= 3) {
     keys.add(e.code);
+    if (e.code === 'KeyM') toggleMark('');
     if (e.code === 'Digit1') layers(1); if (e.code === 'Digit2') layers(2); if (e.code === 'Digit3') layers(3);
     if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
     if (e.key !== 'j' && e.key !== 'k') return;
@@ -502,7 +594,7 @@ window.onkeydown = e => {
 };
 // a link may name the area and ask for the ranking: index.html#area=A68&rank=all (or rank=1: this turn only)
 const want = new URLSearchParams(location.hash.slice(1));
-size(); outText(); pickArea(Math.max(0, D.areas.findIndex(a => a.id === (want.get('area') || 'A00'))));
+size(); outText(); marksUi(); pickArea(Math.max(0, D.areas.findIndex(a => a.id === (want.get('area') || 'A00'))));
 if (want.get('view')) { st.view = want.get('view') === '3d2' ? 4 : 3; home(); update(false); }
 if (want.get('then')) setTimeout(() => pickArea(D.areas.findIndex(a => a.id === want.get('then'))), 3000);   // for tests: switch the area after a while
 if (want.get('rank')) { $('allrot').checked = want.get('rank') === 'all'; rank().then(() => { if (st.ranked && st.ranked[0]) { const c = st.ranked[0]; setModel(c.id, c.shift, c.yaw, c.mirror); } }); }
