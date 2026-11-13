@@ -1,7 +1,7 @@
 """mkswap5.py OUT rev vflip [flipfront]: подмена по ключу, E из orient (perm/signs/scale/offset)"""
 import sys,struct,math
 sys.path.insert(0,'tools/ps2')
-import lf,g101_verts as g
+import lf,ps2mesh as g
 out,rev,vflip=sys.argv[1],int(sys.argv[2]),int(sys.argv[3]); ff=int(sys.argv[4]) if len(sys.argv)>4 else 1
 import os
 perm=(0,2,1);sg=[-1,1,1];sc=float(os.environ.get('SC',0.04));off=[0.0002,-0.2,-0.6166]

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Каталог моделей PS2 (K-125): все архивы LF → OBJ + текстуры + миниатюры + индекс (только чтение).
 
-    catalog.py [--no-nodes] RAWDIR OUTDIR [ARCHIVE.BIN ...]   по умолчанию все *.BIN из RAWDIR
+    catalog.py RAWDIR OUTDIR [ARCHIVE.BIN ...]   по умолчанию все *.BIN из RAWDIR
 
-Части с таблицей узлов (машины, K-184) ставятся по узлам (`g101_nodes.place`); `--no-nodes` — как было.
+Вершины в позе покоя: кость вершины и InitKey читает Rust (`ps2mesh`, У1.13); узлы машин отдельно не нужны.
 
 В OUTDIR/<АРХИВ>/: `NNN.obj` (+`NNN.mtl`, `NNN_K.png` текстуры записи), `NNN_view.png` (три проекции
 каркаса); в OUTDIR: `index.csv` (запись, id, вершин, треугольников, серий списков/полос, мусорных,
 bbox, картинки) и `sheet_<АРХИВ>.png` (контактный лист миниатюр). Серии вершин собирает
-`g101_verts.entry_mesh` (полосы и списки). Без PIL и numpy.
+`ps2mesh.entry_mesh` (полосы и списки). Без PIL и numpy.
 """
 import csv
 import glob
@@ -16,9 +16,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import g101_nodes as gn
-import g101_verts as g
 import lf
+import ps2mesh as g
 
 THUMB = 160
 
@@ -100,8 +99,6 @@ def write_obj(path, tris, mtl=None):
 
 
 def main(argv):
-    nodes_on = '--no-nodes' not in argv
-    argv = [a for a in argv if a != '--no-nodes']
     raw, out = argv[0], argv[1]
     names = argv[2:] or [os.path.basename(p) for p in sorted(glob.glob(os.path.join(raw, '*.BIN')))]
     os.makedirs(out, exist_ok=True)
@@ -116,10 +113,6 @@ def main(argv):
             tris, nl, ns, bad = g.entry_mesh(d)
             if not tris:
                 continue
-            if nodes_on:
-                tris, rep = gn.place(tris, gn.read_nodes(d))
-                if rep['placed']:
-                    print('  %s#%d: поставлено частей %d из %d узлов' % (stem, e.index, rep['placed'], rep['nodes']))
             os.makedirs(d_out, exist_ok=True)
             imgs = []
             for im in e.images:

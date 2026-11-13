@@ -571,3 +571,33 @@ fn events_disassemble_and_their_calls_match_the_export() {
     assert_eq!((bad_ops, no_end), (0, 0));
     assert_eq!(total, 1384);
 }
+
+#[test]
+fn mesh_triangles_add_up_to_the_exports_counts() {
+    use sunpetal_data::ps2::{gig, mesh};
+    let (Some(iso), Some(export)) = (env("SUNPETAL_PS2_ISO"), env("SUNPETAL_PS2_EXPORT")) else {
+        return;
+    };
+    let assets = export.join("../../assets");
+    let mut iso = Iso::open(File::open(iso).unwrap()).unwrap();
+    let mut files = std::collections::HashMap::new();
+    let (mut models, mut degenerate) = (0, 0);
+    for (tsv, col) in [("models.tsv", 6), ("models_extra.tsv", 5)] {
+        for l in std::fs::read_to_string(assets.join(tsv)).unwrap().lines().skip(1) {
+            let c: Vec<&str> = l.split('\t').collect();
+            let (file, rest) = c[col].split_once("@0x").map_or((c[col], ""), |(a, b)| (a, b));
+            let (file, at) = if col == 6 { (file.split('#').next().unwrap(), rest) } else { (file, rest) };
+            let at = usize::from_str_radix(at, 16).unwrap();
+            let path = load_file(&mut iso, &mut files, file);
+            let d = &files[&path];
+            let model = &d[at..at + gig::size(&d[at..]).unwrap()];
+            let m = mesh::entry_mesh(model);
+            let j: serde_json::Value = serde_json::from_slice(&std::fs::read(export.join("models").join(format!("{}.json", c[0]))).unwrap()).unwrap();
+            assert_eq!((m.triangles.len() + m.degenerate as usize) as u64, j["counts"]["triangles"].as_u64().unwrap(), "{}", c[0]);
+            degenerate += m.degenerate;
+            models += 1;
+        }
+    }
+    eprintln!("{models} models, {degenerate} degenerate triangles dropped");
+    assert_eq!(models, 325);
+}

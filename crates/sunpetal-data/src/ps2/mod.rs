@@ -7,6 +7,7 @@ pub mod gim;
 pub mod gs;
 pub mod iso;
 pub mod lf;
+pub mod mesh;
 pub mod pose;
 pub mod scenedb;
 pub mod sha1;

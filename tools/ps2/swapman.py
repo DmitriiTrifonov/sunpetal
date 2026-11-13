@@ -24,7 +24,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import lf
-import g101_verts as g
+import ps2mesh as g
 
 _cache = {}
 

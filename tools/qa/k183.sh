@@ -15,5 +15,5 @@ if [ ! -f "$CAT/index.csv" ] || [ "$STALE" = 1 ]; then
 fi
 echo "== 2. метрики, статус, эталонный список"
 python3 tools/ps2/check_models.py "$CAT" --check --csv "$CAT/index_metrics.csv" --report "$CAT/report.html" | tail -4 || exit 1
-echo "== 3. тесты проверок"; python3 -m unittest tools.ps2.test_check_models tools.ps2.test_g101_nodes 2>&1 | tail -3
+echo "== 3. тесты проверок"; python3 -m unittest tools.ps2.test_check_models 2>&1 | tail -3
 echo "== Ваша часть: открыть $CAT/report.html — красное и жёлтое сверху; верно ли, что красные действительно сломаны"
