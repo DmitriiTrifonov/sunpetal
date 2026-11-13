@@ -353,3 +353,66 @@ fn check_geometry(export: &std::path::Path, id: &str, g: &sunpetal_data::ps2::gi
     }
     Ok(())
 }
+
+#[test]
+fn gim_motions_match_the_export() {
+    use sunpetal_data::ps2::{gim, lf, sha1::sha1_hex};
+    let (Some(iso), Some(export)) = (env("SUNPETAL_PS2_ISO"), env("SUNPETAL_PS2_EXPORT")) else {
+        return;
+    };
+    let roles = std::fs::read_to_string(export.join("../../assets/roles.tsv")).unwrap();
+    let mut iso = Iso::open(File::open(iso).unwrap()).unwrap();
+    let mut files = std::collections::HashMap::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut bad = Vec::new();
+    for l in roles.lines().skip(1) {
+        let c: Vec<&str> = l.split('\t').collect();
+        if c[4] != "MotionPack" {
+            continue;
+        }
+        let path = load_file(&mut iso, &mut files, c[0]);
+        let raw = &files[&path];
+        let arc = lf::parse(raw).unwrap();
+        let pk = arc.data(raw, c[1].parse().unwrap()).unwrap();
+        let items = gim::pack_items(pk).unwrap();
+        for &(_, off) in &items {
+            if pk.get(off..off + 8) != Some(&gim::MAGIC[..]) {
+                continue;
+            }
+            let Ok(m) = gim::parse(&pk[off..]) else { continue };
+            let next = items.iter().map(|i| i.1).filter(|&x| x > off).min().unwrap_or(pk.len());
+            let id = sha1_hex(&pk[off..next])[..10].to_string();
+            if !seen.insert(id.clone()) {
+                continue;
+            }
+            let j: serde_json::Value = serde_json::from_slice(&std::fs::read(export.join("motions").join(format!("{id}.json"))).unwrap()).unwrap();
+            let f3 = |v: &serde_json::Value| -> Vec<f32> { v.as_array().unwrap().iter().map(|x| x.as_f64().unwrap() as f32).collect() };
+            let mut ok = j["bone_type"] == m.bone_type
+                && j["n_std"] == m.stp_table.len()
+                && j["range"] == m.range
+                && j["njoints"] == m.joints.len()
+                && j["stp_table"].as_array().unwrap().iter().map(|x| x.as_u64().unwrap() as u8).collect::<Vec<_>>() == m.stp_table;
+            for (a, b) in m.joints.iter().zip(j["joints"].as_array().unwrap()) {
+                match a {
+                    None => ok &= b.is_null(),
+                    Some(a) => {
+                        ok &= b["flag"] == a.flag && b["child"] == a.child && b["next"] == a.next && b["keys"].as_array().unwrap().len() == a.keys.len();
+                        for (k, kj) in a.keys.iter().zip(b["keys"].as_array().unwrap()) {
+                            ok &= kj["frame"] == k.frame && kj["flag"] == k.flag && f3(&kj["rot"]) == k.rot;
+                            ok &= match k.pos {
+                                Some(p) => f3(&kj["pos"]) == p,
+                                None => kj.get("pos").is_none(),
+                            };
+                        }
+                    }
+                }
+            }
+            if !ok {
+                bad.push(id);
+            }
+        }
+    }
+    eprintln!("{} motions, bad {bad:?}", seen.len());
+    assert!(bad.is_empty());
+    assert_eq!(seen.len(), 399);
+}

@@ -2,6 +2,7 @@
 //! step by step, the formats inside. Read-only; the disc is never written to.
 pub mod bpe;
 pub mod gig;
+pub mod gim;
 pub mod gs;
 pub mod iso;
 pub mod lf;
