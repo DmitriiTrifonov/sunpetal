@@ -22,7 +22,7 @@ pub struct Joint {
     pub keys: Vec<Key>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Motion {
     pub bone_type: u16,
     /// `STPTable`: for every standard joint, the motion's joint that drives it.
