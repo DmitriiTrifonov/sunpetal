@@ -179,6 +179,7 @@ fn materials_find_the_reference_pictures_in_the_t_blocks() {
     let mut cache: std::collections::HashMap<(String, usize), (Vec<gs::Upload>, tblock::Memory)> = Default::default();
     let png_rgba = |name: &str| read_png(&export.join("textures").join(format!("{name}.png"))).2;
     let (mut total, mut found, mut missed, mut null_ok, mut null_total) = (0, 0, Vec::new(), 0, 0);
+    let (mut keys, mut keys_ok) = (0, 0);
     let mut paths: Vec<_> = std::fs::read_dir(export.join("models")).unwrap().map(|e| e.unwrap().path()).collect();
     paths.sort();
     for p in paths.iter().filter(|p| p.extension().is_some_and(|e| e == "json")) {
@@ -231,6 +232,12 @@ fn materials_find_the_reference_pictures_in_the_t_blocks() {
                 if let Some(px) = tblock::material_rgba(rec, ups, mem, &t).unwrap() {
                     mine.push(px);
                 }
+                if t.psm == 0x13 {
+                    if let (Some((a, b)), Some(name)) = (tblock::material_key(rec, mem, ups, &t), m["texture"].as_str()) {
+                        keys += 1;
+                        keys_ok += usize::from(name == format!("{:016x}", a)[..10].to_string() + "_" + &format!("{:016x}", b)[..8]);
+                    }
+                }
             }
             let mut names: Vec<String> = m["texture"].as_str().map(|s| vec![s.to_string()]).unwrap_or_default();
             names.extend(m["texture_alt"].as_array().into_iter().flatten().filter_map(|a| a.as_str().map(String::from)));
@@ -252,7 +259,9 @@ fn materials_find_the_reference_pictures_in_the_t_blocks() {
         "{found}/{total} materials with a reference picture found; materials without one: {null_ok}/{null_total} give nothing; first misses: {:?}",
         &missed[..missed.len().min(5)]
     );
+    eprintln!("T8 keys equal to the export's ids: {keys_ok}/{keys}");
     assert!(missed.is_empty(), "{} misses", missed.len());
+    assert!(keys > 100 && keys_ok * 100 >= keys * 95, "keys {keys_ok}/{keys}");
 }
 
 #[test]

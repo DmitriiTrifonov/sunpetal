@@ -188,6 +188,15 @@ pub fn material_pixels<'a>(mem: &Memory, ups: &'a [Upload], t: &Tex0) -> Option<
     Some((px, miss, clut))
 }
 
+/// The key of a T8 material's picture in `SPM2` and the texture pack (`spm2.rs`): the first 8 bytes (big endian)
+/// of the SHA-1 of the TEX0 rectangle's indices and of the palette upload's bytes. The export's picture id
+/// (`<sha1 of the indices>[:10]_<sha1 of the palette>[:8]`, `sunpetal-ee`) is the prefix of the same hashes.
+pub fn material_key(rec: &[u8], mem: &Memory, ups: &[Upload], t: &Tex0) -> Option<(u64, u64)> {
+    let (px, _, clut) = material_pixels(mem, ups, t)?;
+    let head = |b: &[u8]| u64::from_str_radix(&super::sha1::sha1_hex(b)[..16], 16).ok();
+    Some((head(&px)?, head(rec.get(clut.data.clone())?)?))
+}
+
 /// RGBA of a material: from its uploads (`pick`), or for T8 from the assembled memory when `from_memory`.
 pub fn material_rgba(rec: &[u8], ups: &[Upload], mem: &Memory, t: &Tex0) -> Result<Option<Vec<u8>>, String> {
     if t.psm == PSM_T8 {
