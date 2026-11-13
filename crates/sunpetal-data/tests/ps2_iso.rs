@@ -283,6 +283,9 @@ fn gig_headers_match_the_model_catalogue() {
                 let n = o.joints.len() as i16;
                 o.joints.iter().all(|j| j.child < n && j.next < n && j.child >= -1 && j.next >= -1)
             }));
+        if let Err(e) = check_geometry(&export, c[0], &g) {
+            bad.push(format!("{}: {e}", c[0]));
+        }
         checked += 1;
         if !ok {
             bad.push(format!(
@@ -307,6 +310,7 @@ fn gig_headers_match_the_model_catalogue() {
         let d = &files[&path][at..];
         let g = gig::parse(d).unwrap_or_else(|e| panic!("{}: {e}", c[0]));
         assert_eq!(g.objects.len(), c[2].parse::<usize>().unwrap(), "{}", c[0]);
+        check_geometry(&export, c[0], &g).unwrap_or_else(|e| panic!("{}: {e}", c[0]));
         extra += 1;
     }
     assert_eq!(checked + extra, 325);
@@ -320,4 +324,32 @@ fn load_file(iso: &mut Iso<File>, files: &mut std::collections::HashMap<String, 
         files.insert(path.clone(), iso.file(&path).unwrap());
     }
     path
+}
+
+/// Series of the model against the export: counts and the whole `vtx.bin` byte for byte.
+fn check_geometry(export: &std::path::Path, id: &str, g: &sunpetal_data::ps2::gig::Gig) -> Result<(), String> {
+    let j: serde_json::Value = serde_json::from_slice(&std::fs::read(export.join("models").join(format!("{id}.json"))).map_err(|e| e.to_string())?).unwrap();
+    let want = std::fs::read(export.join("models").join(format!("{id}.vtx.bin"))).map_err(|e| e.to_string())?;
+    let all: Vec<_> = g.objects.iter().flat_map(|o| o.series.iter()).collect();
+    let (nv, nt) = (all.iter().map(|s| s.verts.len()).sum::<usize>(), all.iter().map(|s| s.triangles()).sum::<usize>());
+    let c = &j["counts"];
+    if (c["series"].as_u64(), c["vertices"].as_u64(), c["triangles"].as_u64()) != (Some(all.len() as u64), Some(nv as u64), Some(nt as u64)) {
+        return Err(format!("counts {} {nv} {nt} vs {c}", all.len()));
+    }
+    let mine: Vec<u8> = all.iter().flat_map(|s| s.verts.iter().flat_map(|v| v.export_bytes())).collect();
+    if mine != want {
+        return Err("vtx.bin differs".into());
+    }
+    for o in &g.objects {
+        if o.series.iter().any(|s| s.bones.iter().any(|&b| usize::from(b) >= o.joints.len().max(1)) || s.verts.iter().any(|v| v.slot as usize >= s.bones.len().max(1))) {
+            return Err("bone index out of range".into());
+        }
+    }
+    for (a, b) in all.iter().zip(j["series"].as_array().unwrap()) {
+        let bones: Vec<u64> = b["bones"].as_array().unwrap().iter().map(|x| x.as_u64().unwrap()).collect();
+        if a.pass as u64 != b["pass"] || a.verts.len() as u64 != b["count"] || a.bones.iter().map(|&x| u64::from(x)).collect::<Vec<_>>() != bones {
+            return Err(format!("series {b}"));
+        }
+    }
+    Ok(())
 }

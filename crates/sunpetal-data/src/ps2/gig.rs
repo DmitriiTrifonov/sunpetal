@@ -29,6 +29,63 @@ pub struct Object {
     /// Offset of the first `PrimData` section.
     pub prim_data: u32,
     pub joints: Vec<Joint>,
+    pub series: Vec<Series>,
+}
+
+/// One vertex of a series: position, normal, colour (0..255 floats as stored), ST and the matrix slot (a bone of the series).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Vertex {
+    pub pos: [f32; 3],
+    pub nrm: [f32; 3],
+    pub rgba: [f32; 4],
+    pub st: [f32; 2],
+    pub slot: u32,
+}
+
+/// A strip or a list of vertices sharing a material (`TEX0`, GS `PRIM`).
+#[derive(Clone, Debug)]
+pub struct Series {
+    /// `PrimData` section: 0 `getphPrim`, 1 `getphPrimT`, 2 `getphPrimT2`.
+    pub pass: u32,
+    pub tex0: u64,
+    /// GS `PRIM` (bit 4 is TME).
+    pub prim: u32,
+    pub verts: Vec<Vertex>,
+    /// Joints of the packet's matrix tags (1: rigid, 2-3: blended); a vertex's `slot` indexes them.
+    pub bones: Vec<u16>,
+}
+
+impl Series {
+    /// GS primitive type: 3 triangle list, 4 triangle strip, 5 fan.
+    pub fn kind(&self) -> u32 {
+        self.prim & 7
+    }
+
+    pub fn triangles(&self) -> usize {
+        let n = self.verts.len();
+        match self.kind() {
+            4 => n.saturating_sub(2),
+            3 => n / 3,
+            _ => 0,
+        }
+    }
+}
+
+impl Vertex {
+    /// The export's 40 bytes: pos, normal (f32), rgba (u8, rounded), st (f32), slot, 3 zero bytes.
+    pub fn export_bytes(&self) -> [u8; 40] {
+        let mut o = [0u8; 40];
+        for (i, v) in self.pos.iter().chain(&self.nrm).enumerate() {
+            o[4 * i..4 * i + 4].copy_from_slice(&v.to_le_bytes());
+        }
+        for (i, c) in self.rgba.iter().enumerate() {
+            o[24 + i] = c.clamp(0.0, 255.0).round_ties_even() as u8;
+        }
+        o[28..32].copy_from_slice(&self.st[0].to_le_bytes());
+        o[32..36].copy_from_slice(&self.st[1].to_le_bytes());
+        o[36] = self.slot as u8;
+        o
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -87,9 +144,150 @@ pub fn parse(d: &[u8]) -> Result<Gig, String> {
                 init_key,
             });
         }
-        objects.push(Object { at, packet_data: u32_at(d, at + 4)?, prim_data: u32_at(d, at + 0x80)?, joints });
+        objects.push(Object { at, packet_data: u32_at(d, at + 4)?, prim_data: u32_at(d, at + 0x80)?, joints, series: series(d, u32_at(d, at + 0x80)? as usize) });
     }
     Ok(Gig { scene_scale, objects })
+}
+
+const UNPACK_BYTES: [usize; 16] = [4, 2, 1, 0, 8, 4, 2, 0, 12, 6, 3, 0, 16, 8, 4, 2];
+
+struct Tag {
+    at: usize,
+    qwc: usize,
+    id: u32,
+    v: [u32; 2],
+}
+
+/// The DMA chain from `start`: `cnt` (1) data follows, `next` (2) jumps to `ADDR`, `ref` (3) has its data outside, `end` (7) stops.
+fn tags(d: &[u8], start: usize) -> Vec<Tag> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut p = start;
+    for _ in 0..4096 {
+        if !seen.insert(p) || p + 16 > d.len() {
+            break;
+        }
+        let w = |k: usize| u32::from_le_bytes(d[p + k..p + k + 4].try_into().unwrap());
+        let (w0, addr) = (w(0), w(4));
+        let (qwc, id) = ((w0 & 0xFFFF) as usize, (w0 >> 28) & 7);
+        out.push(Tag { at: p, qwc, id, v: [w(8), w(12)] });
+        match id {
+            7 => break,
+            2 => p = addr as usize,
+            1 => p += 16 + qwc * 16,
+            3 => p += 16,
+            _ => break,
+        }
+    }
+    out
+}
+
+/// `UNPACK V4-32` blocks of a tag's VIF stream: (VU address, quadword count, data offset). A `ref` tag's data is outside the file.
+fn unpacks(d: &[u8], t: &Tag) -> Result<Vec<(usize, usize)>, String> {
+    let mut out = Vec::new();
+    let mut pos = t.at + 16;
+    let end = if t.id != 3 { pos + t.qwc * 16 } else { pos };
+    let mut i = 0;
+    loop {
+        let c = if i < 2 {
+            i += 1;
+            t.v[i - 1]
+        } else if pos + 4 <= end {
+            pos += 4;
+            u32::from_le_bytes(d.get(pos - 4..pos).ok_or("tag past the end")?.try_into().unwrap())
+        } else {
+            break;
+        };
+        let (cmd, num) = ((c >> 24) & 0x7F, (c >> 16) & 0xFF);
+        if cmd >= 0x60 {
+            let n = if num == 0 { 256 } else { num as usize };
+            if t.id != 3 {
+                let b = UNPACK_BYTES[(cmd & 0xF) as usize];
+                if b == 0 {
+                    return Err("reserved UNPACK format".into());
+                }
+                if cmd & 0xF == 0xC {
+                    out.push((n, pos));
+                }
+                pos += (n * b + 3) & !3;
+            }
+        } else if (cmd == 0x30 || cmd == 0x31) && t.id != 3 {
+            pos += 16;
+        } else if cmd == 0x4A || cmd == 0x4B {
+            pos += (if num == 0 { 256 } else { num as usize }) * 8;
+        } else if cmd > 0x20 && i > 2 {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+/// The series of one UNPACK block of `n` quadwords at `o`; `None` when a series runs out of the block or the file.
+fn block(d: &[u8], o: usize, n: usize) -> Option<Vec<(u64, u32, Vec<Vertex>)>> {
+    let u32_ = |at: usize| d.get(at..at + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()));
+    let f = |at: usize| u32_(at).map(f32::from_bits);
+    let mut out = Vec::new();
+    let mut q = 0;
+    while q + 4 <= n {
+        let h = o + q * 16;
+        let nv = (u32_(h + 0x30)? & 0x7FFF) as usize;
+        let prim = (u32_(h + 0x34)? >> 15) & 0x7FF;
+        let tex0 = u64::from(u32_(h + 0x20)?) | u64::from(u32_(h + 0x24)?) << 32;
+        if q + 4 + nv * 4 > n {
+            return None;
+        }
+        let mut verts = Vec::with_capacity(nv);
+        for k in 0..nv {
+            let v = h + 0x40 + 0x40 * k;
+            let (mut u, mut w) = if prim & 0x10 != 0 { (f(v + 0x30)?, f(v + 0x34)?) } else { (0.0, 0.0) };
+            if !(u.is_finite() && w.is_finite() && u.abs() < 1e6 && w.abs() < 1e6) {
+                (u, w) = (0.0, 0.0);
+            }
+            verts.push(Vertex {
+                pos: [f(v)?, f(v + 4)?, f(v + 8)?],
+                nrm: [f(v + 0x10)?, f(v + 0x14)?, f(v + 0x18)?],
+                rgba: [f(v + 0x20)?, f(v + 0x24)?, f(v + 0x28)?, f(v + 0x2C)?],
+                st: [u, w],
+                slot: u32_(v + 0x3C)?,
+            });
+        }
+        out.push((tex0, prim, verts));
+        q += 4 + nv * 4;
+    }
+    (q == n).then_some(out)
+}
+
+/// All series of an object: the `PrimData` sections (`[count, end offset, "PadObj"]` + a DMA chain) in file order.
+fn series(d: &[u8], start: usize) -> Vec<Series> {
+    let mut out = Vec::new();
+    let (mut pos, mut pass) = (start, 0);
+    while d.get(pos + 8..pos + 14) == Some(b"PadObj") {
+        let end_off = u32::from_le_bytes(d[pos + 4..pos + 8].try_into().unwrap()) as usize;
+        let mut mats: Vec<(u16, usize)> = Vec::new();
+        for t in tags(d, pos + 0x10) {
+            if t.id == 3 {
+                if mats.len() == 3 {
+                    mats.clear();
+                }
+                mats.push((((u32::from_le_bytes(d[t.at..t.at + 4].try_into().unwrap()) >> 16) & 0x3FF) as u16, t.qwc));
+            }
+            let Ok(blocks) = unpacks(d, &t) else { continue };
+            for (num, off) in blocks {
+                if num < 4 {
+                    continue;
+                }
+                if let Some(ss) = block(d, off, num) {
+                    for (tex0, prim, verts) in ss {
+                        let bones = mats.iter().filter(|m| m.1 != 0).map(|m| m.0).collect();
+                        out.push(Series { pass, tex0, prim, verts, bones });
+                    }
+                }
+            }
+        }
+        pass += 1;
+        pos = end_off + 0x10;
+    }
+    out
 }
 
 impl Gig {
