@@ -234,8 +234,9 @@ pub(crate) fn on_enter(c: &mut Cpu, key: u32) {
     }
 }
 
-/// The frame being drawn, by model and mesh: the polygons of each (`None`: batches not out of a model file).
-pub fn frame_models() -> Vec<(Option<super::modelsrc::ModelAt>, u32)> {
+/// The frame being drawn, by model and mesh: the polygons of each (`None`: batches not out of a model file) and
+/// the matrix-stack slot of the last MTX_RESTORE before it (255: none).
+pub fn frame_models() -> Vec<(Option<super::modelsrc::ModelAt>, u32, u8)> {
     super::nds(|n| n.frame_models())
 }
 

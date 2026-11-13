@@ -247,20 +247,22 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
         }
         "batches" => {
             // the frame's polygons by where the game sent them from: model file, model, mesh (docs/ULTIMATE-IMPORT.md, У3.4)
-            let mut by: std::collections::BTreeMap<(String, u16, String), (u32, u32)> = Default::default();
+            let mut by: std::collections::BTreeMap<(String, u16, String, u8), (u32, u32)> = Default::default();
             let (mut none, mut all) = (0u32, 0u32);
-            for (m, polys) in debug::frame_models() {
+            for (m, polys, slot) in debug::frame_models() {
                 all += polys;
                 match m {
                     Some(m) => {
-                        let e = by.entry((m.model, m.mesh, m.mesh_name)).or_default();
+                        let e = by.entry((m.model, m.mesh, m.mesh_name, slot)).or_default();
                         (e.0, e.1) = (e.0 + 1, e.1 + polys);
                     }
                     None => none += polys,
                 }
             }
-            let rows: Vec<Value> =
-                by.iter().map(|((model, mesh, name), (runs, polys))| json!({"model": model, "mesh": mesh, "name": name, "runs": runs, "polys": polys})).collect();
+            let rows: Vec<Value> = by
+                .iter()
+                .map(|((model, mesh, name, slot), (runs, polys))| json!({"model": model, "mesh": mesh, "name": name, "slot": slot, "runs": runs, "polys": polys}))
+                .collect();
             done(json!({"polys": all, "unnamed": none, "meshes": rows}))
         }
         "poke" => {

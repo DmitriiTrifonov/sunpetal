@@ -206,10 +206,15 @@ def parse_sbc(b, at, end, n_nodes, n_mats, n_shapes):
         elif c == 0x06:
             parents[a[0]] = a[1]
             cmd['node'], cmd['parent'] = a[0], a[1]
+            # NODEDESC's options, in this order: the slot this node's matrix is stored at (bit 0), then the slot
+            # of the parent's matrix restored before it (bit 1). Established on the hero (`C001`): node n stores at
+            # slot n and the batches the game sends carry MTX_RESTORE slot n (`batches` in sunpetal-debug).
+            k = 3
             if hi_of(op) & 1:
-                cmd['restore'] = a[3]
+                cmd['store'] = a[k]
+                k += 1
             if hi_of(op) & 2:
-                cmd['store'] = a[-1]
+                cmd['restore'] = a[k]
         cmds.append(cmd)
         o += n
     if o > end:
@@ -321,6 +326,37 @@ class Model:
         for i, nd in enumerate(self.nodes):
             nd['world'] = world(i)
 
+    def stack_nodes(self):
+        """Which node's matrix the game keeps at each matrix-stack slot, and the skinned slots' mixes:
+        ({slot: node} from NODEDESC's store slot, {slot: [(node under the source slot, weight)]} from NODEMIX).
+        A NODEMIX's triples are (source slot, inverse-bind index, weight over 256)."""
+        stored = {c['store']: c['node'] for c in self.sbc if 'store' in c}
+        mixes = {}
+        for c in self.sbc:
+            if c['op'] & 0x1F == 0x09:
+                a = c['args']
+                mixes[a[0]] = [(stored.get(a[2 + 3 * k]), a[4 + 3 * k]) for k in range(a[1])]
+        return stored, mixes
+
+    def mesh_nodes(self):
+        """Which node (bone) each mesh hangs under: [{shape, name, node, node_name, material}] by shape index.
+        A mesh drawn by several draws (skinning) lists the first; `draws` has them all."""
+        out = {}
+        for d in self.draws:
+            out.setdefault(d['shape'], d)
+        stored, mixes = self.stack_nodes()
+        rows = []
+        for i, d in sorted(out.items()):
+            r = {'shape': i, 'name': self.shapes[i]['name'], 'node': d['node'], 'node_name': self.nodes[d['node']]['name'],
+                 'material': d['mat'], 'slot': d['restore']}
+            if d['restore'] in mixes:
+                r['mix'] = [{'node': n, 'weight': w} for n, w in mixes[d['restore']]]
+            elif d['restore'] in stored:
+                r['node'] = stored[d['restore']]
+                r['node_name'] = self.nodes[r['node']]['name']
+            rows.append(r)
+        return rows
+
     def as_json(self, b=None):
         return {
             'name': self.name, 'pos_scale': self.pos_scale, 'inv_pos_scale': self.inv_pos_scale,
@@ -333,6 +369,7 @@ class Model:
             'shapes': [{'index': i, 'name': s['name'], 'flag': s['flag'], 'dl_offset': s['dl'][0], 'dl_size': s['dl'][1]}
                        for i, s in enumerate(self.shapes)],
             'draws': self.draws,
+            'mesh_nodes': self.mesh_nodes(),
         }
 
 

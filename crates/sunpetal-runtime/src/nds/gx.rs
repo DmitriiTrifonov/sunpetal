@@ -177,8 +177,9 @@ struct Lists {
     polys: Vec<GxPoly>,
     nverts_ds: u32,
     /// The batches' sources, in order: the address the batch's BEGIN_VTXS came from by DMA (0: not by DMA)
-    /// and the polygons it gave (`modelsrc.rs`). A run of batches from one address is one entry.
-    srcs: Vec<(u32, u32)>,
+    /// the polygons it gave (`modelsrc.rs`) and the matrix-stack slot of the last MTX_RESTORE before it (the
+    /// bone of a skinned part: 255 before any). A run of batches from one address and slot is one entry.
+    srcs: Vec<(u32, u32, u8)>,
 }
 
 struct Queued {
@@ -586,6 +587,8 @@ pub(super) struct Gx {
     stk_proj: Mtx,
     stk_tex: Mtx,
     stk_pos: [Mtx; 32],
+    /// The slot of the last MTX_RESTORE (255: none yet), for `Build::srcs`.
+    last_restore: u8,
     stk_vec: [Mtx; 32],
     sp_proj: u32,
     sp_tex: u32,
@@ -686,6 +689,7 @@ impl Gx {
             stk_proj: IDENTITY,
             stk_tex: IDENTITY,
             stk_pos: [IDENTITY; 32],
+            last_restore: 255,
             stk_vec: [IDENTITY; 32],
             sp_proj: 0,
             sp_tex: 0,
@@ -1473,6 +1477,7 @@ impl Nds {
                     }
                     g.mtx_pos = g.stk_pos[a];
                     g.mtx_vec = g.stk_vec[a];
+                    g.last_restore = a as u8;
                     g.clip_dirty = true;
                 }
             }
@@ -1627,8 +1632,8 @@ impl Nds {
             0x40 => {
                 // BEGIN_VTXS
                 let g = &mut self.gx;
-                if g.build.srcs.last().map(|s| s.0) != Some(g.cmd_src) {
-                    g.build.srcs.push((g.cmd_src, 0));
+                if g.build.srcs.last().map(|s| (s.0, s.2)) != Some((g.cmd_src, g.last_restore)) {
+                    g.build.srcs.push((g.cmd_src, 0, g.last_restore));
                 }
                 #[cfg(feature = "debug-tools")]
                 {
@@ -2168,9 +2173,9 @@ impl Nds {
     }
 
     /// The frame being drawn: each run of batches' model and mesh (`None`: not out of a model file) and its polygons.
-    pub(crate) fn frame_models(&mut self) -> Vec<(Option<super::modelsrc::ModelAt>, u32)> {
+    pub(crate) fn frame_models(&mut self) -> Vec<(Option<super::modelsrc::ModelAt>, u32, u8)> {
         let srcs = self.gx.render.srcs.clone();
         let at = self.models_at(&srcs.iter().map(|s| s.0).collect::<Vec<_>>());
-        at.into_iter().zip(srcs).map(|(m, s)| (m, s.1)).collect()
+        at.into_iter().zip(srcs).map(|(m, s)| (m, s.1, s.2)).collect()
     }
 }
