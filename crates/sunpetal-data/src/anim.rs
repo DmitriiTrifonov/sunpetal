@@ -3,16 +3,19 @@
 //! (`ps2::pose`) samples them; nothing here interpolates.
 //!
 //! ```text
-//! u32 version (1), u32 motions, u32 ids
+//! u32 version (2), u32 tracks, u32 motions, u32 ids
+//! tracks × { u32 keys, u8 has_pos, u16 frame[keys], i16 flag[keys],
+//!            floats as 4 byte planes: plane b = byte b of every float (pos[3] if has_pos, then rot[3], per key) }
 //! motions × { [u8;5] key (first 10 hex digits of the SHA-1 of the motion's bytes), u16 bone_type, u16 flags, u32 range,
 //!             u16 n_std, u8 stp_table[n_std], u16 joints,
-//!             joints × { u8 present, if present: i32 flag, u8 child, u8 next, u32 keys,
-//!                        keys × { u16 frame, i16 flag, f32 pos[3] unless flag == 1, f32 rot[3] } } }
+//!             joints × { u8 present, if present: i32 flag, u8 child, u8 next, u32 track } }
 //! ids × { u8 scene name length, scene name, u32 motion id, [u8;5] key }
 //! ```
+//! Equal tracks are stored once and the float bytes sit in planes: lossless, and `lz10` over it gives 19,7 MB for the
+//! 399 motions of the disc (raw 40,8).
 use crate::ps2::gim::{Joint, Key, Motion};
 
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 pub type MotionKey = [u8; 5];
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -36,36 +39,42 @@ pub fn key_from_hex(h: &str) -> Option<MotionKey> {
 
 impl Anim {
     pub fn encode(&self) -> Vec<u8> {
-        let mut o = Vec::new();
-        for n in [VERSION, self.motions.len() as u32, self.ids.len() as u32] {
-            o.extend_from_slice(&n.to_le_bytes());
-        }
+        let mut tracks: Vec<Vec<u8>> = Vec::new();
+        let mut index = std::collections::HashMap::new();
+        let mut body = Vec::new();
         for (key, m) in &self.motions {
-            o.extend_from_slice(key);
-            o.extend_from_slice(&m.bone_type.to_le_bytes());
-            o.extend_from_slice(&m.flags.to_le_bytes());
-            o.extend_from_slice(&m.range.to_le_bytes());
-            o.extend_from_slice(&(m.stp_table.len() as u16).to_le_bytes());
-            o.extend_from_slice(&m.stp_table);
-            o.extend_from_slice(&(m.joints.len() as u16).to_le_bytes());
+            body.extend_from_slice(key);
+            body.extend_from_slice(&m.bone_type.to_le_bytes());
+            body.extend_from_slice(&m.flags.to_le_bytes());
+            body.extend_from_slice(&m.range.to_le_bytes());
+            body.extend_from_slice(&(m.stp_table.len() as u16).to_le_bytes());
+            body.extend_from_slice(&m.stp_table);
+            body.extend_from_slice(&(m.joints.len() as u16).to_le_bytes());
             for j in &m.joints {
                 let Some(j) = j else {
-                    o.push(0);
+                    body.push(0);
                     continue;
                 };
-                o.push(1);
-                o.extend_from_slice(&j.flag.to_le_bytes());
-                o.extend_from_slice(&[j.child, j.next]);
-                o.extend_from_slice(&(j.keys.len() as u32).to_le_bytes());
-                for k in &j.keys {
-                    o.extend_from_slice(&k.frame.to_le_bytes());
-                    o.extend_from_slice(&k.flag.to_le_bytes());
-                    for v in k.pos.iter().flatten().chain(k.rot.iter()) {
-                        o.extend_from_slice(&v.to_le_bytes());
-                    }
+                let t = track_bytes(j);
+                let n = tracks.len();
+                let id = *index.entry(t.clone()).or_insert(n);
+                if id == n {
+                    tracks.push(t);
                 }
+                body.push(1);
+                body.extend_from_slice(&j.flag.to_le_bytes());
+                body.extend_from_slice(&[j.child, j.next]);
+                body.extend_from_slice(&(id as u32).to_le_bytes());
             }
         }
+        let mut o = Vec::new();
+        for n in [VERSION, tracks.len() as u32, self.motions.len() as u32, self.ids.len() as u32] {
+            o.extend_from_slice(&n.to_le_bytes());
+        }
+        for t in &tracks {
+            o.extend_from_slice(t);
+        }
+        o.extend_from_slice(&body);
         for (scene, id, key) in &self.ids {
             o.push(scene.len() as u8);
             o.extend_from_slice(scene.as_bytes());
@@ -80,10 +89,40 @@ impl Anim {
         if r.u32()? != VERSION {
             return Err("ANIM: unknown version".into());
         }
-        let (nm, ni) = (r.u32()? as usize, r.u32()? as usize);
-        // every motion takes at least 15 bytes and every id 10: a count the bytes cannot hold is a damaged file
-        if nm > d.len() / 15 || ni > d.len() / 10 {
+        let (nt, nm, ni) = (r.u32()? as usize, r.u32()? as usize, r.u32()? as usize);
+        // every track takes at least 5 bytes, motion 15, id 10: a count the bytes cannot hold is a damaged file
+        if nt > d.len() / 5 || nm > d.len() / 15 || ni > d.len() / 10 {
             return Err("ANIM: counts exceed the data".into());
+        }
+        let mut tracks: Vec<(bool, Vec<Key>)> = Vec::with_capacity(nt);
+        for _ in 0..nt {
+            let nk = r.u32()? as usize;
+            let has_pos = match r.u8()? {
+                0 => false,
+                1 => true,
+                _ => return Err("ANIM: bad track".into()),
+            };
+            let nf = if has_pos { 6 } else { 3 };
+            if nk > (d.len() - r.at) / (4 + 4 * nf) {
+                return Err("ANIM: keys exceed the data".into());
+            }
+            let frames = r.take(2 * nk)?;
+            let flags = r.take(2 * nk)?;
+            let planes = [r.take(nk * nf)?, r.take(nk * nf)?, r.take(nk * nf)?, r.take(nk * nf)?];
+            let mut keys = Vec::with_capacity(nk);
+            for i in 0..nk {
+                let mut v = [0f32; 6];
+                for (f, slot) in v.iter_mut().enumerate().take(nf) {
+                    let at = i * nf + f;
+                    *slot = f32::from_le_bytes([planes[0][at], planes[1][at], planes[2][at], planes[3][at]]);
+                    if !slot.is_finite() {
+                        return Err("ANIM: a key is not a number".into());
+                    }
+                }
+                let (pos, rot) = if has_pos { (Some([v[0], v[1], v[2]]), [v[3], v[4], v[5]]) } else { (None, [v[0], v[1], v[2]]) };
+                keys.push(Key { frame: u16::from_le_bytes([frames[2 * i], frames[2 * i + 1]]), flag: i16::from_le_bytes([flags[2 * i], flags[2 * i + 1]]), pos, rot });
+            }
+            tracks.push((has_pos, keys));
         }
         let mut motions = Vec::with_capacity(nm);
         for _ in 0..nm {
@@ -100,23 +139,11 @@ impl Anim {
                 }
                 let flag = r.u32()? as i32;
                 let (child, next) = (r.u8()?, r.u8()?);
-                let nk = r.u32()? as usize;
-                let size = if flag == 1 { 16 } else { 28 };
-                if nk > (d.len() - r.at) / size {
-                    return Err("ANIM: keys exceed the data".into());
+                let (has_pos, keys) = tracks.get(r.u32()? as usize).ok_or("ANIM: a joint names no track")?;
+                if *has_pos != (flag != 1) {
+                    return Err("ANIM: track does not fit the joint".into());
                 }
-                let mut keys = Vec::with_capacity(nk);
-                for _ in 0..nk {
-                    let (frame, kf) = (r.u16()?, r.u16()? as i16);
-                    let f3 = |r: &mut Reader| -> Result<[f32; 3], String> { Ok([r.f32()?, r.f32()?, r.f32()?]) };
-                    let pos = if flag == 1 { None } else { Some(f3(&mut r)?) };
-                    let rot = f3(&mut r)?;
-                    if pos.iter().flatten().chain(rot.iter()).any(|v| !v.is_finite()) {
-                        return Err("ANIM: a key is not a number".into());
-                    }
-                    keys.push(Key { frame, flag: kf, pos, rot });
-                }
-                joints.push(Some(Joint { flag, child, next, keys }));
+                joints.push(Some(Joint { flag, child, next, keys: keys.clone() }));
             }
             motions.push((key, Motion { bone_type, stp_table, flags, range, joints }));
         }
@@ -143,6 +170,35 @@ impl Anim {
     }
 }
 
+/// One joint's keys as a track: has_pos, frames, flags, float byte planes.
+fn track_bytes(j: &Joint) -> Vec<u8> {
+    let has_pos = j.flag != 1;
+    let n = j.keys.len();
+    let mut o = Vec::new();
+    o.extend_from_slice(&(n as u32).to_le_bytes());
+    o.push(has_pos as u8);
+    for k in &j.keys {
+        o.extend_from_slice(&k.frame.to_le_bytes());
+    }
+    for k in &j.keys {
+        o.extend_from_slice(&k.flag.to_le_bytes());
+    }
+    let mut planes: [Vec<u8>; 4] = Default::default();
+    for k in &j.keys {
+        let pos = if has_pos { k.pos.unwrap_or([0.0; 3]) } else { [0.0; 3] };
+        let vals = if has_pos { pos.iter().chain(k.rot.iter()).copied().collect::<Vec<_>>() } else { k.rot.to_vec() };
+        for v in vals {
+            for (b, plane) in planes.iter_mut().enumerate() {
+                plane.push(v.to_le_bytes()[b]);
+            }
+        }
+    }
+    for p in planes {
+        o.extend_from_slice(&p);
+    }
+    o
+}
+
 struct Reader<'a> {
     d: &'a [u8],
     at: usize,
@@ -162,9 +218,6 @@ impl<'a> Reader<'a> {
     }
     fn u32(&mut self) -> Result<u32, String> {
         Ok(u32::from_le_bytes(self.take(4)?.try_into().unwrap()))
-    }
-    fn f32(&mut self) -> Result<f32, String> {
-        Ok(f32::from_bits(self.u32()?))
     }
 }
 
