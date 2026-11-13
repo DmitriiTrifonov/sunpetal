@@ -254,3 +254,70 @@ fn materials_find_the_reference_pictures_in_the_t_blocks() {
     );
     assert!(missed.is_empty(), "{} misses", missed.len());
 }
+
+#[test]
+fn gig_headers_match_the_model_catalogue() {
+    use sunpetal_data::ps2::gig;
+    let (Some(iso), Some(export)) = (env("SUNPETAL_PS2_ISO"), env("SUNPETAL_PS2_EXPORT")) else {
+        return;
+    };
+    let assets = export.join("../../assets");
+    let mut iso = Iso::open(File::open(iso).unwrap()).unwrap();
+    let mut files: std::collections::HashMap<String, Vec<u8>> = Default::default();
+    let (mut checked, mut bad) = (0, Vec::new());
+    // scene and character models: id, size, object and joint counts from models.tsv
+    for l in std::fs::read_to_string(assets.join("models.tsv")).unwrap().lines().skip(1) {
+        let c: Vec<&str> = l.split('\t').collect();
+        let (file, rest) = c[6].split_once('#').unwrap();
+        let at = usize::from_str_radix(rest.split_once("@0x").unwrap().1, 16).unwrap();
+        let path = load_file(&mut iso, &mut files, file);
+        let d = &files[&path][at..];
+        let g = gig::parse(d).unwrap_or_else(|e| panic!("{}: {e}", c[0]));
+        let id = &sunpetal_data::ps2::sha1::sha1_hex(&d[..gig::size(d).unwrap()])[..10];
+        let ok = id == c[0]
+            && gig::size(d).unwrap() - 0x20 == c[1].parse::<usize>().unwrap()
+            && g.objects.len() == c[2].parse::<usize>().unwrap()
+            && g.joint_count() == c[3].parse::<usize>().unwrap()
+            // 2a8972749b (an effect model) declares 2 joints but the second is overlapped by its data: the links are garbage
+            && (c[0] == "2a8972749b" || g.objects.iter().all(|o| {
+                let n = o.joints.len() as i16;
+                o.joints.iter().all(|j| j.child < n && j.next < n && j.child >= -1 && j.next >= -1)
+            }));
+        checked += 1;
+        if !ok {
+            bad.push(format!(
+                "{} id {id} size {} nobj {} joints {:?}",
+                c[0],
+                gig::size(d).unwrap() - 0x20,
+                g.objects.len(),
+                g.objects.iter().map(|o| o.joints.iter().map(|j| (j.child, j.next)).collect::<Vec<_>>()).collect::<Vec<_>>()
+            ));
+        }
+    }
+    eprintln!("{checked} scene models, {} bad: {bad:?}", bad.len());
+    assert_eq!(checked, 268);
+    assert!(bad.is_empty());
+    // models outside the scene records: object count only (the table has no joint count)
+    let mut extra = 0;
+    for l in std::fs::read_to_string(assets.join("models_extra.tsv")).unwrap().lines().skip(1) {
+        let c: Vec<&str> = l.split('\t').collect();
+        let (file, rest) = c[5].split_once("@0x").unwrap();
+        let at = usize::from_str_radix(rest, 16).unwrap();
+        let path = load_file(&mut iso, &mut files, file);
+        let d = &files[&path][at..];
+        let g = gig::parse(d).unwrap_or_else(|e| panic!("{}: {e}", c[0]));
+        assert_eq!(g.objects.len(), c[2].parse::<usize>().unwrap(), "{}", c[0]);
+        extra += 1;
+    }
+    assert_eq!(checked + extra, 325);
+}
+
+fn load_file(iso: &mut Iso<File>, files: &mut std::collections::HashMap<String, Vec<u8>>, name: &str) -> String {
+    // the tables name a file as "R00.BIN", "event/R03.BIN" or "data/EFFECT.BIN" (a folder per file on the disc): find it by name
+    let base = name.rsplit('/').next().unwrap().to_uppercase();
+    let path = iso.files().unwrap().into_iter().map(|f| f.0).find(|p| p.to_uppercase().ends_with(&format!("/{base}"))).unwrap_or_else(|| panic!("no {name} on the disc"));
+    if !files.contains_key(&path) {
+        files.insert(path.clone(), iso.file(&path).unwrap());
+    }
+    path
+}
