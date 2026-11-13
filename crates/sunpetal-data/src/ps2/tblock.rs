@@ -62,6 +62,11 @@ pub fn uploads(rec: &[u8], role: Role) -> Result<Vec<Upload>, String> {
     if t == 0 {
         return Ok(Vec::new());
     }
+    uploads_at(rec, t)
+}
+
+/// The uploads of the T-block at `t` in `rec`: a count and `(offset, size)` entries counted from `t`.
+fn uploads_at(rec: &[u8], t: usize) -> Result<Vec<Upload>, String> {
     let n = u32at(rec, t).ok_or("T-block past the record")?;
     let mut out = Vec::new();
     for e in 0..n {
@@ -71,6 +76,36 @@ pub fn uploads(rec: &[u8], role: Role) -> Result<Vec<Upload>, String> {
             return Err(format!("T-block entry {e} past the record"));
         }
         out.extend(gs::uploads(rec, from..to));
+    }
+    Ok(out)
+}
+
+/// An item model or character shadow of a `Chara` record with its own T-block.
+#[derive(Debug)]
+pub struct ItemTex {
+    /// Offset of the model's GIG in the record.
+    pub gig: usize,
+    pub uploads: Vec<Upload>,
+}
+
+/// The item table of a `Chara` record (`WCharaItemDataHeader`, the `u32` at 0x14): a count and
+/// `(gig offset, T-block offset)` pairs counted from the table. The record's main T-block (at 4) does not
+/// belong to these models. Empty pairs (both 0) are skipped. A page is built from one model's own T-block only:
+/// the game reuses GS page addresses between models, so blocks from other records are other pictures.
+pub fn item_uploads(rec: &[u8]) -> Result<Vec<ItemTex>, String> {
+    let t = u32at(rec, 0x14).ok_or("record shorter than its header")?;
+    if t == 0 {
+        return Ok(Vec::new());
+    }
+    let n = u32at(rec, t).ok_or("item table past the record")?;
+    let mut out = Vec::new();
+    for k in 0..n {
+        let (g, x) = (u32at(rec, t + 4 + 8 * k).ok_or("item entry past the record")?, u32at(rec, t + 8 + 8 * k).ok_or("item entry past the record")?);
+        if g == 0 && x == 0 {
+            continue;
+        }
+        let uploads = if x == 0 { Vec::new() } else { uploads_at(rec, t + x)? };
+        out.push(ItemTex { gig: t + g, uploads });
     }
     Ok(out)
 }

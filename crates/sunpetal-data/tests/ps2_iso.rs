@@ -617,3 +617,21 @@ fn anim_section_holds_every_motion_and_round_trips() {
     eprintln!("lz10: {} bytes", sunpetal_data::lz10::compress(&bytes).len());
     assert_eq!(Anim::decode(&bytes).unwrap(), anim);
 }
+
+#[test]
+fn item_models_have_their_own_t_blocks() {
+    use sunpetal_data::ps2::{lf, tblock};
+    let Some(iso) = env("SUNPETAL_PS2_ISO") else {
+        return;
+    };
+    let mut iso = Iso::open(File::open(iso).unwrap()).unwrap();
+    // (file, record, gig offset of the item model: the occurrence of the export's model 1067453636 / 25ed554922)
+    for (file, idx, gig) in [("R04.BIN", 11, 0x37220), ("R03.BIN", 9, 0x5f210)] {
+        let raw = iso.file(&format!("DATA/EVENT/{file}")).unwrap();
+        let arc = lf::parse(&raw).unwrap();
+        let rec = arc.data(&raw, idx).unwrap();
+        let item = tblock::item_uploads(rec).unwrap().into_iter().find(|i| i.gig == gig).unwrap_or_else(|| panic!("{file}#{idx}: no item at {gig:#x}"));
+        assert!(item.uploads.iter().any(|u| u.psm == 19), "{file}#{idx}: no PSMT8 picture");
+        assert!(item.uploads.iter().any(|u| u.psm == 0), "{file}#{idx}: no palette");
+    }
+}
