@@ -138,32 +138,47 @@ def rotation(b, anim_at, tables, idx):
     return rot5_entry(*struct.unpack_from('<5h', b, anim_at + t1 + 10 * idx))
 
 
-def pose(b, anim, node, frame, anim_at):
-    """(T, R) of one node at an integer frame, on a sample (between samples: the previous one)."""
+def pose(b, anim, node, frame, anim_at, lerp=False):
+    """(T, R) of one node at a frame. Default: the sample at or before an integer frame. `lerp`: a fractional
+    frame, translation and rotation matrix element-wise interpolated between neighbouring samples (what the
+    game's NNS does for tracks stepping 2 or 4 frames; checked against the game in `check_pose.py`)."""
     nd = anim['nodes'][node]
     t, r = tracks(nd['flags'], nd['words'])
+    ident = [[1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0]]
     if t[0] is None:
-        return (0.0, 0.0, 0.0), [[1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0]]
+        return (0.0, 0.0, 0.0), ident
+
+    def at(trk, frame_i, kind):
+        """sample index and weight of the next one for a track"""
+        shift = sample_shape(trk[1])[0]
+        n = sample_count(anim['frames'], trk[1])
+        pos = frame / (1 << shift) if lerp else frame_i >> shift
+        i = min(int(pos), n - 1)
+        return i, (pos - i if lerp and i + 1 < n else 0.0), n
+
     def val(trk):
         if trk[0] == 'const':
             w = trk[1]
             return (w - (1 << 32) if w >> 31 else w) / 4096
-        shift, s16, _ = sample_shape(trk[1])
-        i = frame >> shift
-        if s16:
-            return struct.unpack_from('<h', b, anim_at + trk[2] + 2 * i)[0] / 4096
-        return struct.unpack_from('<i', b, anim_at + trk[2] + 4 * i)[0] / 4096
+        s16 = sample_shape(trk[1])[1]
+        i, f, _ = at(trk, int(frame), 't')
+        rd = (lambda k: struct.unpack_from('<h', b, anim_at + trk[2] + 2 * k)[0] / 4096) if s16 else (lambda k: struct.unpack_from('<i', b, anim_at + trk[2] + 4 * k)[0] / 4096)
+        return rd(i) * (1 - f) + rd(i + 1) * f if f else rd(i)
     tv = tuple(val(x) for x in t)
     if r is None:
-        return tv, [[1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0]]
+        return tv, ident
     if r[0] == 'const':
-        idx = r[1]
-    else:
-        idx = struct.unpack_from('<H', b, anim_at + r[2] + 2 * (frame >> sample_shape(r[1])[0]))[0]
-    return tv, rotation(b, anim_at, anim['tables'], idx)
+        return tv, rotation(b, anim_at, anim['tables'], r[1])
+    i, f, _ = at(r, int(frame), 'r')
+    idx = lambda k: struct.unpack_from('<H', b, anim_at + r[2] + 2 * k)[0]
+    r0 = rotation(b, anim_at, anim['tables'], idx(i))
+    if not f:
+        return tv, r0
+    r1 = rotation(b, anim_at, anim['tables'], idx(i + 1))
+    return tv, [[r0[a][c] * (1 - f) + r1[a][c] * f for c in range(3)] for a in range(3)]
 
 
-def world_matrices(model, b, anim, frame):
+def world_matrices(model, b, anim, frame, lerp=False):
     """The model's node world matrices (row-vector 4 x 3, as `nsbmd.Model.nodes[i]['world']`) with the
     animation's translation and rotation at `frame`; the scale stays the model's. Nodes the animation has
     no record for (more nodes than records) keep the model's own local matrix."""
@@ -174,7 +189,7 @@ def world_matrices(model, b, anim, frame):
             return done[i]
         nd = model.nodes[i]
         if i < len(anim['nodes']):
-            t, r = pose(b, anim, i, frame, anim['at'])
+            t, r = pose(b, anim, i, frame, anim['at'], lerp)
             local = nsbmd.local_matrix(t, r, nd['s'])
         else:
             local = nd['local']

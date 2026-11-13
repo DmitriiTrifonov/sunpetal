@@ -247,13 +247,13 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
         }
         "batches" => {
             // the frame's polygons by where the game sent them from: model file, model, mesh (docs/ULTIMATE-IMPORT.md, У3.4)
-            let mut by: std::collections::BTreeMap<(String, u16, String, u8), (u32, u32)> = Default::default();
+            let mut by: std::collections::BTreeMap<(String, u16, String, u8), (u32, u32, [i32; 16])> = Default::default();
             let (mut none, mut all) = (0u32, 0u32);
-            for (m, polys, slot) in debug::frame_models() {
+            for (m, polys, slot, pos) in debug::frame_models() {
                 all += polys;
                 match m {
                     Some(m) => {
-                        let e = by.entry((m.model, m.mesh, m.mesh_name, slot)).or_default();
+                        let e = by.entry((m.model, m.mesh, m.mesh_name, slot)).or_insert((0, 0, pos));
                         (e.0, e.1) = (e.0 + 1, e.1 + polys);
                     }
                     None => none += polys,
@@ -261,9 +261,30 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             }
             let rows: Vec<Value> = by
                 .iter()
-                .map(|((model, mesh, name, slot), (runs, polys))| json!({"model": model, "mesh": mesh, "name": name, "slot": slot, "runs": runs, "polys": polys}))
+                .map(|((model, mesh, name, slot), (runs, polys, pos))| json!({"model": model, "mesh": mesh, "name": name, "slot": slot, "runs": runs, "polys": polys, "pos": pos}))
                 .collect();
             done(json!({"polys": all, "unnamed": none, "meshes": rows}))
+        }
+        "anims" => {
+            // animation objects in RAM: which .nsbca file (address, size) and its frame (docs/ULTIMATE-IMPORT.md, У3.6)
+            let rows: Vec<Value> = debug::anim_objects()
+                .into_iter()
+                .map(|a| json!({"object": format!("{:08X}", a.object), "file": format!("{:08X}", a.file), "size": a.size, "frame": a.frame as f64 / 4096.0}))
+                .collect();
+            done(json!({"anims": rows}))
+        }
+        "motions" => {
+            // motion sets (hero and other actors): table, objects, the one played now
+            let anims = debug::anim_objects();
+            let sets: Vec<Value> = debug::motion_sets()
+                .into_iter()
+                .map(|m| {
+                    let frame = m.current.and_then(|c| anims.iter().find(|a| a.object == m.objects[c])).map(|a| a.frame as f64 / 4096.0);
+                    json!({"record_field": format!("{:08X}", m.record_field), "table": format!("{:08X}", m.table), "count": m.objects.len(),
+                        "current": m.current, "current_object": m.current.map(|c| format!("{:08X}", m.objects[c])), "frame": frame})
+                })
+                .collect();
+            done(json!({"motions": sets}))
         }
         "poke" => {
             let addr = address(w.first().ok_or("poke ADDR VALUE")?)?;

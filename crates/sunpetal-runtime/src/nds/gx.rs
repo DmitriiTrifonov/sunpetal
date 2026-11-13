@@ -178,8 +178,8 @@ struct Lists {
     nverts_ds: u32,
     /// The batches' sources, in order: the address the batch's BEGIN_VTXS came from by DMA (0: not by DMA)
     /// the polygons it gave (`modelsrc.rs`) and the matrix-stack slot of the last MTX_RESTORE before it (the
-    /// bone of a skinned part: 255 before any). A run of batches from one address and slot is one entry.
-    srcs: Vec<(u32, u32, u8)>,
+    /// bone of a skinned part: 255 before any) and the position matrix at its first BEGIN_VTXS. A run of batches from one address and slot is one entry.
+    srcs: Vec<(u32, u32, u8, Mtx)>,
 }
 
 struct Queued {
@@ -1633,7 +1633,7 @@ impl Nds {
                 // BEGIN_VTXS
                 let g = &mut self.gx;
                 if g.build.srcs.last().map(|s| (s.0, s.2)) != Some((g.cmd_src, g.last_restore)) {
-                    g.build.srcs.push((g.cmd_src, 0, g.last_restore));
+                    g.build.srcs.push((g.cmd_src, 0, g.last_restore, g.mtx_pos));
                 }
                 #[cfg(feature = "debug-tools")]
                 {
@@ -2173,9 +2173,9 @@ impl Nds {
     }
 
     /// The frame being drawn: each run of batches' model and mesh (`None`: not out of a model file) and its polygons.
-    pub(crate) fn frame_models(&mut self) -> Vec<(Option<super::modelsrc::ModelAt>, u32, u8)> {
+    pub(crate) fn frame_models(&mut self) -> Vec<(Option<super::modelsrc::ModelAt>, u32, u8, [i32; 16])> {
         let srcs = self.gx.render.srcs.clone();
         let at = self.models_at(&srcs.iter().map(|s| s.0).collect::<Vec<_>>());
-        at.into_iter().zip(srcs).map(|(m, s)| (m, s.1, s.2)).collect()
+        at.into_iter().zip(srcs).map(|(m, s)| (m, s.1, s.2, s.3)).collect()
     }
 }

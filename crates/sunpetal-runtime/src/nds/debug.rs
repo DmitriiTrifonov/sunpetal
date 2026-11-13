@@ -235,8 +235,8 @@ pub(crate) fn on_enter(c: &mut Cpu, key: u32) {
 }
 
 /// The frame being drawn, by model and mesh: the polygons of each (`None`: batches not out of a model file) and
-/// the matrix-stack slot of the last MTX_RESTORE before it (255: none).
-pub fn frame_models() -> Vec<(Option<super::modelsrc::ModelAt>, u32, u8)> {
+/// the matrix-stack slot of the last MTX_RESTORE before it (255: none) and the position matrix (fx 20.12) at its first batch.
+pub fn frame_models() -> Vec<(Option<super::modelsrc::ModelAt>, u32, u8, [i32; 16])> {
     super::nds(|n| n.frame_models())
 }
 
@@ -253,6 +253,111 @@ pub fn peek(addr: u32, len: usize) -> Option<Vec<u8>> {
 /// Writes `data` at `addr` of the ARM9's memory; false if it is not memory.
 pub fn poke(addr: u32, data: &[u8]) -> bool {
     machine(|m| m.mem.write_bytes(9, addr, data))
+}
+
+/// An NNS animation object found in RAM (docs/ULTIMATE-IMPORT.md, У3.6).
+#[derive(Debug, PartialEq, Eq)]
+pub struct AnimObject {
+    pub object: u32,
+    /// Address and size of the raw `.nsbca` file the object plays.
+    pub file: u32,
+    pub size: u32,
+    /// Frame, fx32 (1.0 = 0x1000).
+    pub frame: u32,
+}
+
+/// Animation objects in a main-RAM image `ram` (based at `base`): the game loads each `.nsbca` raw (`BCA0`),
+/// its record (`J\0AC`) is at `JNT0 + 0x30`; an object is a block whose +8 points to that record (+0 frame).
+pub fn anim_objects_in(ram: &[u8], base: u32) -> Vec<AnimObject> {
+    let u32_at = |o: usize| u32::from_le_bytes([ram[o], ram[o + 1], ram[o + 2], ram[o + 3]]);
+    let mut out = Vec::new();
+    let mut at = 0;
+    while let Some(p) = ram[at..].windows(6).position(|w| w == b"BCA0\xff\xfe") {
+        let f = at + p;
+        at = f + 1;
+        if f + 0x18 > ram.len() {
+            break;
+        }
+        let size = u32_at(f + 8) as usize;
+        if size == 0 || size > 0x80000 || f + size > ram.len() || &ram[f + 0x14..f + 0x18] != b"JNT0" {
+            continue;
+        }
+        let count = u16::from_le_bytes([ram[f + 14], ram[f + 15]]) as usize;
+        for k in 0..count {
+            if 16 + 4 * k + 4 > size {
+                break;
+            }
+            let rec = base + (f as u32) + u32_at(f + 16 + 4 * k) + 0x30;
+            let needle = rec.to_le_bytes();
+            for (i, w) in ram.windows(4).enumerate() {
+                if i % 4 == 0 && i >= 8 && w == needle && i + 4 <= ram.len() - 4 {
+                    let next = u32_at(i + 4);
+                    if (base..base + ram.len() as u32).contains(&next) {
+                        out.push(AnimObject { object: base + i as u32 - 8, file: base + f as u32, size: size as u32, frame: u32_at(i - 8) });
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// A motion table (consecutive pointers to animation objects) with the record that points at it.
+#[derive(Debug, PartialEq, Eq)]
+pub struct MotionSet {
+    /// Address of the record's field that holds the table pointer (+8 of it is the current object).
+    pub record_field: u32,
+    pub table: u32,
+    /// Objects of the table, in table order.
+    pub objects: Vec<u32>,
+    /// Index in `objects` of the object the record plays now (`None` if the +0 slot of the field is not one of them).
+    pub current: Option<usize>,
+}
+
+/// Motion sets in `ram`: a table is >= 3 consecutive words that are animation objects (`known`); the record
+/// that plays it keeps the table pointer at +8 after the current object pointer (the hero at C02_01: 0228FE10
+/// current, 0228FE18 table 0229C990; stand = M0101, walk = M0102).
+pub fn motion_sets_in(ram: &[u8], base: u32, known: &[u32]) -> Vec<MotionSet> {
+    let u32_at = |o: usize| u32::from_le_bytes([ram[o], ram[o + 1], ram[o + 2], ram[o + 3]]);
+    let n = ram.len() / 4;
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < n {
+        if !known.contains(&u32_at(i * 4)) {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < n && known.contains(&u32_at(i * 4)) {
+            i += 1;
+        }
+        if i - start < 3 {
+            continue;
+        }
+        let table = base + 4 * start as u32;
+        let objects: Vec<u32> = (start..i).map(|k| u32_at(k * 4)).collect();
+        for k in 2..n {
+            if u32_at(k * 4) == table {
+                let cur = u32_at((k - 2) * 4);
+                out.push(MotionSet { record_field: base + 4 * k as u32, table, current: objects.iter().position(|&o| o == cur), objects: objects.clone() });
+            }
+        }
+    }
+    out
+}
+
+/// The motion sets the game holds now.
+pub fn motion_sets() -> Vec<MotionSet> {
+    let Some(ram) = peek(MAIN_RAM.start, (MAIN_RAM.end - MAIN_RAM.start) as usize) else {
+        return Vec::new();
+    };
+    let known: Vec<u32> = anim_objects_in(&ram, MAIN_RAM.start).iter().map(|a| a.object).collect();
+    motion_sets_in(&ram, MAIN_RAM.start, &known)
+}
+
+/// The animation objects the game holds now.
+pub fn anim_objects() -> Vec<AnimObject> {
+    peek(MAIN_RAM.start, (MAIN_RAM.end - MAIN_RAM.start) as usize).map(|ram| anim_objects_in(&ram, MAIN_RAM.start)).unwrap_or_default()
 }
 
 /// The addresses of main RAM where `needle` is.
@@ -272,4 +377,49 @@ pub fn find(needle: &[u8]) -> Vec<u32> {
 /// `s` as UTF-16LE bytes, the script text's encoding.
 pub fn utf16(s: &str) -> Vec<u8> {
     s.encode_utf16().flat_map(u16::to_le_bytes).collect()
+}
+
+#[cfg(test)]
+mod anim_tests {
+    use super::*;
+
+    #[test]
+    fn finds_object_by_record_pointer() {
+        let base = 0x0200_0000u32;
+        let mut ram = vec![0u8; 0x400];
+        let f = 0x40;
+        ram[f..f + 6].copy_from_slice(b"BCA0\xff\xfe");
+        ram[f + 8..f + 12].copy_from_slice(&0x100u32.to_le_bytes());
+        ram[f + 14..f + 16].copy_from_slice(&1u16.to_le_bytes());
+        ram[f + 16..f + 20].copy_from_slice(&0x4u32.to_le_bytes()); // JNT0-relative record offset
+        ram[f + 0x14..f + 0x18].copy_from_slice(b"JNT0");
+        let rec = base + f as u32 + 4 + 0x30;
+        let o = 0x200;
+        ram[o..o + 4].copy_from_slice(&0x3000u32.to_le_bytes());
+        ram[o + 8..o + 12].copy_from_slice(&rec.to_le_bytes());
+        ram[o + 12..o + 16].copy_from_slice(&(base + 0x10).to_le_bytes());
+        // the pointer is at +8 and the field after it (+0xC) must point into RAM (as in anim_probe.py: word at +4 of the hit)
+        let got = anim_objects_in(&ram, base);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].object, base + o as u32);
+        assert_eq!(got[0].frame, 0x3000);
+    }
+
+    #[test]
+    fn finds_motion_set_and_current() {
+        let base = 0x0200_0000u32;
+        let mut ram = vec![0u8; 0x200];
+        let objs = [0x0200_0100u32, 0x0200_0110, 0x0200_0120];
+        for (k, o) in objs.iter().enumerate() {
+            ram[0x40 + 4 * k..0x44 + 4 * k].copy_from_slice(&o.to_le_bytes());
+        }
+        // record: current object at 0x80, table pointer at 0x88
+        ram[0x80..0x84].copy_from_slice(&objs[1].to_le_bytes());
+        ram[0x88..0x8C].copy_from_slice(&(base + 0x40).to_le_bytes());
+        let sets = motion_sets_in(&ram, base, &objs);
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].table, base + 0x40);
+        assert_eq!(sets[0].record_field, base + 0x88);
+        assert_eq!(sets[0].current, Some(1));
+    }
 }
