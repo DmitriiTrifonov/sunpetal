@@ -6,5 +6,6 @@ pub mod gim;
 pub mod gs;
 pub mod iso;
 pub mod lf;
+pub mod pose;
 pub mod sha1;
 pub mod tblock;

@@ -416,3 +416,57 @@ fn gim_motions_match_the_export() {
     assert!(bad.is_empty());
     assert_eq!(seen.len(), 399);
 }
+
+/// У1.10: poses against `tools/ult/pose_vectors.py` (the reference `gigpose.py`): needs build/ult/pose_vectors.json.
+#[test]
+fn poses_match_the_reference_vectors() {
+    use sunpetal_data::ps2::{gig, gim, lf, pose};
+    let (Some(iso), Some(export)) = (env("SUNPETAL_PS2_ISO"), env("SUNPETAL_PS2_EXPORT")) else {
+        return;
+    };
+    let vectors = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../build/ult/pose_vectors.json");
+    let Ok(vectors) = std::fs::read(&vectors) else {
+        eprintln!("skipped: no build/ult/pose_vectors.json (tools/ult/pose_vectors.py)");
+        return;
+    };
+    let vectors: serde_json::Value = serde_json::from_slice(&vectors).unwrap();
+    let assets = export.join("../../assets");
+    let first = |tsv: &str, id: &str| -> String {
+        std::fs::read_to_string(assets.join(tsv)).unwrap().lines().skip(1).map(|l| l.split('\t').collect::<Vec<_>>()).find(|c| c[0] == id).unwrap()[6].to_string()
+    };
+    let mut iso = Iso::open(File::open(iso).unwrap()).unwrap();
+    let mut files = std::collections::HashMap::new();
+    let (mut worst, mut frames) = (0f64, 0);
+    for pair in vectors.as_array().unwrap() {
+        let (mid, mo) = (pair["model"].as_str().unwrap(), pair["motion"].as_str().unwrap());
+        let (mf, mrest) = first("models.tsv", mid).split_once('#').map(|(a, b)| (a.to_string(), b.to_string())).unwrap();
+        let at = usize::from_str_radix(mrest.split_once("@0x").unwrap().1, 16).unwrap();
+        let path = load_file(&mut iso, &mut files, &mf);
+        let g = gig::parse(&files[&path][at..]).unwrap();
+        let (gf, grest) = first("motions.tsv", mo).split_once('#').map(|(a, b)| (a.to_string(), b.to_string())).unwrap();
+        let (idx, off) = grest.split_once("@0x").unwrap();
+        let path = load_file(&mut iso, &mut files, &gf);
+        let raw = &files[&path];
+        let pk = lf::parse(raw).unwrap().data(raw, idx.parse().unwrap()).unwrap().to_vec();
+        let m = gim::parse(&pk[usize::from_str_radix(off, 16).unwrap()..]).unwrap();
+        let joints = &g.objects[0].joints;
+        for f in pair["frames"].as_array().unwrap() {
+            let keys = pose::sample(joints, &m, f["frame"].as_f64().unwrap(), true);
+            let world = pose::world(joints, &keys);
+            for (k, kj) in keys.iter().zip(f["keys"].as_array().unwrap()) {
+                for (a, b) in k.iter().zip(kj.as_array().unwrap()) {
+                    worst = worst.max((a - b.as_f64().unwrap()).abs());
+                }
+            }
+            for (w, wj) in world.iter().zip(f["world"].as_array().unwrap()) {
+                for (a, b) in w.iter().flatten().zip(wj.as_array().unwrap()) {
+                    worst = worst.max((a - b.as_f64().unwrap()).abs());
+                }
+            }
+            frames += 1;
+        }
+    }
+    eprintln!("{} pairs, {frames} frames, worst deviation {worst:e}", vectors.as_array().unwrap().len());
+    assert!(worst < 1e-4);
+    assert_eq!(vectors.as_array().unwrap().len(), 20);
+}
