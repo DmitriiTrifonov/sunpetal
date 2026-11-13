@@ -1,0 +1,180 @@
+# Глава DS ↔ ScenarioID ↔ файл PS2 (tools/ult/make_scenario.py; руками не править).
+# ds_lines: реплик главы в text/ru.csv; ps2_lines: sentences в text/<R>.tsv выгрузки; diff = ps2/ds - 1;
+# ok: |diff| <= 0,10. В DS реплик больше в большинстве глав: проверка ключом «число реплик» слабая, порядок
+# глав взят из SIDtoRID (он описывает счёт лучше прямой нумерации: разброс 0,14 против 0,17).
+
+[[scenario]]
+scenario_id = 0
+ps2 = "OP"
+ds = "C00"
+ds_lines = 352
+ps2_lines = 248
+diff = -0.295
+ok = false
+
+[[scenario]]
+scenario_id = 1
+ps2 = "R01"
+ds = "C01"
+ds_lines = 365
+ps2_lines = 348
+diff = -0.047
+ok = true
+
+[[scenario]]
+scenario_id = 2
+ps2 = "R02"
+ds = "C02"
+ds_lines = 432
+ps2_lines = 419
+diff = -0.030
+ok = true
+
+[[scenario]]
+scenario_id = 3
+ps2 = "R03"
+ds = "C03"
+ds_lines = 360
+ps2_lines = 345
+diff = -0.042
+ok = true
+
+[[scenario]]
+scenario_id = 4
+ps2 = "R04"
+ds = "C04"
+ds_lines = 542
+ps2_lines = 462
+diff = -0.148
+ok = false
+
+[[scenario]]
+scenario_id = 5
+ps2 = "R05"
+ds = "C05"
+ds_lines = 579
+ps2_lines = 495
+diff = -0.145
+ok = false
+
+[[scenario]]
+scenario_id = 6
+ps2 = "R06"
+ds = "C06"
+ds_lines = 363
+ps2_lines = 356
+diff = -0.019
+ok = true
+
+[[scenario]]
+scenario_id = 7
+ps2 = "R07"
+ds = "C07"
+ds_lines = 439
+ps2_lines = 351
+diff = -0.200
+ok = false
+
+[[scenario]]
+scenario_id = 8
+ps2 = "R10"
+ds = "C08"
+ds_lines = 329
+ps2_lines = 299
+diff = -0.091
+ok = true
+
+[[scenario]]
+scenario_id = 9
+ps2 = "R08"
+ds = "C09"
+ds_lines = 473
+ps2_lines = 349
+diff = -0.262
+ok = false
+
+[[scenario]]
+scenario_id = 10
+ps2 = "R09"
+ds = "C10"
+ds_lines = 530
+ps2_lines = 488
+diff = -0.079
+ok = true
+
+[[scenario]]
+scenario_id = 11
+ps2 = "R11"
+ds = "C11"
+ds_lines = 592
+ps2_lines = 376
+diff = -0.365
+ok = false
+
+[[scenario]]
+scenario_id = 12
+ps2 = "R12"
+ds = "C12"
+ds_lines = 459
+ps2_lines = 308
+diff = -0.329
+ok = false
+
+[[scenario]]
+scenario_id = 13
+ps2 = "R13"
+ds = "C13"
+ds_lines = 190
+ps2_lines = 153
+diff = -0.195
+ok = false
+
+[[scenario]]
+scenario_id = 14
+ps2 = "R15"
+ds = "C14"
+ds_lines = 844
+ps2_lines = 782
+diff = -0.073
+ok = true
+
+[[scenario]]
+scenario_id = 15
+ps2 = "R16"
+ds = "C15"
+ds_lines = 282
+ps2_lines = 248
+diff = -0.121
+ok = false
+
+[[scenario]]
+scenario_id = 16
+ps2 = "R17"
+ds = "C16"
+ds_lines = 248
+ps2_lines = 245
+diff = -0.012
+ok = true
+
+[[scenario]]
+scenario_id = 17
+ps2 = "R18"
+ds = "C17"
+ds_lines = 403
+ps2_lines = 384
+diff = -0.047
+ok = true
+
+[[scenario]]
+scenario_id = 18
+ps2 = "R19"
+ds = "C18"
+ds_lines = 737
+ps2_lines = 445
+diff = -0.396
+ok = false
+
+[[scenario]]
+scenario_id = 20
+ps2 = "R00"
+note = "новая игра: пара в DS не определена (нужна проверка по сценам)"
