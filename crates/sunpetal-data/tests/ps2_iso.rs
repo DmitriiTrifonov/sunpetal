@@ -470,3 +470,45 @@ fn poses_match_the_reference_vectors() {
     assert!(worst < 1e-4);
     assert_eq!(vectors.as_array().unwrap().len(), 20);
 }
+
+#[test]
+fn scene_databases_give_the_reference_roles_and_edges() {
+    use sunpetal_data::ps2::{lf, scenedb};
+    let (Some(iso), Some(export)) = (env("SUNPETAL_PS2_ISO"), env("SUNPETAL_PS2_EXPORT")) else {
+        return;
+    };
+    let assets = export.join("../../assets");
+    let table =
+        |name: &str| -> Vec<Vec<String>> { std::fs::read_to_string(assets.join(name)).unwrap().lines().skip(1).map(|l| l.split('\t').map(String::from).collect()).collect() };
+    let roles_ref = table("roles.tsv");
+    let mut names: Vec<String> = roles_ref.iter().map(|r| r[0].clone()).collect();
+    names.dedup();
+    let mut iso = Iso::open(File::open(iso).unwrap()).unwrap();
+    let mut files = std::collections::HashMap::new();
+    let (mut roles_mine, mut edges_mine) = (Vec::new(), Vec::new());
+    for name in &names {
+        let path = load_file(&mut iso, &mut files, name);
+        let raw = &files[&path];
+        let arc = lf::parse(raw).unwrap();
+        let db = scenedb::parse_db(arc.data(raw, 0).unwrap()).unwrap();
+        for (i, r) in scenedb::roles(&db, arc.records.len()).into_iter().enumerate() {
+            roles_mine.push(vec![name.clone(), i.to_string(), arc.records[i].at.to_string(), arc.records[i].size.to_string(), r]);
+        }
+        edges_mine.extend(scenedb::edges(name, raw).unwrap().into_iter().map(Vec::from));
+    }
+    roles_mine.sort();
+    let mut want = roles_ref.clone();
+    want.sort();
+    assert_eq!(roles_mine, want, "roles");
+    let mut edges_ref: Vec<Vec<String>> = table("edges.tsv");
+    for e in &mut edges_ref {
+        e.resize(4, String::new());
+    }
+    edges_ref.sort();
+    edges_mine.sort();
+    eprintln!("{} scenes, {} roles, {} edges", names.len(), roles_mine.len(), edges_mine.len());
+    let missing: Vec<_> = edges_ref.iter().filter(|e| edges_mine.binary_search(e).is_err()).take(5).collect();
+    let extra: Vec<_> = edges_mine.iter().filter(|e| edges_ref.binary_search(e).is_err()).take(5).collect();
+    assert!(missing.is_empty() && extra.is_empty(), "missing {missing:?} extra {extra:?}");
+    assert_eq!((names.len(), edges_mine.len()), (20, 4270));
+}
