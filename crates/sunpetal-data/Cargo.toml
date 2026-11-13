@@ -12,5 +12,7 @@ workspace = true
 ab_glyph = "0.2.32"
 
 [dev-dependencies]
+# decodes the reference pictures of the export in the PS2 tests
+png = "0.17"
 # a font with Latin, Greek and Cyrillic for the tests of the font maker; not shipped
 epaint_default_fonts = "0.37.0"

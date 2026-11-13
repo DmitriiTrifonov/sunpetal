@@ -2426,7 +2426,7 @@
   {
    "id": "K-210",
    "t": "Ультимативная У1: читатель PS2 на Rust (sunpetal-data::ps2: ISO, LF, BPE, GS, T-блок, GIG, GIM, поза, БД сцены, события); замена g101_*.py",
-   "col": "backlog",
+   "col": "doing",
    "r": 10.0,
    "i": 3.0,
    "c": 0.8,

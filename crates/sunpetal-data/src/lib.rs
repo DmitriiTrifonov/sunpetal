@@ -10,6 +10,7 @@ pub mod models;
 pub mod nftr;
 pub mod nitrofs;
 pub mod pack2d;
+pub mod ps2;
 pub mod report;
 pub mod script;
 pub mod spm2;
