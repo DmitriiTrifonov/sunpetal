@@ -175,7 +175,9 @@ def pose(b, anim, node, frame, anim_at, lerp=False):
     if not f:
         return tv, r0
     r1 = rotation(b, anim_at, anim['tables'], idx(i + 1))
-    return tv, [[r0[a][c] * (1 - f) + r1[a][c] * f for c in range(3)] for a in range(3)]
+    m = [[r0[a][c] * (1 - f) + r1[a][c] * f for c in range(3)] for a in range(3)]
+    m = [[v / (sum(x * x for x in row) ** 0.5) for v in row] for row in m]  # the game's rows stay unit (checked, check_pose.py)
+    return tv, m
 
 
 def world_matrices(model, b, anim, frame, lerp=False):

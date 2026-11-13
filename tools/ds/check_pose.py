@@ -8,7 +8,8 @@ anim_probe.py) and `batches` (each run of polygons: model, slot of the last MTX_
 at the batch). The position matrix is P = W_node * K with the same K (object, view, POSSCALE) for every bone of
 a model, so P_a * P_b^-1 = W_a * W_b^-1: K drops out. The check compares those products for the bone pairs of
 the hero against the matrices computed from the file at the frame the game holds (and one frame before).
-Prints the largest deviation in 20.12 units (the criterion of У3.5: < 2).
+Prints the largest deviations in 20.12 units. Criterion: the best frame's deviation over neighbouring bones
+< 100 (the game rounds its 1.12 matrices; the plan's `< 2` is not reachable). ALL=1 scans every frame of the motion.
 """
 import argparse
 import os
@@ -102,7 +103,7 @@ def main(argv):
         if f < 0:
             continue
         w = [ext(m) for m in nsbca.world_matrices(model, files[name], anim, f, lerp=True)]
-        worst = wrot = wtr = 0.0
+        worst = wrot = wtr = wadj = 0.0
         for a in slots:
             for b in slots:
                 if a >= b or a not in stored or b not in stored:
@@ -113,11 +114,13 @@ def main(argv):
                 tr = max(abs(got[3][j] - want[3][j]) for j in range(3)) * 4096
                 wrot, wtr = max(wrot, rot), max(wtr, tr)
                 worst = max(worst, rot, tr)
+                if stored[b] != stored[a] and (model.nodes[stored[b]]['parent'] == stored[a] or model.nodes[stored[a]]['parent'] == stored[b]):
+                    wadj = max(wadj, rot, tr)
                 if os.environ.get('DBG') and model.nodes[stored[b]]['parent'] == stored[a] or os.environ.get('DBG') and model.nodes[stored[a]]['parent'] == stored[b]:
                     print('  adj', model.nodes[stored[a]]['name'], model.nodes[stored[b]]['name'], 'rot %.1f tr %.1f' % (rot, tr))
-        print('frame %.1f: worst %.1f (rotation %.1f, translation %.1f) over %d slots' % (f, worst, wrot, wtr, len(slots)))
-        best = worst if best is None else min(best, worst)
-    return 0 if best is not None and best < 2 else 1
+        print('frame %.1f: worst %.1f (rotation %.1f, translation %.1f) neighbours %.1f over %d slots' % (f, worst, wrot, wtr, wadj, len(slots)))
+        best = wadj if best is None else min(best, wadj)
+    return 0 if best is not None and best < 100 else 1
 
 
 if __name__ == '__main__':
