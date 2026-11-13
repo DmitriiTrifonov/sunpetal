@@ -512,3 +512,62 @@ fn scene_databases_give_the_reference_roles_and_edges() {
     assert!(missing.is_empty() && extra.is_empty(), "missing {missing:?} extra {extra:?}");
     assert_eq!((names.len(), edges_mine.len()), (20, 4270));
 }
+
+#[test]
+fn events_disassemble_and_their_calls_match_the_export() {
+    use sunpetal_data::ps2::{events, lf, scenedb};
+    let (Some(iso), Some(export)) = (env("SUNPETAL_PS2_ISO"), env("SUNPETAL_PS2_EXPORT")) else {
+        return;
+    };
+    let roles = std::fs::read_to_string(export.join("../../assets/roles.tsv")).unwrap();
+    let mut names: Vec<&str> = roles.lines().skip(1).map(|l| l.split('\t').next().unwrap()).collect();
+    names.dedup();
+    let mut iso = Iso::open(File::open(iso).unwrap()).unwrap();
+    let mut files = std::collections::HashMap::new();
+    let (mut total, mut bad_ops, mut no_end, mut ncalls) = (0, 0, 0, 0);
+    for name in names {
+        let path = load_file(&mut iso, &mut files, name);
+        let raw = &files[&path];
+        let arc = lf::parse(raw).unwrap();
+        let rec0 = arc.data(raw, 0).unwrap();
+        let db = scenedb::parse_db(rec0).unwrap();
+        let mut mine = Vec::new();
+        for (ei, words) in events::static_events(rec0, &db).unwrap() {
+            total += 1;
+            let mut ops = events::dis(&words, 0, 20000, false);
+            while matches!(ops.last(), Some((_, events::Op::Bad(0)))) {
+                ops.pop();
+            }
+            if !matches!(ops.last(), Some((_, events::Op::End | events::Op::Simple(0x1B)))) {
+                no_end += 1;
+            }
+            bad_ops += ops.iter().filter(|o| matches!(o.1, events::Op::Bad(_))).count();
+            mine.extend(events::calls(ei, &ops));
+        }
+        let stem = name.trim_end_matches(".BIN");
+        let jsonl = std::fs::read_to_string(export.join("events").join(format!("{stem}.jsonl"))).unwrap();
+        let want: Vec<serde_json::Value> = jsonl.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        assert_eq!(mine.len(), want.len(), "{name}: calls");
+        for (a, b) in mine.iter().zip(&want) {
+            let args_ok = a.args.len() == b["args"].as_array().unwrap().len()
+                && a.args.iter().zip(b["args"].as_array().unwrap()).all(|(x, y)| match (x, y) {
+                    (None, y) => y.is_null(),
+                    (Some(events::Value::Int(i)), y) => y.as_i64() == Some(*i),
+                    (Some(events::Value::Float(f)), y) => y.as_f64().map(|v| v as f32) == Some(*f as f32), // serde_json parses doubles inexactly
+                });
+            let ok = b["event"] == a.event
+                && b["pc"] == a.pc
+                && b["seq"] == a.seq
+                && b["x"] == a.x
+                && b["m"] == a.m
+                && b["method"].as_str().and_then(|s| s.parse::<u16>().ok()) == Some(a.method)
+                && b["class"] == events::class_name(a.class).map_or(a.class.to_string(), String::from)
+                && args_ok;
+            assert!(ok, "{name}: {a:?} vs {b}");
+        }
+        ncalls += mine.len();
+    }
+    eprintln!("{total} events, {ncalls} calls, unknown ops {bad_ops}, without end {no_end}");
+    assert_eq!((bad_ops, no_end), (0, 0));
+    assert_eq!(total, 1384);
+}
