@@ -158,3 +158,99 @@ fn gs_uploads_decode_to_the_reference_pictures_of_the_export() {
     assert!(bad.is_empty());
     assert!(want.is_empty(), "{} of {total} pictures not found", want.len());
 }
+
+#[test]
+fn materials_find_the_reference_pictures_in_the_t_blocks() {
+    use sunpetal_data::ps2::{gs, lf, tblock};
+    let (Some(iso), Some(export)) = (env("SUNPETAL_PS2_ISO"), env("SUNPETAL_PS2_EXPORT")) else {
+        return;
+    };
+    let assets = export.join("../../assets");
+    // role of a record, from the reference table (the scene database is a later step of the reader)
+    let roles: std::collections::HashMap<(String, usize), String> = std::fs::read_to_string(assets.join("roles.tsv"))
+        .unwrap()
+        .lines()
+        .skip(1)
+        .map(|l| l.split('\t').collect::<Vec<_>>())
+        .map(|c| ((c[0].to_string(), c[1].parse().unwrap()), c[4].to_string()))
+        .collect();
+    let mut iso = Iso::open(File::open(iso).unwrap()).unwrap();
+    let mut archives = std::collections::HashMap::new();
+    let mut cache: std::collections::HashMap<(String, usize), (Vec<gs::Upload>, tblock::Memory)> = Default::default();
+    let png_rgba = |name: &str| read_png(&export.join("textures").join(format!("{name}.png"))).2;
+    let (mut total, mut found, mut missed, mut null_ok, mut null_total) = (0, 0, Vec::new(), 0, 0);
+    let mut paths: Vec<_> = std::fs::read_dir(export.join("models")).unwrap().map(|e| e.unwrap().path()).collect();
+    paths.sort();
+    for p in paths.iter().filter(|p| p.extension().is_some_and(|e| e == "json")) {
+        let j: serde_json::Value = serde_json::from_slice(&std::fs::read(p).unwrap()).unwrap();
+        let occ: Vec<(String, usize, tblock::Role)> = j["occurrences"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|o| {
+                let (file, rest) = o.as_str()?.split_once('#')?;
+                let idx: usize = rest.split('@').next()?.parse().ok()?;
+                let role = match roles.get(&(file.to_string(), idx))?.as_str() {
+                    "Scene3D" => tblock::Role::Scene3D,
+                    "Chara" => tblock::Role::Chara,
+                    _ => return None,
+                };
+                Some((file.to_string(), idx, role))
+            })
+            .collect();
+        if occ.is_empty() {
+            continue;
+        }
+        for (file, idx, role) in &occ {
+            let key = (file.clone(), *idx);
+            if cache.contains_key(&key) {
+                continue;
+            }
+            if !archives.contains_key(file) {
+                let raw = iso.file(&format!("DATA/EVENT/{file}")).unwrap();
+                let arc = lf::parse(&raw).unwrap();
+                archives.insert(file.clone(), (raw, arc));
+            }
+            let (raw, arc) = &archives[file];
+            let rec = arc.data(raw, *idx).unwrap();
+            let ups = tblock::uploads(rec, *role).unwrap();
+            let mem = tblock::assemble(rec, &ups);
+            cache.insert(key, (ups, mem));
+        }
+        for m in j["materials"].as_array().unwrap() {
+            let prim = u64::from_str_radix(m["prim"].as_str().unwrap().trim_start_matches("0x"), 16).unwrap();
+            if prim & 0x10 == 0 {
+                continue;
+            }
+            let t = tblock::Tex0::from_bits(u64::from_str_radix(m["tex0"].as_str().unwrap().trim_start_matches("0x"), 16).unwrap());
+            let mut mine = Vec::new();
+            for (file, idx, _) in &occ {
+                let (raw, arc) = &archives[file];
+                let rec = arc.data(raw, *idx).unwrap();
+                let (ups, mem) = &cache[&(file.clone(), *idx)];
+                if let Some(px) = tblock::material_rgba(rec, ups, mem, &t).unwrap() {
+                    mine.push(px);
+                }
+            }
+            let mut names: Vec<String> = m["texture"].as_str().map(|s| vec![s.to_string()]).unwrap_or_default();
+            names.extend(m["texture_alt"].as_array().into_iter().flatten().filter_map(|a| a.as_str().map(String::from)));
+            if names.is_empty() {
+                null_total += 1;
+                null_ok += usize::from(mine.is_empty());
+                continue;
+            }
+            total += 1;
+            let refs: Vec<Vec<u8>> = names.iter().map(|n| png_rgba(n)).collect();
+            if mine.iter().any(|px| refs.contains(px)) {
+                found += 1;
+            } else {
+                missed.push(format!("{} {} {:?} found {}", p.file_name().unwrap().to_string_lossy(), m["texture"], t, mine.len()));
+            }
+        }
+    }
+    eprintln!(
+        "{found}/{total} materials with a reference picture found; materials without one: {null_ok}/{null_total} give nothing; first misses: {:?}",
+        &missed[..missed.len().min(5)]
+    );
+    assert!(missed.is_empty(), "{} misses", missed.len());
+}

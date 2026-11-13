@@ -2855,6 +2855,7 @@ dependencies = [
  "ab_glyph",
  "epaint_default_fonts",
  "png 0.17.16",
+ "serde_json",
 ]
 
 [[package]]
