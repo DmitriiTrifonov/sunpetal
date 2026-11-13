@@ -1,0 +1,113 @@
+# Места золотых кадров (tools/auto/golden.py, К-225, А2.6): имя, куда идти, что делать, что снимать.
+# goto: --goto Cnn_01 (начало главы на копии build/full100.sav); autoplay: --autoplay; steps: команды REPL до снимка
+# (последняя команда снимка добавляется сама, снимок обоих экранов в масштабе 1). Ключ run — перед стартом нельзя
+# менять данные: кадр должен быть воспроизводим (двух прогонов подряд хватает: хэши равны).
+
+[[place]]
+name = "c01_start"
+goto = "C01_01"
+steps = ["advance 120"]
+
+[[place]]
+name = "c02_start"
+goto = "C02_01"
+steps = ["advance 120"]
+
+[[place]]
+name = "c03_start"
+goto = "C03_01"
+steps = ["advance 120"]
+
+[[place]]
+name = "c04_start"
+goto = "C04_01"
+steps = ["advance 120"]
+
+[[place]]
+name = "c05_start"
+goto = "C05_01"
+steps = ["advance 120"]
+
+[[place]]
+name = "c06_start"
+goto = "C06_01"
+steps = ["advance 120"]
+
+[[place]]
+name = "c07_start"
+goto = "C07_01"
+steps = ["advance 120"]
+
+[[place]]
+name = "c08_start"
+goto = "C08_01"
+steps = ["advance 120"]
+
+[[place]]
+name = "c09_start"
+goto = "C09_01"
+steps = ["advance 120"]
+
+[[place]]
+name = "c10_start"
+goto = "C10_01"
+steps = ["advance 120"]
+
+[[place]]
+name = "c11_start"
+goto = "C11_01"
+steps = ["advance 120"]
+
+[[place]]
+name = "c12_start"
+goto = "C12_01"
+steps = ["advance 120"]
+
+[[place]]
+name = "c13_start"
+goto = "C13_01"
+steps = ["advance 120"]
+
+[[place]]
+name = "c14_start"
+goto = "C14_01"
+steps = ["advance 120"]
+
+[[place]]
+name = "c15_start"
+goto = "C15_01"
+steps = ["advance 120"]
+
+[[place]]
+name = "c16_start"
+goto = "C16_01"
+steps = ["advance 120"]
+
+[[place]]
+name = "c17_start"
+goto = "C17_01"
+steps = ["advance 120"]
+
+[[place]]
+name = "c18_start"
+goto = "C18_01"
+steps = ["advance 120"]
+
+# свободная ходьба и меню ходьбы (маршруты скилла screen-recon)
+[[place]]
+name = "c02_walk"
+goto = "C02_01"
+autoplay = true
+steps = ["skip 100", "advance 20"]
+
+[[place]]
+name = "c02_walk_menu"
+goto = "C02_01"
+autoplay = true
+steps = ["skip 100", "advance 20", "press START 3", "advance 40"]
+
+[[place]]
+name = "c02_suitcase"
+goto = "C02_01"
+autoplay = true
+steps = ["skip 100", "advance 20", "press START 3", "advance 40", "tap 25 43 4", "advance 100"]
