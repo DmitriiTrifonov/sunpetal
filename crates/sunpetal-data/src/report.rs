@@ -17,7 +17,7 @@ fn size(n: u64) -> String {
 /// `META` is listed but said to be unchecked; a damaged or cut file is an error.
 pub fn report(path: &Path) -> Result<String, String> {
     let meta = verify_file(path)?;
-    let c = Container::read_only(path, |t| t == b"TRAN")?;
+    let c = Container::read_only(path, |t| matches!(t, b"TRAN" | b"MODL" | b"ANIM" | b"TEXS"))?;
     let mut o = format!("{}\n", path.display());
     match &meta {
         Some(m) => {
@@ -44,6 +44,31 @@ pub fn report(path: &Path) -> Result<String, String> {
             Err(e) => o += &format!("a translation that cannot be read: {}\n", e),
         }
     }
+    for s in c.all(crate::models::TAG) {
+        match (crate::models::unpack(&s.data), crate::spm2::unpack(&s.data)) {
+            (Ok(old), Ok(new)) => {
+                let verts: usize = old.iter().map(|m| m.verts.len()).sum::<usize>() + new.iter().map(|m| m.verts.len()).sum::<usize>();
+                let (pics, bones) = (new.iter().flat_map(|m| &m.materials).filter(|m| m.picture.is_some()).count(), new.iter().map(|m| m.bones.len()).sum::<usize>());
+                o += &format!("models: {} in SPM2 ({} bones, {} materials with a picture), {} in SPM1, {} vertices\n", new.len(), bones, pics, old.len(), verts);
+            }
+            (a, b) => o += &format!("a models part that cannot be read: {}\n", a.err().or(b.err()).unwrap_or_default()),
+        }
+    }
+    for s in c.all(crate::anim::TAG) {
+        match crate::anim::Anim::unpack(&s.data) {
+            Ok(a) => {
+                let scenes: std::collections::BTreeSet<&str> = a.ids.iter().map(|i| i.0.as_str()).collect();
+                o += &format!("motions: {} motions, {} ids in {} scenes\n", a.motions.len(), a.ids.len(), scenes.len());
+            }
+            Err(e) => o += &format!("a motions part that cannot be read: {}\n", e),
+        }
+    }
+    for s in c.all(b"TEXS") {
+        match s.data.get(..4) {
+            Some(n) => o += &format!("textures: {} pictures\n", u32::from_le_bytes(n.try_into().unwrap())),
+            None => o += "a texture part that cannot be read\n",
+        }
+    }
     Ok(o)
 }
 
@@ -57,13 +82,27 @@ mod tests {
         let mut c = Container::new();
         c.add(b"TEXS", vec![0, 0, 0, 0]);
         c.add(b"TRAN", b"not a translation".to_vec());
+        let m = crate::spm2::Model { name: "room".into(), unit: 1.0, bind: None, bones: vec![], materials: vec![], verts: vec![], parts: vec![], idx: vec![] };
+        c.add(b"MODL", crate::models::pack(&[("room", m.encode())]));
+        let a = crate::anim::Anim { motions: vec![], ids: vec![] };
+        c.add(b"ANIM", a.pack());
         c.set_rom(*b"YHNP", 0x1234_ABCD);
         let dir = std::env::temp_dir().join(format!("sunpetal-report-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("r.spdata");
         c.write(&path).unwrap();
         let r = report(&path).unwrap();
-        assert!(r.contains("YHNP") && r.contains("1234ABCD") && r.contains("PS2 textures") && r.contains("cannot be read"), "{}", r);
+        assert!(
+            r.contains("YHNP")
+                && r.contains("1234ABCD")
+                && r.contains("PS2 textures")
+                && r.contains("cannot be read")
+                && r.contains("models: 1 in SPM2")
+                && r.contains("motions: 0 motions")
+                && r.contains("textures: 0 pictures"),
+            "{}",
+            r
+        );
         let mut bytes = fs::read(&path).unwrap();
         let last = bytes.len() - 1;
         bytes[last] ^= 1;

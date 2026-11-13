@@ -6,9 +6,14 @@ pub fn decompress(data: &[u8]) -> Result<Vec<u8>, String> {
     if data.len() < 4 || data[0] != 0x10 {
         return Err("not LZ10".into());
     }
-    let size = u32::from_le_bytes([data[1], data[2], data[3], 0]) as usize;
-    let mut out = Vec::with_capacity(size);
+    let mut size = u32::from_le_bytes([data[1], data[2], data[3], 0]) as usize;
     let mut pos = 4;
+    // 16 MB and more: size 0 in the header and the real one in the next four bytes (as LZ11 does)
+    if size == 0 && data.len() >= 8 {
+        size = u32::from_le_bytes(data[4..8].try_into().unwrap()) as usize;
+        pos = 8;
+    }
+    let mut out = Vec::with_capacity(size);
     let end = || "LZ10 data ends early".to_string();
     while out.len() < size {
         let flags = *data.get(pos).ok_or_else(end)?;
@@ -45,7 +50,7 @@ const CHAIN: usize = 128;
 /// with the same first three bytes (the first of the equal ones wins, the nearest).
 pub fn compress(data: &[u8]) -> Vec<u8> {
     let n = data.len();
-    let mut out = vec![0x10, n as u8, (n >> 8) as u8, (n >> 16) as u8];
+    let mut out = if n < 1 << 24 { vec![0x10, n as u8, (n >> 8) as u8, (n >> 16) as u8] } else { [&[0x10, 0, 0, 0][..], &(n as u32).to_le_bytes()].concat() };
     let hash = |p: usize| ((data[p] as usize) << 10 ^ (data[p + 1] as usize) << 5 ^ data[p + 2] as usize) & 0x7FFF;
     let mut head = vec![usize::MAX; 0x8000];
     let mut prev = vec![usize::MAX; n];
@@ -112,6 +117,14 @@ mod tests {
             v.extend_from_slice(format!("line {} of the text, again and again\r\n", i % 37).as_bytes());
         }
         v
+    }
+
+    #[test]
+    fn it_holds_more_than_16_mb() {
+        let d: Vec<u8> = (0..(1usize << 24) + 1000).map(|i| (i % 251) as u8).collect();
+        let c = compress(&d);
+        assert_eq!(&c[..8], &[0x10, 0, 0, 0, d.len() as u8, (d.len() >> 8) as u8, (d.len() >> 16) as u8, (d.len() >> 24) as u8]);
+        assert!(decompress(&c).unwrap() == d);
     }
 
     #[test]
