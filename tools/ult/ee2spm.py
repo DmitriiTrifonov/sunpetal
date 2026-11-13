@@ -29,6 +29,54 @@ j = json.load(open(os.path.join(a.dir, a.id + ".json")))
 vtx = open(os.path.join(a.dir, a.id + ".vtx.bin"), "rb").read()
 
 
+def png_alpha(path):
+    """The set of alpha values of an 8-bit RGBA or palette PNG (no PIL here); None when it is another kind."""
+    import zlib
+
+    d = open(path, "rb").read()
+    pos, idat, trns = 8, b"", None
+    while pos < len(d):
+        n, t = struct.unpack(">I4s", d[pos : pos + 8])
+        body = d[pos + 8 : pos + 8 + n]
+        pos += 12 + n
+        if t == b"IHDR":
+            w, h, bd, ct, _, _, il = struct.unpack(">IIBBBBB", body)
+        elif t == b"IDAT":
+            idat += body
+        elif t == b"tRNS":
+            trns = body
+    if ct not in (6, 3) or bd != 8 or il:
+        return None
+    bpp = 4 if ct == 6 else 1
+    raw, st, prev, out, o = zlib.decompress(idat), w * bpp, bytearray(w * bpp), set(), 0
+    for _ in range(h):
+        ft, line, o = raw[o], bytearray(raw[o + 1 : o + 1 + w * bpp]), o + 1 + st
+        for i in range(st):
+            x = line[i - bpp] if i >= bpp else 0
+            y = prev[i]
+            z = prev[i - bpp] if i >= bpp else 0
+            if ft == 1:
+                line[i] = (line[i] + x) & 255
+            elif ft == 2:
+                line[i] = (line[i] + y) & 255
+            elif ft == 3:
+                line[i] = (line[i] + (x + y) // 2) & 255
+            elif ft == 4:
+                pa, pb, pc = abs(y - z), abs(x - z), abs(x + y - 2 * z)
+                line[i] = (line[i] + (x if pa <= pb and pa <= pc else y if pb <= pc else z)) & 255
+        prev = line
+        out.update(line[3::4] if ct == 6 else {(trns[v] if trns and v < len(trns) else 255) for v in set(line)})
+    return out
+
+
+def blend_of(alphas, vertex_alpha):
+    """GS blends every model as Cs*As + Cd*(1-As) (ALPHA_1 = 0x44 in all the captures), so the state that tells
+    materials apart is where As comes from: 0 solid, 1 cut-out (the picture has holes), 2 see-through."""
+    if vertex_alpha < 128 or (alphas and (max(alphas) < 255 or any(0 < x < 255 for x in alphas))):
+        return 2
+    return 1 if alphas and 0 in alphas else 0
+
+
 def tris(kind, n):
     if kind == "strip":
         return [(i, i + 2, i + 1) if i % 2 == 0 else (i + 1, i + 2, i) for i in range(n - 2)]
@@ -86,6 +134,14 @@ o += struct.pack("<H", len(mats))
 used = {m for m, _, _ in parts}
 pics = a.pictures or os.path.join(a.dir, "..", "textures")
 copied = 0
+vmin = {}
+for m, f, c in parts:
+    vmin[m] = min([vmin.get(m, 128)] + [verts[x][2][3] for x in idx[f : f + c]])
+blends = []
+for i, m in enumerate(mats):
+    t = m.get("texture")
+    pa = png_alpha(os.path.join(pics, t + ".png")) if t and os.path.exists(os.path.join(pics, t + ".png")) else None
+    blends.append(blend_of(pa, vmin.get(i, 128)))
 for i, m in enumerate(mats):
     t = m.get("texture")
     src = os.path.join(pics, t + ".png") if t else None
@@ -102,7 +158,7 @@ for i, m in enumerate(mats):
         o += bytes([1]) + struct.pack("<QQHH", data, pal, w, h)
     else:
         o += bytes([0])
-    o += bytes([m["pass"], 255, 1])  # pass, blend not known, both sides
+    o += bytes([m["pass"], blends[i], 1])  # pass, blend, both sides
 o += struct.pack("<I", len(verts))
 for p, nrm, c, uv, b in verts:
     o += struct.pack("<3f3f4B2fHH", *p, *nrm, *c, *uv, b, 0)
@@ -111,6 +167,7 @@ for m, f, c in parts:
     o += struct.pack("<HII", m, f, c)
 o += struct.pack("<I", len(idx)) + struct.pack("<%dI" % len(idx), *idx)
 open(a.out, "wb").write(o)
+print("blend (solid, cut-out, see-through):", [blends.count(k) for k in range(3)])
 print(a.id, len(bones), "bones", len(mats), "materials", len(verts), "vertices", len(idx) // 3, "triangles ->", a.out)
 if a.pack:
     print(copied, "pictures copied to", a.pack)

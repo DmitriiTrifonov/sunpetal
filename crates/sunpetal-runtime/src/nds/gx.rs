@@ -282,6 +282,8 @@ struct UltPart {
     key: Option<super::render3d::TexKey>,
     tex: u32,
     pal: u32,
+    /// The polygon alpha (1-31): 31 but for a see-through material whose vertices say less.
+    alpha: u32,
     /// Each vertex: its place in the anchor mesh's space, colour (0-31), texture coordinates (texels × 16).
     tris: Vec<[UltVertex; 3]>,
 }
@@ -379,7 +381,11 @@ impl Ult {
             })
             .collect();
         let mut order: Vec<&sunpetal_data::spm2::Part> = m.parts.iter().collect();
-        order.sort_by_key(|p| m.materials[p.material as usize].pass);
+        // the solid and cut-out materials first, the see-through ones over them (a pass at a time within each)
+        order.sort_by_key(|p| {
+            let mt = &m.materials[p.material as usize];
+            (mt.blend == 2, mt.pass)
+        });
         let mut parts = Vec::with_capacity(order.len());
         for p in order {
             let (key, tex, pal) = mats[p.material as usize];
@@ -388,7 +394,16 @@ impl Ult {
                 (q, c, [(uv[0] * w).round().clamp(-32768.0, 32767.0) as i32, (uv[1] * h).round().clamp(-32768.0, 32767.0) as i32])
             };
             let tris = m.idx[p.first as usize..(p.first + p.count) as usize].chunks_exact(3).map(|t| [texel(vert(t[0])), texel(vert(t[1])), texel(vert(t[2]))]).collect();
-            parts.push(UltPart { key, tex, pal, tris });
+            // a see-through material's vertices carry its alpha (0x80 = 1.0 on the PS2); the picture's own
+            // alpha comes through the texture
+            let alpha = if m.materials[p.material as usize].blend == 2 {
+                let ix = &m.idx[p.first as usize..(p.first + p.count) as usize];
+                let sum: u64 = ix.iter().map(|&i| m.verts[i as usize].rgba[3] as u64).sum();
+                ((sum * 31 / (ix.len().max(1) as u64 * 128)) as u32).clamp(1, 31)
+            } else {
+                31
+            };
+            parts.push(UltPart { key, tex, pal, alpha, tris });
         }
         // FNV-1a over the places and the triangles
         let mut source = 0xcbf2_9ce4_8422_2325u64;
@@ -1131,6 +1146,7 @@ impl Nds {
             self.gx.attr = (attr | 0xC0) & !(0x1F << 16 | 3 << 4) | 31 << 16;
             let parts = std::mem::take(&mut self.gx.ult[u].parts);
             for part in &parts {
+                self.gx.attr = self.gx.attr & !(0x1F << 16) | part.alpha << 16;
                 // a picture the pack does not have: the vertices' colours alone
                 let has = part.key.is_some_and(|k| pack.get(&k).is_some());
                 (self.gx.tex_param, self.gx.pltt_base) = if has { (part.tex, part.pal) } else { (0, 0) };
@@ -2077,6 +2093,27 @@ fn gpu_or_software(job: &super::render3d::Job, scale: usize, gpu: impl FnOnce() 
 
 #[cfg(test)]
 mod ult_tests {
+    #[test]
+    fn see_through_materials_come_last_with_their_vertex_alpha() {
+        use sunpetal_data::spm2::{Material, Model, Part, Vertex};
+        let v = |a: u8| Vertex { pos: [0.0; 3], nrm: [0.0; 3], rgba: [128, 128, 128, a], uv: [0.0; 2], bone: 0 };
+        let mat = |pass, blend| Material { picture: None, pass, blend, flags: 0 };
+        // material 0 is see-through in pass 0, 1 is solid in pass 1, 2 has no state known (255)
+        let m = Model {
+            name: "t".into(),
+            unit: 1.0,
+            bind: Some(sunpetal_data::spm2::Bind { model: "x".into(), size: None, mesh: None, only_mesh: false, place: [1., 0., 0., 0., 1., 0., 0., 0., 1., 0., 0., 0.] }),
+            bones: vec![],
+            materials: vec![mat(0, 2), mat(1, 0), mat(1, 255)],
+            verts: vec![v(64), v(64), v(64), v(128), v(128), v(128)],
+            parts: vec![Part { material: 0, first: 0, count: 3 }, Part { material: 1, first: 3, count: 3 }, Part { material: 2, first: 3, count: 3 }],
+            idx: vec![0, 1, 2, 3, 4, 5],
+        };
+        let u = super::Ult::new(&m, &mut 0).unwrap();
+        let alphas: Vec<u32> = u.parts.iter().map(|p| p.alpha).collect();
+        assert_eq!(alphas, vec![31, 31, 15], "solid and unknown first (pass order), the half-alpha one last");
+    }
+
     #[test]
     fn two_ds_models_on_one_ps2_scene_draw_it_once() {
         // replacements 0 and 2 are made of the same PS2 model, 1 of another
