@@ -4,10 +4,12 @@
     review.py build PACK_DIR        # PACK_DIR/items.json -> PACK_DIR/index.html (картинки копируются в PACK_DIR/img)
     review.py serve PACK_DIR [--port 8765]   # страница на localhost, ответ щелчком пишется в PACK_DIR/answers.json
     review.py answers PACK_DIR      # напечатать ответы
+    review.py apply PACK_DIR        # ответы -> список действий (close / bug / next / pending / decide); сам ничего не меняет
 
 items.json: {"title": "...", "items": [{"id": "k110-1", "card": "K-110", "question": "...", "note": "...",
   "options": [{"id": "yes", "label": "Да"}, ...], "images": [{"path": "a.png", "caption": "DS"}, ...]}]}
-Пунктов не больше 10. Варианты по умолчанию: да / нет / пропустить. Путь картинки — от PACK_DIR или абсолютный.
+Пунктов не больше 10. Необязательно в пункте: "good": [id...] и "bad": [id...] — какие варианты значат «принято»
+и «баг» (по умолчанию good: yes/ok/new, bad: no/bug/old; skip — в следующий пакет; прочее — решает агент). Варианты по умолчанию: да / нет / пропустить. Путь картинки — от PACK_DIR или абсолютный.
 Страница одна, без внешних ссылок. Без `serve` (file://) ответы копятся в браузере, кнопка «Скачать answers.json».
 """
 import html
@@ -101,6 +103,25 @@ def read_answers(pack):
         return json.load(f)
 
 
+GOOD = ('yes', 'ok', 'new')
+BAD = ('no', 'bug', 'old')
+
+
+def apply(pack):
+    """Список действий по ответам: close (карточка принята: close-qa), bug (bug-task с тем же кадром),
+    next (перенести в следующий пакет), pending (нет ответа), decide (вариант без толкования)."""
+    ans = read_answers(pack)
+    out = []
+    for it in load(pack)['items']:
+        a = ans.get(it['id'])
+        good, bad = it.get('good', GOOD), it.get('bad', BAD)
+        kind = ('pending' if a is None else 'close' if a in good else 'bug' if a in bad
+                else 'next' if a == 'skip' else 'decide')
+        out.append({'id': it['id'], 'card': it.get('card', ''), 'answer': a, 'action': kind,
+                    'question': it['question'], 'images': [im['path'] for im in it.get('images', [])]})
+    return out
+
+
 def write_answer(pack, item, answer):
     ans = read_answers(pack)
     ans[item] = answer
@@ -134,12 +155,15 @@ def handler(pack):
 
 
 def main(argv):
-    if len(argv) < 2 or argv[0] not in ('build', 'serve', 'answers'):
+    if len(argv) < 2 or argv[0] not in ('build', 'serve', 'answers', 'apply'):
         print(__doc__)
         return 2
     cmd, pack = argv[0], argv[1]
     if cmd == 'build':
         print(build(pack))
+    elif cmd == 'apply':
+        for a in apply(pack):
+            print(f"{a['action']:8} {a['id']:12} {a['card']:20} {a['answer']}")
     elif cmd == 'answers':
         print(json.dumps(read_answers(pack), ensure_ascii=False, indent=1))
     else:

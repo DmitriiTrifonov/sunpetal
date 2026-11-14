@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """A DS area and the PS2 models at the same place, side by side from above (docs/ULTIMATE-IMPORT.md, У4.2).
 
-    area_sheet.py ROM.nds EXPORT_DIR DS_PATH OUT.png [--cell N] [--most N]
+    area_sheet.py ROM.nds EXPORT_DIR DS_PATH OUT.png [--cell N] [--most N] [--model ID[,ID..]] [--shift X,Y,Z]
+
+--model shows the named PS2 models (instead of the ones with most vertices); with no --model and no --most the
+`ps2` of the area in data/ult/areas.toml is used when there is one. --shift moves the PS2 models by X,Y,Z
+(DS units) before drawing (default: the `shift` of the area in areas.toml), for pieces of road that sit shifted against the DS area.
 
 Every cell is the same window (the DS area's box, x across, z down, no shift: the outdoor PS2 world shares
 the DS's coordinates). First the DS area whole and then by node (red); then the PS2 models with most
@@ -13,6 +17,7 @@ import json
 import os
 import pickle
 import sys
+import tomllib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -54,10 +59,26 @@ def main(argv):
         for s in j['scene3d']:
             for slot, mid in s['models'].items():
                 where.setdefault(mid, []).append(f"{j['scene']}#{s['record']}:{slot}")
-    ps = sorted(((sum(1 for p in pts if inside(p)), mid) for mid, pts in clouds.items()), reverse=True)[:most]
+    entry = None
+    with open(os.path.join(HERE, '..', '..', 'data', 'ult', 'areas.toml'), 'rb') as f:
+        entry = next((a for a in tomllib.load(f).get('area', []) if path.endswith(a.get('file', '\0')) or a.get('file', '\0').endswith(path)), None)
+    named = argv[argv.index('--model') + 1].split(',') if '--model' in argv else []
+    if not named and '--most' not in argv and entry and entry.get('ps2'):
+        named = [entry['ps2']]
+    shift = [float(v) for v in argv[argv.index('--shift') + 1].split(',')] if '--shift' in argv else (
+        entry['shift'] if entry and named == [entry.get('ps2')] and 'shift' in entry else [0, 0, 0])
+    if shift != [0, 0, 0]:
+        clouds = {k: [(p[0] + shift[0], p[1] + shift[1], p[2] + shift[2]) for p in v] for k, v in clouds.items() if not named or k in named}
+    if named:
+        missing = [m for m in named if m not in clouds]
+        if missing:
+            raise SystemExit(f'area_sheet: no cloud for {missing}')
+        ps = [(sum(1 for p in clouds[m] if inside(p)), m) for m in named]
+    else:
+        ps = sorted(((sum(1 for p in pts if inside(p)), mid) for mid, pts in clouds.items()), reverse=True)[:most]
     items = [('DS ' + m.name + ' (whole)', [(ds, (220, 0, 0), 2)])]
     items += [(f'DS node {n} ({len(set(pts))} vertices)', [(ds, (215, 215, 215), 1), (pts, (220, 0, 0), 2)]) for n, pts in sorted(nodes.items(), key=lambda x: -len(x[1]))]
-    items += [(f"PS2 {mid} ({n} vertices in the window; {', '.join(where.get(mid, ['not in a scene'])[:3])})", [(ds, (215, 215, 215), 1), (clouds[mid], (0, 0, 220), 1)]) for n, mid in ps if n]
+    items += [(f"PS2 {mid} ({n} vertices in the window; {', '.join(where.get(mid, ['not in a scene'])[:3])})", [(ds, (215, 215, 215), 1), (clouds[mid], (0, 0, 220), 1)]) for n, mid in ps if n or named]
     cols = 5
     rows = (len(items) + cols - 1) // cols
     W, H = cols * T, rows * T

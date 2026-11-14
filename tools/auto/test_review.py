@@ -48,5 +48,17 @@ class T(unittest.TestCase):
         self.assertEqual(review.read_answers(d), {'i1': 'no'})
 
 
+    def test_apply_maps_three_answers(self):
+        d = pack(4)
+        doc = json.load(open(os.path.join(d, 'items.json')))
+        doc['items'][3]['options'] = [{'id': 'a', 'label': 'А'}]
+        json.dump(doc, open(os.path.join(d, 'items.json'), 'w'))
+        for k, v in (('i0', 'yes'), ('i1', 'no'), ('i2', 'skip')):
+            review.write_answer(d, k, v)
+        self.assertEqual([a['action'] for a in review.apply(d)], ['close', 'bug', 'next', 'pending'])
+        review.write_answer(d, 'i3', 'a')
+        self.assertEqual(review.apply(d)[3]['action'], 'decide')
+
+
 if __name__ == '__main__':
     unittest.main()
