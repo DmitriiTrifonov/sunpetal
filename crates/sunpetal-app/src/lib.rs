@@ -18,6 +18,7 @@
 #![allow(deprecated)]
 mod audio;
 mod config;
+mod console;
 mod dial;
 mod effects;
 mod emu;
@@ -220,6 +221,8 @@ struct App {
     /// What was last put into effect (the menu compares).
     applied: Settings,
     menu: ui::Menu,
+    /// The debug console (K-232; `SUNPETAL_DEBUG_MENU=1`).
+    console: console::Console,
     /// `--full-menu`: the full settings menu for this run, whatever the setting says.
     force_full: bool,
     /// Key code to button bit, from the settings.
@@ -799,6 +802,7 @@ impl App {
     /// window, or off screen). False when the program is to end (Quit, a restart).
     fn redraw(&mut self) -> bool {
         self.poll_pads();
+        self.console.pump(&self.shared);
         // the machine stopped (a failed boot, a fatal error, a panic): say so once, keep the window
         let stopped = self.shared.stopped.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
         if let Some(why) = stopped {
@@ -935,11 +939,13 @@ impl App {
             self.toast = None;
         }
         let toast = self.toast.as_ref().map(|(m, _)| m.clone());
+        let mut typed: Option<String> = None;
         {
             let (cursor, pen_now) = (self.stylus.pos.filter(|_| !self.menu.open), self.pen_down);
             let App {
                 gfx,
                 menu,
+                console,
                 force_full,
                 settings,
                 layouts,
@@ -1024,7 +1030,7 @@ impl App {
                 let vwide = *wide_now as f32;
                 let lang = config::Lang::resolve(&settings.interface.language);
                 menu.short = !(settings.ui.full_menu || *force_full || menu.forced_full);
-                if menu.open || pad_on || corner_on || stats_on || fade > 0.0 || vline.is_some() || cursor.is_some() || toast.is_some() || stopped_msg.is_some() {
+                if menu.open || console.open || pad_on || corner_on || stats_on || fade > 0.0 || vline.is_some() || cursor.is_some() || toast.is_some() || stopped_msg.is_some() {
                     let held = touch_held.clone();
                     let mut f = |ctx: &egui::Context| {
                         if fade > 0.0 {
@@ -1086,6 +1092,9 @@ impl App {
                             shared.dump_2d_new.store(menu.dump_2d_new, Ordering::Relaxed);
                             shared.dump_on_touch.store(menu.dump_on_touch, Ordering::Relaxed);
                         }
+                        if console.open {
+                            typed = console.show(ctx);
+                        }
                         if let Some(msg) = &toast {
                             paint_toast(ctx, msg);
                         }
@@ -1115,6 +1124,29 @@ impl App {
         if action == Some(ui::Action::Quit) {
             self.save();
             return false;
+        }
+        if let Some(line) = typed {
+            match self.console.submit(&self.shared, &line) {
+                Some(console::Ask::Goto(scene)) => {
+                    self.console.say(&format!("restarting to play to {} …", scene));
+                    self.save();
+                    self.restart = true;
+                    let mut args = restart_args(std::env::args_os().skip(1).collect(), &self.settings.video.texture_pack);
+                    // the old --goto goes, the new one comes
+                    if let Some(i) = args.iter().position(|a| a == "--goto") {
+                        args.drain(i..(i + 2).min(args.len()));
+                    }
+                    args.push("--goto".into());
+                    args.push(scene.into());
+                    *self.shared.restart.lock().unwrap() = Some(args);
+                    return false;
+                }
+                Some(console::Ask::Shot) => {
+                    self.dump_shot();
+                    self.console.say("shot written to artifacts/shots");
+                }
+                None => {}
+            }
         }
         // a save to export or import: the emulation does it (paused or not); what it did comes back below
         match &action {
@@ -1242,8 +1274,16 @@ impl ApplicationHandler for App {
             }
         }
         // the menu sees the events while it is open
+        // the debug console: the backquote opens and closes it
+        if let WindowEvent::KeyboardInput { event, .. } = &ev {
+            if event.state == ElementState::Pressed && !event.repeat && event.physical_key == PhysicalKey::Code(KeyCode::Backquote) && self.console.enabled {
+                self.console.toggle();
+                return;
+            }
+        }
+        let ui_open = self.menu.open || self.console.open;
         let mut consumed = false;
-        if self.menu.open {
+        if ui_open {
             if let Some(g) = &mut self.gfx {
                 consumed = g.ui_event(&ev);
             }
@@ -1285,11 +1325,11 @@ impl ApplicationHandler for App {
                     if !down {
                         self.kb &= !b;
                         self.send_keys();
-                    } else if !self.menu.open {
+                    } else if !ui_open {
                         self.kb |= b;
                         self.send_keys();
                     }
-                    if !self.menu.open || !down {
+                    if !ui_open || !down {
                         return;
                     }
                 }
@@ -1721,6 +1761,7 @@ fn prepare(o: Options, scripted: bool) -> (App, Arc<Shared>, Option<cpal::Stream
         tap: (0, 0),
         restart: false,
         scripted,
+        console: console::Console::default(),
     };
     app.menu.sound = menu_sound;
     (app, shared, stream)

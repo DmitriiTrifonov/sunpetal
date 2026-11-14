@@ -11,6 +11,7 @@
 //!     tap X Y [N]          the stylus at window pixel X Y for N frames (through the layout, as the mouse)
 //!     touch X Y [N]        the stylus at lower-screen DS pixel X Y for N frames (no layout)
 //!     pen X Y | lift       the stylus put down at lower-screen DS pixel X Y and kept there | lifted (for a shot while held)
+//!     console [LINE]       the debug console (SUNPETAL_DEBUG_MENU=1): opened/closed | a line typed, its answer in "said"
 //!     swap | menu          the screen swap (F8) | the settings menu (F1)
 //!     set KEY VALUE        a setting by its path in config.toml (video.layout single, video.dialogue_font nunito)
 //!     fast on|off          run without waiting for the clock (on at the start)
@@ -195,6 +196,25 @@ fn command(app: &mut App, words: &[&str]) -> Result<String, String> {
         "swap" => {
             app.swap_screen();
             Ok(format!("\"layout\":{:?}", app.layout().name))
+        }
+        // console toggle | LINE: the debug console (K-232; needs SUNPETAL_DEBUG_MENU=1): its key, or a line typed; the answer in "said"
+        "console" => {
+            if !app.console.enabled {
+                return Err("no console: set SUNPETAL_DEBUG_MENU=1".into());
+            }
+            let rest = words[1..].join(" ");
+            if rest.is_empty() || rest == "toggle" {
+                app.console.toggle();
+                return Ok(format!("\"open\":{}", app.console.open));
+            }
+            let before = app.console.len();
+            match app.console.submit(&app.shared, &rest) {
+                Some(crate::console::Ask::Goto(_)) => return Err("goto restarts the program: use --goto".into()),
+                Some(crate::console::Ask::Shot) => return Err("use the script's shot".into()),
+                None => {}
+            }
+            wait(app, 2)?;
+            Ok(format!("\"said\":{:?}", app.console.since(before + 1)))
         }
         "menu" => {
             app.toggle_menu();

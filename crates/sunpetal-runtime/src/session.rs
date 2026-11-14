@@ -266,6 +266,11 @@ impl Session {
         r
     }
 
+    /// Puts the stylus down at (x, y) and keeps it there (`None`: lifts it), for the commands that run frames themselves (`calls`).
+    pub fn hold_pen(&mut self, at: Option<(i32, i32)>) {
+        self.pen = at;
+    }
+
     /// The pen moves in a straight line from (x0, y0) to (x1, y1) over `frames` frames (a swipe), then lifts.
     pub fn drag(&mut self, from: (i32, i32), to: (i32, i32), frames: u64) -> Result<(), String> {
         for (x, y) in [from, to] {
@@ -778,23 +783,7 @@ const EVENT_TABLE: u32 = 0x1E810;
 impl Session {
     /// Runs the game's handler `handler` on a command whose parameters (from the third word on) are `params`.
     fn script_command(&mut self, handler: u32, params: Vec<i32>) -> Result<(), String> {
-        let done = std::rc::Rc::new(std::cell::Cell::new(false));
-        let flag = done.clone();
-        debug::inject(EVENT_LOOP, move |c| {
-            let sp = c.r[13].wrapping_sub(0x100) & !7;
-            let mut block = [0u8; 0x40];
-            for (i, p) in params.iter().enumerate() {
-                block[8 + 4 * i..12 + 4 * i].copy_from_slice(&p.to_le_bytes());
-            }
-            let old = debug::peek(COMMAND_SLOT, 4).unwrap_or_default();
-            debug::poke(sp, &block);
-            debug::poke(COMMAND_SLOT, &sp.to_le_bytes());
-            c.r[13] = sp;
-            c.r[14] = EVENT_LOOP;
-            crate::call(c, handler);
-            debug::poke(COMMAND_SLOT, &old);
-            flag.set(true);
-        });
+        let done = queue_script_command(handler, params);
         for _ in 0..300 {
             if done.get() {
                 return Ok(());
@@ -1296,6 +1285,70 @@ impl Session {
         out.texts_model = model.texts;
         Ok(out)
     }
+}
+
+/// Queues the game's handler `handler` on a command with `params` (from the third word on) to run when the ARM9 is next
+/// in its event loop; the flag is set once it has run. The caller runs the frames (a session, or the window's machine).
+pub fn queue_script_command(handler: u32, params: Vec<i32>) -> std::rc::Rc<std::cell::Cell<bool>> {
+    let done = std::rc::Rc::new(std::cell::Cell::new(false));
+    let flag = done.clone();
+    debug::inject(EVENT_LOOP, move |c| {
+        let sp = c.r[13].wrapping_sub(0x100) & !7;
+        let mut block = [0u8; 0x40];
+        for (i, p) in params.iter().enumerate() {
+            block[8 + 4 * i..12 + 4 * i].copy_from_slice(&p.to_le_bytes());
+        }
+        let old = debug::peek(COMMAND_SLOT, 4).unwrap_or_default();
+        debug::poke(sp, &block);
+        debug::poke(COMMAND_SLOT, &sp.to_le_bytes());
+        c.r[13] = sp;
+        c.r[14] = EVENT_LOOP;
+        crate::call(c, handler);
+        debug::poke(COMMAND_SLOT, &old);
+        flag.set(true);
+    });
+    done
+}
+
+fn word(a: u32) -> Option<u32> {
+    debug::peek(a, 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+}
+
+/// The story value `index` now.
+pub fn story_value(index: u32) -> Option<i32> {
+    word(VALUES + 4 * index).map(|v| v as i32)
+}
+
+/// The hero's record in the game's memory, if the map has one.
+fn hero() -> Option<u32> {
+    word(WORLD).and_then(word).filter(|h| *h != 0)
+}
+
+/// The map the hero is on.
+pub fn hero_map() -> Option<i32> {
+    word(hero()? + 0xC).map(|m| m as i32)
+}
+
+/// The hero's place (1/4096 units).
+pub fn hero_pos() -> Option<[i32; 3]> {
+    let h = hero()?;
+    Some([word(h + 0x18)? as i32, word(h + 0x1C)? as i32, word(h + 0x20)? as i32])
+}
+
+/// Puts the hero at `pos`; false if there is no hero.
+pub fn hero_teleport(pos: [i32; 3]) -> bool {
+    let Some(h) = hero() else { return false };
+    let bytes: Vec<u8> = pos.iter().flat_map(|p| p.to_le_bytes()).collect();
+    debug::poke(h + 0x18, &bytes)
+}
+
+/// `SETVALUE` and `CHANGEMAP` queued (`queue_script_command`).
+pub fn queue_set_value(index: i32, value: i32) -> std::rc::Rc<std::cell::Cell<bool>> {
+    queue_script_command(SETVALUE, vec![index, value])
+}
+
+pub fn queue_change_map(map: i32, pos: [i32; 3]) -> std::rc::Rc<std::cell::Cell<bool>> {
+    queue_script_command(CHANGEMAP, vec![map, pos[0], pos[1], pos[2], 0])
 }
 
 #[cfg(test)]

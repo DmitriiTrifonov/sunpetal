@@ -2,6 +2,8 @@
 //! that generated C code calls (docs/ABI.md, include/sunpetal_abi.h).
 pub mod abi;
 pub mod bios;
+#[cfg(feature = "debug-tools")]
+pub mod console;
 pub mod dialogmodel;
 #[cfg(feature = "debug-tools")]
 pub mod dialogue;

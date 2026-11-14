@@ -156,6 +156,11 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             s.change_map(number(w.first(), "MAP", None)?, [number(w.get(1), "X", None)?, number(w.get(2), "Y", None)?, number(w.get(3), "Z", None)?])?;
             done(json!({}))
         }
+        "chapter" => {
+            // chapter N: from wherever the game is, without the menu of requests (K-234); the caller runs the frames
+            sunpetal_runtime::console::start_chapter(number(w.first(), "N", None)?)?;
+            done(json!({}))
+        }
         "scene" => done(json!({"scene": s.scene()})),
         "thindiff" => done(json!({"lines": s.thin_diff()?})),
         "scriptstate" => done(
@@ -183,6 +188,11 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
         }
         "tap" => {
             s.tap(number(w.first(), "X", None)?, number(w.get(1), "Y", None)?, number(w.get(2), "FRAMES", Some(9))?)?;
+            done(json!({}))
+        }
+        "pen" => {
+            // pen X Y | pen lift: the stylus kept down (for `calls` and the like, which run the frames)
+            s.hold_pen(if w.first() == Some(&"lift") { None } else { Some((number(w.first(), "X", None)?, number(w.get(1), "Y", None)?)) });
             done(json!({}))
         }
         "drag" => {

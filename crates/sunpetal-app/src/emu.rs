@@ -141,6 +141,9 @@ pub struct Shared {
     pub line_drawn: AtomicBool,
     /// The 2D pack's groups of variant pictures and their variants (set by the emulation once the pack is in, for the menu).
     pub pack_groups: Mutex<std::collections::BTreeMap<String, Vec<String>>>,
+    /// The debug console (K-232): lines typed for the machine's thread, and its answers.
+    pub console_in: Mutex<Vec<String>>,
+    pub console_out: Mutex<Vec<String>>,
 }
 
 /// The menu's request for the game's save file.
@@ -201,6 +204,8 @@ impl Shared {
             goto: Mutex::new(None),
             line_drawn: AtomicBool::new(false),
             pack_groups: Mutex::new(Default::default()),
+            console_in: Mutex::new(Vec::new()),
+            console_out: Mutex::new(Vec::new()),
         })
     }
 }
@@ -336,6 +341,14 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
                 eprintln!("save: {}", e);
             }
             *shared.save_done.lock().unwrap() = Some((import, said));
+        }
+        let typed = std::mem::take(&mut *shared.console_in.lock().unwrap());
+        for line in typed {
+            let said = match sunpetal_runtime::console::run(&line) {
+                Ok(t) => t,
+                Err(e) => format!("error: {}", e),
+            };
+            shared.console_out.lock().unwrap().push(said);
         }
         if shared.paused.load(Ordering::Relaxed) {
             std::thread::sleep(Duration::from_millis(10));
