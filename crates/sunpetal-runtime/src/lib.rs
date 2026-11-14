@@ -20,6 +20,7 @@ pub mod nativestep;
 pub mod nativethin;
 pub mod nds;
 pub mod savefile;
+pub mod scene;
 pub mod sched;
 #[cfg(feature = "debug-tools")]
 pub mod script;

@@ -212,6 +212,12 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             let wide = sunpetal_runtime::nds::screenshot_wide(std::path::Path::new(w.first().ok_or("shotwide FILE")?))?;
             done(json!({"wide": wide}))
         }
+        "frame" => {
+            // the frame as the game gave it: camera and models (K-228); `hash` is equal for equal frames
+            let f = sunpetal_runtime::scene::SceneFrame::capture();
+            let items: Vec<_> = f.items.iter().map(|i| json!({"model": i.model, "mesh": i.mesh, "slot": i.slot, "polys": i.polys})).collect();
+            done(json!({"hash": format!("{:016x}", f.hash()), "view": f.view, "proj": f.proj, "named_polys": f.named_polys(), "items": items}))
+        }
         "cam" => {
             // cam YAW PITCH [DX DY DZ]: extra turn (degrees) and move of the scene camera; `cam 0 0` is the game's own view
             sunpetal_runtime::nativecam::set(
