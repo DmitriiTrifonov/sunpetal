@@ -47,12 +47,12 @@ pub(super) const ANY_PALETTE: u64 = u64::MAX;
 pub(super) struct Pack {
     entries: HashMap<TexKey, Entry>,
     /// The data file the `Slice` entries are read from.
-    file: Option<Mutex<fs::File>>,
+    files: Vec<Mutex<fs::File>>,
 }
 
 enum Source {
     Path(PathBuf),
-    Slice { off: u64, len: u32 },
+    Slice { file: usize, off: u64, len: u32 },
 }
 
 struct Entry {
@@ -62,7 +62,7 @@ struct Entry {
 
 impl Pack {
     pub(super) fn empty() -> Pack {
-        Pack { entries: HashMap::new(), file: None }
+        Pack { entries: HashMap::new(), files: Vec::new() }
     }
 
     pub(super) fn len(&self) -> usize {
@@ -82,7 +82,7 @@ impl Pack {
             .get_or_init(|| {
                 let bytes = match &e.source {
                     Source::Path(p) => fs::read(p).map_err(|x| x.to_string()),
-                    Source::Slice { off, len } => self.read_slice(*off, *len),
+                    Source::Slice { file, off, len } => self.read_slice(*file, *off, *len),
                 };
                 match bytes.and_then(|b| decode_png(&b)) {
                     Ok(img) => Some(Arc::new(img)),
@@ -95,8 +95,8 @@ impl Pack {
             .clone()
     }
 
-    fn read_slice(&self, off: u64, len: u32) -> Result<Vec<u8>, String> {
-        let mut f = self.file.as_ref().ok_or("no data file")?.lock().map_err(|_| "data file lock")?;
+    fn read_slice(&self, file: usize, off: u64, len: u32) -> Result<Vec<u8>, String> {
+        let mut f = self.files.get(file).ok_or("no data file")?.lock().map_err(|_| "data file lock")?;
         f.seek(SeekFrom::Start(off)).map_err(|e| e.to_string())?;
         let mut buf = vec![0; len as usize];
         f.read_exact(&mut buf).map_err(|e| e.to_string())?;
@@ -113,7 +113,7 @@ impl Pack {
                 entries.insert(key, Entry { source: Source::Path(p), image: OnceLock::new() });
             }
         }
-        Ok(Pack { entries, file: None })
+        Ok(Pack { entries, files: Vec::new() })
     }
 
     /// A data file: the index is read now, the pictures later.
@@ -150,19 +150,44 @@ impl Pack {
                     w: u16::from_le_bytes([e[17], e[18]]),
                     h: u16::from_le_bytes([e[19], e[20]]),
                 };
-                let source = Source::Slice { off: u64::from_le_bytes(e[21..29].try_into().unwrap()), len: u32::from_le_bytes(e[29..33].try_into().unwrap()) };
+                let source = Source::Slice { file: 0, off: u64::from_le_bytes(e[21..29].try_into().unwrap()), len: u32::from_le_bytes(e[29..33].try_into().unwrap()) };
                 entries.insert(key, Entry { source, image: OnceLock::new() });
             }
         }
-        Ok(Pack { entries, file: Some(Mutex::new(f)) })
+        Ok(Pack { entries, files: vec![Mutex::new(f)] })
     }
 
-    /// A folder or a data file, whichever the path is.
+    /// A folder or a data file, whichever the path is. Several paths joined by `:` (`;` on Windows) are
+    /// merged: a picture of a later one replaces the same key of an earlier one.
     pub(super) fn open(path: &Path) -> Result<Pack, String> {
+        let list: Vec<PathBuf> = std::env::split_paths(path).collect();
+        if list.len() > 1 && !path.exists() {
+            let mut all = Pack::empty();
+            for p in &list {
+                all.merge(Pack::open_one(p)?);
+            }
+            return Ok(all);
+        }
+        Pack::open_one(path)
+    }
+
+    fn open_one(path: &Path) -> Result<Pack, String> {
         if path.is_dir() {
             Pack::from_dir(path)
         } else {
             Pack::from_file(path)
+        }
+    }
+
+    /// Adds the pictures of another pack over this one's.
+    fn merge(&mut self, other: Pack) {
+        let base = self.files.len();
+        self.files.extend(other.files);
+        for (k, mut e) in other.entries {
+            if let Source::Slice { file, .. } = &mut e.source {
+                *file += base;
+            }
+            self.entries.insert(k, e);
         }
     }
 }
@@ -553,5 +578,24 @@ mod tests {
         }
         let k = key_of(&tex, texture(5, 0, 0), 0);
         assert_eq!((k.data, k.pal), (0x65f913cef1b9d6e2, 0xb972c4060ba7c695));
+    }
+
+    #[test]
+    fn packs_joined_by_the_path_separator_merge_later_over_earlier() {
+        let base = std::env::temp_dir().join(format!("sp-merge-{}", std::process::id()));
+        let (a, b) = (base.join("a"), base.join("b"));
+        fs::create_dir_all(&a).unwrap();
+        fs::create_dir_all(&b).unwrap();
+        let one = "8x8_4_0000000000000001_0000000000000002.png";
+        let two = "8x8_4_0000000000000003_0000000000000004.png";
+        for (d, n) in [(&a, one), (&b, one), (&b, two)] {
+            fs::write(d.join(n), b"x").unwrap();
+        }
+        let joined = std::env::join_paths([&a, &b]).unwrap();
+        let pack = Pack::open(Path::new(&joined)).unwrap();
+        assert_eq!(pack.len(), 2);
+        let key = parse_name(one).unwrap();
+        assert!(matches!(&pack.entries[&key].source, Source::Path(p) if p.starts_with(&b)));
+        let _ = fs::remove_dir_all(&base);
     }
 }

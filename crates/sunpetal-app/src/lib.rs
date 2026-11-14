@@ -1603,6 +1603,16 @@ fn prepare(o: Options, scripted: bool) -> (App, Arc<Shared>, Option<cpal::Stream
             settings.game.language
         );
     }
+    // SUNPETAL_EXTRA_PACK: more packs (`:`-joined paths) laid over the texture pack, e.g. the PS2 replacement pictures
+    // over the translation's data file; the later ones win
+    if let Some(extra) = std::env::var_os("SUNPETAL_EXTRA_PACK").filter(|e| !e.is_empty()) {
+        let mut all: Vec<PathBuf> = cfg.texture_pack.iter().cloned().collect();
+        all.extend(std::env::split_paths(&extra));
+        match std::env::join_paths(all) {
+            Ok(j) => cfg.texture_pack = Some(PathBuf::from(j)),
+            Err(e) => eprintln!("SUNPETAL_EXTRA_PACK: {}", e),
+        }
+    }
     let shared = Shared::new();
     shared.scale.store(settings.video.res, Ordering::Relaxed);
     shared.renderer.store((config::parse_renderer(&settings.video.renderer) == Some(sunpetal_runtime::nds::Renderer::Gpu)) as u8, Ordering::Relaxed);
