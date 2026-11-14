@@ -1,6 +1,7 @@
 //! Pose of a `G101` skeleton at a frame of a `GIM0100` motion (У1.10): keys sampled per joint, then the
 //! world matrices down the joint tree. Same arithmetic as the reference `gigpose.py` (checked on the runtime's
-//! `CurrentKey` in X-08), in f64. Not done: the additive `StartBehavior` bit 2 and blending of motions.
+//! `CurrentKey` in X-08), in f64. Also here: `Synthesis` (blend with the previous key after a change of motion, 12 frames) and the
+//! additive rotation of `StartBehavior` bit 2 (F-201). Not done: stepping of `FrameNo` by `SetMotion`.
 use super::gig::Joint;
 use super::gim::Motion;
 
@@ -72,6 +73,47 @@ pub fn rest_keys(joints: &[Joint]) -> Vec<Key> {
 /// that jumps by more than π/2 takes the next key. A 0x20 key adds its position to the rest one, the rotation is
 /// absolute; a rotation-only key keeps the rest position. `chara`: motion joint 0 is then absolute entirely.
 pub fn sample(joints: &[Joint], m: &Motion, frame: f64, chara: bool) -> Vec<Key> {
+    sample_ex(joints, m, frame, chara, false)
+}
+
+/// `StartBehavior` of a motion (`PHeader.flags` bits 1..3).
+pub fn start_behavior(m: &Motion) -> u16 {
+    (m.flags >> 1) & 7
+}
+
+/// `EndBehavior` of a motion (`PHeader.flags` bits 4..5): 0 stop, 1 loop, 2 loop and stop, 3 hold the last key.
+pub fn end_behavior(m: &Motion) -> u16 {
+    (m.flags >> 4) & 3
+}
+
+/// Frames over which a change of motion is blended (`SynthCnt` starts here).
+pub const SYNTH_FRAMES: u32 = 12;
+
+/// `Synthesis` (0x1341d0): the keys of the motion before (`cur`) blended into the new ones; `cnt` counts down
+/// from [`SYNTH_FRAMES`]. A rotation axis that would turn by more than π/2 a frame takes the new value.
+pub fn synthesis(cur: &[Key], new: &[Key], cnt: u32) -> Vec<Key> {
+    if cnt == 0 {
+        return new.to_vec();
+    }
+    let w = f64::from(cnt) / f64::from(SYNTH_FRAMES);
+    cur.iter()
+        .zip(new)
+        .map(|(c, n)| {
+            let mut o = [0.0; 6];
+            for a in 0..6 {
+                o[a] = n[a] * (1.0 - w) + c[a] * w;
+                if a >= 3 && ((c[a] - n[a]) / f64::from(SYNTH_FRAMES)).abs() > HALF_PI {
+                    o[a] = n[a];
+                }
+            }
+            o
+        })
+        .collect()
+}
+
+/// [`sample`] with `StartBehavior` bit 2 (`additive_rot`): on an exact key the rotation is the rest one plus the
+/// key's, as the game does (between keys it is not).
+pub fn sample_ex(joints: &[Joint], m: &Motion, frame: f64, chara: bool, additive_rot: bool) -> Vec<Key> {
     joints
         .iter()
         .map(|j| {
@@ -110,6 +152,11 @@ pub fn sample(joints: &[Joint], m: &Motion, frame: f64, chara: bool) -> Vec<Key>
                 }
                 key[3..6].copy_from_slice(&v[3..6]);
             }
+            if additive_rot && gj.flag != 1 && (t == 0.0 || t >= 1.0) {
+                for a in 3..6 {
+                    key[a] = f64::from(j.init_key[a]) + v[a];
+                }
+            }
             key
         })
         .collect()
@@ -125,6 +172,17 @@ mod tests {
 
     fn joint(child: i16, next: i16, key: Key) -> Joint {
         Joint { is_bone_ref: false, key_no: 0, child, next, standard_joint: 0, init_key: key.map(|x| x as f32) }
+    }
+
+    #[test]
+    fn synthesis_blends_and_ends_on_the_new_keys() {
+        let (cur, new) = ([[0.0; 6]], [[1.0, 0.0, 0.0, 0.0, 0.5, 0.0]]);
+        assert_eq!(synthesis(&cur, &new, 0), new.to_vec());
+        let half = synthesis(&cur, &new, 6);
+        assert!((half[0][0] - 0.5).abs() < 1e-12 && (half[0][4] - 0.25).abs() < 1e-12);
+        // a turn of more than π/2 a frame takes the new value
+        let far = synthesis(&[[0.0; 6]], &[[0.0, 0.0, 0.0, 20.0, 0.0, 0.0]], 6);
+        assert_eq!(far[0][3], 20.0);
     }
 
     #[test]
