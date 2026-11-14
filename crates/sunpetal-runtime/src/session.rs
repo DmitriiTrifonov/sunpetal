@@ -489,40 +489,21 @@ pub enum Stop {
     Stalled,
 }
 
-/// The lower screen's rows of the list of requests (y), the page-turner, and the frames the menu needs.
-const REQUEST_ROWS: [i32; 3] = [19, 49, 78];
-const NEXT_PAGE: (i32, i32) = (55, 75);
-
 impl Session {
-    /// From the title to the list of requests (the save must have the requests open), blind by
-    /// frames: the menu is the same every run, so is the time it takes.
-    fn go_to_request_list(&mut self) -> Result<(), String> {
-        self.run(2400)?;
-        for (key, wait) in [("START", 200), ("START", 200), ("START", 150), ("A", 300), ("A", 400), ("A", 300), ("A", 400)] {
-            self.press(key, 9)?;
-            self.run(wait)?;
-        }
-        for _ in 0..2 {
-            self.tap(200, 80, 9)?;
-            self.run(300)?;
-        }
-        Ok(())
-    }
-
-    /// Plays request `n` from its start, through the menu of a save that has played it: the first
-    /// scene `Cnn_01` is being read when this returns.
+    /// Plays chapter `n` from its start: the game is asked for the world with the chapter (`console::start_chapter`, K-234),
+    /// as the menu of requests does, with no menu and no save that has the request open. The first scene `Cnn_01` is being
+    /// read when this returns.
     pub fn goto_request(&mut self, n: u32) -> Result<(), String> {
-        self.go_to_request_list()?;
-        // the first touch on "Next" is taken as the list's focus, the rest turn the pages
-        let page = n / 3;
-        for _ in 0..if page > 0 { page + 1 } else { 0 } {
-            self.tap(NEXT_PAGE.0, NEXT_PAGE.1, 9)?;
-            self.run(60)?;
+        // the mode controller is up when the first mode runs; the game takes a while to boot to it
+        let mut up = Err(String::new());
+        for _ in 0..30 {
+            self.run(200)?;
+            up = crate::console::start_chapter(n);
+            if up.is_ok() {
+                break;
+            }
         }
-        let y = *REQUEST_ROWS.get((n % 3) as usize).ok_or("request row")?;
-        self.tap(230, y, 9)?;
-        self.run(60)?;
-        self.tap(230, y, 9)?;
+        up?;
         let want = format!("C{:02}_01", n);
         for _ in 0..1500 {
             if self.scene.as_deref() == Some(want.as_str()) {
@@ -530,7 +511,7 @@ impl Session {
             }
             self.run(1)?;
         }
-        Err(format!("request {} did not start: the game never read {} (does the save have it open?)", n, want))
+        Err(format!("chapter {} did not start: the game never read {}", n, want))
     }
 
     /// Plays the scene `Cnn_yy`: `Cnn_01` is the start of request `nn`; a later one is started by its event
