@@ -212,6 +212,15 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             let wide = sunpetal_runtime::nds::screenshot_wide(std::path::Path::new(w.first().ok_or("shotwide FILE")?))?;
             done(json!({"wide": wide}))
         }
+        "cam" => {
+            // cam YAW PITCH [DX DY DZ]: extra turn (degrees) and move of the scene camera; `cam 0 0` is the game's own view
+            sunpetal_runtime::nativecam::set(
+                number(w.first(), "YAW", Some(0.0))?,
+                number(w.get(1), "PITCH", Some(0.0))?,
+                [number(w.get(2), "DX", Some(0.0))?, number(w.get(3), "DY", Some(0.0))?, number(w.get(4), "DZ", Some(0.0))?],
+            );
+            done(json!({}))
+        }
         "peek" => {
             let (a, n) = w.first().ok_or("peek ADDR[:LEN]")?.split_once(':').unwrap_or((w[0], "64"));
             let addr = address(a)?;

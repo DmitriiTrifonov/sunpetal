@@ -291,6 +291,8 @@ pub unsafe extern "C" fn arm_interpret(c: *mut Cpu, key: u32) {
 #[no_mangle]
 pub static mut g_arm_hooks: c_int = 0;
 
+static mut IN_AFTER: u32 = 0;
+
 /// At a function's entry while calls are traced or functions replaced: 1 if the host's replacement of this one ran
 /// (the function must return: the replacement set `pc`), else 0.
 #[no_mangle]
@@ -299,6 +301,17 @@ pub unsafe extern "C" fn arm_trace_enter(c: *mut Cpu, key: u32) -> c_int {
         if let Some(f) = machine(|m| m.override_at((*c).cpu, key)) {
             f(c);
             return 1;
+        }
+        // run-then-hook: the original body goes first (its own entry check is let through by `IN_AFTER`)
+        if IN_AFTER != key {
+            if let Some((post, orig)) = machine(|m| m.after_at((*c).cpu, key).zip(m.original_fn((*c).cpu, key))) {
+                let outer = IN_AFTER;
+                IN_AFTER = key;
+                orig(c);
+                IN_AFTER = outer;
+                post(c);
+                return 1;
+            }
         }
     }
     if g_arm_trace != 0 {

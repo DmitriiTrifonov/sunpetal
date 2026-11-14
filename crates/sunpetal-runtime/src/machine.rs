@@ -205,6 +205,7 @@ pub struct Machine {
     pub sched: Sched,
     /// Guest functions run by host code instead (HLE of SDK routines, tests): looked up first.
     overrides: HashMap<(i32, u32), ArmFunc>,
+    afters: HashMap<(i32, u32), ArmFunc>,
     /// The self-test's interpreter mode: no recompiled code, callees interpreted too.
     pub interp_only: bool,
     active: [Option<&'static ArmModule>; 2],
@@ -265,6 +266,7 @@ impl Machine {
             interp_only: false,
             sched: Sched::new(),
             overrides: HashMap::new(),
+            afters: HashMap::new(),
             active: [None, None],
             ovl: [Overlays::default(), Overlays::default()],
             ovl_made: false,
@@ -430,6 +432,29 @@ impl Machine {
         self.overrides.insert((cpu, key), f);
         // direct calls of the recompiled code ask at the function's entry (`ARM_ENTER`)
         unsafe { crate::services::g_arm_hooks = 1 };
+    }
+
+    /// Runs the guest function at `key` as it is, then `f` (it sees the registers and memory the function left;
+    /// `pc` is already the return address). Unlike `override_fn` the original body stays.
+    pub fn after_fn(&mut self, cpu: i32, key: u32, f: ArmFunc) {
+        self.afters.insert((cpu, key), f);
+        unsafe { crate::services::g_arm_hooks = 1 };
+    }
+
+    /// The hook that runs after the function at `key` of `cpu`, if the host has one.
+    pub fn after_at(&self, cpu: i32, key: u32) -> Option<ArmFunc> {
+        self.afters.get(&(cpu, key)).copied()
+    }
+
+    /// The recompiled body at `key`, without the host's replacements.
+    pub fn original_fn(&mut self, cpu: i32, key: u32) -> Option<ArmFunc> {
+        let m = self.active[ci(cpu)]?;
+        let f = m.funcs();
+        let i = f.partition_point(|e| e.key < key);
+        if i < f.len() && f[i].key == key {
+            return Some(f[i].func);
+        }
+        self.overlay_fn(cpu, key)
     }
 
     /// The replacement of the function at `key` of `cpu`, if the host has one.

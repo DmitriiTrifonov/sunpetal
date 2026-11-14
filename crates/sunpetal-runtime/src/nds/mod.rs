@@ -471,6 +471,10 @@ pub fn boot(cfg: Config) -> Result<(), String> {
         sched::start(cpu, entries[ci(cpu)]);
         crate::bios::direct_boot_cpu(cpu, entries[ci(cpu)]);
     }
+    if crate::nativecam::wanted() {
+        crate::nativecam::install();
+        note("free camera hook");
+    }
     if crate::nativeinput::wanted() {
         crate::nativeinput::install();
         note("native input: key sampler");
