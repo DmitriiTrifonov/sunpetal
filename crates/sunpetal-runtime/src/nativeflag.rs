@@ -1,7 +1,6 @@
 //! The switches of the native modules (docs/NATIVE-ENGINE-PLAN.md). `SUNPETAL_NATIVE=1` turns them all on, together; a
 //! module's own variable overrides it (`SUNPETAL_NATIVE_LOAD=0` leaves that one to the game, `=1` takes it alone).
-//! The input module (`SUNPETAL_NATIVE_INPUT`) is not under the umbrella: alone it differs from the game from the 4th frame of
-//! C01_01 (and 9 other scenes), without it all 429 scenes agree (2026-11-15). Off by default: the ARM code is the reference until the author says otherwise.
+//! Off by default: the ARM code is the reference until the author says otherwise.
 
 /// Whether the module whose variable is `name` is on.
 pub fn on(name: &str) -> bool {

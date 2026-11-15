@@ -35,13 +35,18 @@ unsafe extern "C" fn hook(c: *mut Cpu) {
     (*c).r[1] = held;
     (*c).r[2] = REPEAT_OUT;
     (*c).r[14] = 0x0202_C3AD;
+    // the recompiled body polls before this call (`ARM_POLL`): the budget counts it, or the slice ends a step later than the game's
+    (*c).budget -= 1;
+    if (*c).budget < 0 {
+        crate::services::arm_poll(c);
+    }
     crate::call(&mut *c, REPEAT_KEY);
     (*c).r[0] = 1;
     (*c).pc = if lr & 1 != 0 { lr } else { lr & !3 };
 }
 
 pub fn wanted() -> bool {
-    std::env::var("SUNPETAL_NATIVE_INPUT").is_ok_and(|v| v == "1")
+    crate::nativeflag::on("SUNPETAL_NATIVE_INPUT")
 }
 
 pub fn install() {
