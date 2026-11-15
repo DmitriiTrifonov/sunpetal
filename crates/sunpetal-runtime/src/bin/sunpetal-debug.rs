@@ -51,6 +51,12 @@ struct Args {
     /// Play request N from its start (the same as --goto CNN_01).
     #[arg(long, value_name = "N", conflicts_with = "goto")]
     chapter: Option<u32>,
+    /// After --goto/--chapter (and --set): the hero to map N (`CHANGEMAP`; the Model/Area/A{N:02d} of docs/MAPS.md), at --map-at or the same place.
+    #[arg(long, value_name = "N")]
+    map: Option<i32>,
+    /// With --map: the place, X,Y,Z in 1/4096 units.
+    #[arg(long, value_name = "X,Y,Z", requires = "map")]
+    map_at: Option<String>,
     /// A story value, valueN=V (`SETVALUE N V`); value0 is the chapter's step.
     #[arg(long, value_name = "NAME=VALUE")]
     set: Vec<String>,
@@ -570,6 +576,17 @@ fn run(a: Args) -> Result<(), String> {
             s.set_value(*i, *v)?;
         }
         s.run(a.frame_delay)?;
+    }
+    if let Some(map) = a.map {
+        let pos = match &a.map_at {
+            Some(t) => {
+                let v: Vec<i32> = t.split(',').map(|x| x.trim().parse().map_err(|_| format!("--map-at {}: X,Y,Z as numbers", t))).collect::<Result<_, _>>()?;
+                <[i32; 3]>::try_from(v).map_err(|_| format!("--map-at {}: X,Y,Z", t))?
+            }
+            None => sunpetal_runtime::session::hero_pos().ok_or("--map: no hero yet to take the place from (give --map-at X,Y,Z, or play to a free walk with --goto)")?,
+        };
+        s.change_map(map, pos)?;
+        s.run(a.frame_delay.max(300))?;
     }
     let mut stop = None;
     if a.autoplay {
