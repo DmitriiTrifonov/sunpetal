@@ -2,6 +2,7 @@
 //! step by step, the formats inside. Read-only; the disc is never written to.
 pub mod bpe;
 pub mod events;
+pub mod export;
 pub mod gig;
 pub mod gim;
 pub mod gs;

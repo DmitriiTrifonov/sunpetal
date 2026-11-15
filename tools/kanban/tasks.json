@@ -2736,7 +2736,7 @@
   {
    "id": "K-234",
    "t": "Данные PS2 для движка 1/3: читатель выгрузки sunpetal-ee в Rust — cameras/<R>.json, scenes/<R>.json (hit, height, light, fog), maps.tsv; типы и тесты на R01/OP",
-   "col": "backlog",
+   "col": "done",
    "r": 8.0,
    "i": 2.0,
    "c": 0.8,
