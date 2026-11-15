@@ -1259,8 +1259,16 @@ pub fn install() {
     all.extend(TEXTS.iter().enumerate().map(|(i, t)| (t.key, TSLOTS[i])));
     // for hunting a difference: SUNPETAL_NATIVE_LOAD_SKIP=0x0204253C,… leaves these functions to the game
     let skip: Vec<u32> = std::env::var("SUNPETAL_NATIVE_LOAD_SKIP").map(|v| v.split(',').filter_map(|k| num(k).ok()).map(|k| k | 1).collect()).unwrap_or_default();
+    // SUNPETAL_NATIVE_LOAD_ONLY=0x…,…: only these (to bisect a difference); SUNPETAL_NATIVE_LOAD_LIST=1 prints every key
+    let only: Option<Vec<u32>> = std::env::var("SUNPETAL_NATIVE_LOAD_ONLY").ok().map(|v| v.split(',').filter_map(|k| num(k).ok()).map(|k| k | 1).collect());
+    if std::env::var_os("SUNPETAL_NATIVE_LOAD_LIST").is_some() {
+        eprintln!("LOADKEYS {}", all.iter().map(|(k, _)| format!("{:#010X}", k)).collect::<Vec<_>>().join(","));
+    }
     crate::machine(|m| {
         for (key, f) in all {
+            if only.as_ref().is_some_and(|o| !o.contains(&key)) {
+                continue;
+            }
             if !skip.contains(&key) && !skip.contains(&1) {
                 m.override_fn(9, key, f);
             }
