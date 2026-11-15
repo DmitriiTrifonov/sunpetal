@@ -293,11 +293,35 @@ pub static mut g_arm_hooks: c_int = 0;
 
 static mut IN_AFTER: u32 = 0;
 
+/// One bit per function address (modulo 4 MiB of halfwords) that has a host replacement or after-hook: the entry check of
+/// every function reads one bit instead of looking the key up in the hook tables (an unrelated address may share a bit;
+/// it then takes the slow path, which answers right).
+const HOOK_BITS: usize = 1 << 21;
+static HOOK_MAP: [std::sync::atomic::AtomicU8; HOOK_BITS / 8] = [const { std::sync::atomic::AtomicU8::new(0) }; HOOK_BITS / 8];
+
+#[inline(always)]
+fn hook_bit(key: u32) -> (usize, u8) {
+    let i = ((key >> 1) as usize) & (HOOK_BITS - 1);
+    (i >> 3, 1 << (i & 7))
+}
+
+/// Marks `key` as one the host hooks (`Machine::override_fn`, `after_fn`).
+pub fn mark_hooked(key: u32) {
+    let (b, m) = hook_bit(key);
+    HOOK_MAP[b].fetch_or(m, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[inline(always)]
+fn maybe_hooked(key: u32) -> bool {
+    let (b, m) = hook_bit(key);
+    HOOK_MAP[b].load(std::sync::atomic::Ordering::Relaxed) & m != 0
+}
+
 /// At a function's entry while calls are traced or functions replaced: 1 if the host's replacement of this one ran
 /// (the function must return: the replacement set `pc`), else 0.
 #[no_mangle]
 pub unsafe extern "C" fn arm_trace_enter(c: *mut Cpu, key: u32) -> c_int {
-    if g_arm_hooks != 0 {
+    if g_arm_hooks != 0 && maybe_hooked(key) {
         if let Some(f) = machine(|m| m.override_at((*c).cpu, key)) {
             f(c);
             return 1;

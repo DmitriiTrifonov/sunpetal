@@ -430,6 +430,7 @@ impl Machine {
     /// for calls, jumps and thread starts, and must return to `lr` as recompiled code does.
     pub fn override_fn(&mut self, cpu: i32, key: u32, f: ArmFunc) {
         self.overrides.insert((cpu, key), f);
+        crate::services::mark_hooked(key);
         // direct calls of the recompiled code ask at the function's entry (`ARM_ENTER`)
         unsafe { crate::services::g_arm_hooks = 1 };
     }
@@ -438,6 +439,7 @@ impl Machine {
     /// `pc` is already the return address). Unlike `override_fn` the original body stays.
     pub fn after_fn(&mut self, cpu: i32, key: u32, f: ArmFunc) {
         self.afters.insert((cpu, key), f);
+        crate::services::mark_hooked(key);
         unsafe { crate::services::g_arm_hooks = 1 };
     }
 
