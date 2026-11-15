@@ -16,6 +16,7 @@ pub mod nativechar;
 pub mod nativedialog;
 pub mod nativedraw;
 pub mod nativeend;
+pub mod nativeflag;
 pub mod nativeinput;
 pub mod nativeload;
 pub mod nativestep;

@@ -138,6 +138,7 @@ unsafe extern "C" fn set_motion(c: *mut Cpu) {
 fn chosen() -> Vec<String> {
     match std::env::var("SUNPETAL_NATIVE_CHARS") {
         Ok(v) if v == "1" => ["finder", "pos", "dir", "motion"].map(String::from).to_vec(),
+        Err(_) if crate::nativeflag::all() => ["finder", "pos", "dir", "motion"].map(String::from).to_vec(),
         Ok(v) if !v.is_empty() && v != "0" => v.split(',').map(|s| s.trim().to_string()).collect(),
         _ => Vec::new(),
     }

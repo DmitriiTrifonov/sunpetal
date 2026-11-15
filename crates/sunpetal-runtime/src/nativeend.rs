@@ -158,7 +158,7 @@ unsafe extern "C" fn end(c: *mut Cpu) {
 }
 
 pub fn wanted() -> bool {
-    std::env::var("SUNPETAL_NATIVE_END").is_ok_and(|v| v == "1")
+    crate::nativeflag::on("SUNPETAL_NATIVE_END")
 }
 
 pub fn install() {

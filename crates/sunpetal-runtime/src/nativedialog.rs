@@ -93,7 +93,7 @@ slots!(s0 = 0, s1 = 1, s2 = 2, s3 = 3, s4 = 4, s5 = 5, s6 = 6, s7 = 7);
 
 /// Whether the environment asks for the native handlers.
 pub fn wanted() -> bool {
-    std::env::var("SUNPETAL_NATIVE_DIALOG").is_ok_and(|v| v == "1")
+    crate::nativeflag::on("SUNPETAL_NATIVE_DIALOG")
 }
 
 /// Puts the handlers of the repository's table in place of the guest's (ARM9).

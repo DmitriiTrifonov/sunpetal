@@ -394,7 +394,7 @@ aslots!(
 );
 
 pub fn wanted() -> bool {
-    std::env::var("SUNPETAL_NATIVE_LOAD").is_ok_and(|v| v == "1")
+    crate::nativeflag::on("SUNPETAL_NATIVE_LOAD")
 }
 
 /// `0x0203FC54`: read the names section. For each token that follows a `[[` tag the game allocates the token's

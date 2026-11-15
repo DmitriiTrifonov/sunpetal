@@ -231,7 +231,7 @@ pub const BLIT_KEY: u32 = 0x0203_38E0;
 
 /// Whether the environment asks for the native blit.
 pub fn wanted() -> bool {
-    std::env::var("SUNPETAL_NATIVE_DIALOG_DRAW").is_ok_and(|v| v == "1")
+    crate::nativeflag::on("SUNPETAL_NATIVE_DIALOG_DRAW")
 }
 
 /// Puts the native blit in place of the guest's.

@@ -107,7 +107,7 @@ unsafe extern "C" fn change_by_value(c: *mut Cpu) {
 }
 
 pub fn wanted() -> bool {
-    std::env::var("SUNPETAL_NATIVE_STEP").is_ok_and(|v| v == "1")
+    crate::nativeflag::on("SUNPETAL_NATIVE_STEP")
 }
 
 pub fn install() {
