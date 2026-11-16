@@ -12,7 +12,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("setvalue", "setvalue I V: story value I = V (0 is the chapter's step)"),
     ("value", "value [I]: story value I (default 0)"),
     ("where", "where: scene, map, place, story step"),
-    ("ps2walk", "ps2walk SCENE [AREA]: the d-pad walks the hero by the PS2 scene's walls and floor; `ps2walk off` ends it"),
+    ("charwalk", "charwalk SCENE [AREA]: the d-pad walks the hero by the PS2 scene's walls and floor; `charwalk off` ends it"),
     ("scene", "scene: the script file the game read last"),
     ("cam", "cam YAW PITCH [DX DY DZ]: the scene camera turned (degrees) and moved; `cam 0 0` is the game's"),
     ("shot", "shot: the window's picture and its parts to artifacts/shots"),
@@ -91,8 +91,8 @@ pub fn run(line: &str) -> Result<String, String> {
             start_chapter(num(w, 0, "N", None)?)?;
             Ok("chapter asked for; the scene starts in a few frames".into())
         }
-        "ps2walk" => {
-            // ps2walk SCENE [AREA]: the d-pad walks the hero on the PS2 scene's walls and floor (SUNPETAL_EE_EXPORT); `ps2walk off`
+        "charwalk" => {
+            // charwalk SCENE [AREA]: the d-pad walks the hero on the PS2 scene's walls and floor (SUNPETAL_EE_EXPORT); `charwalk off`
             if w.first() == Some(&"off") {
                 crate::nativewalk::disable();
                 return Ok("the game's own walk".into());

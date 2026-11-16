@@ -167,8 +167,8 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             sunpetal_runtime::console::start_chapter(number(w.first(), "N", None)?)?;
             done(json!({}))
         }
-        "ps2walk" => {
-            // ps2walk SCENE [AREA] / ps2walk off: the d-pad walks the hero by the PS2 scene (K-236)
+        "charwalk" => {
+            // charwalk SCENE [AREA] / charwalk off: the d-pad walks the hero by the PS2 scene (K-236)
             if w.first() == Some(&"off") {
                 sunpetal_runtime::nativewalk::disable();
                 return done(json!({}));
