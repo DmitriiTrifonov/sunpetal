@@ -234,6 +234,31 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             let items: Vec<_> = f.items.iter().map(|i| json!({"model": i.model, "mesh": i.mesh, "slot": i.slot, "polys": i.polys})).collect();
             done(json!({"hash": format!("{:016x}", f.hash()), "view": f.view, "proj": f.proj, "named_polys": f.named_polys(), "items": items}))
         }
+        "cam" if w.first() == Some(&"ps2path") => {
+            // cam ps2path SCENE RECORD PATH T: a path of the PS2 export (SUNPETAL_EE_EXPORT = out/export/v1) at T, as the camera
+            let root = std::env::var("SUNPETAL_EE_EXPORT").map_err(|_| "SUNPETAL_EE_EXPORT is not set")?;
+            let idx = |i: usize, name: &str| w.get(i).ok_or(format!("{name} is missing"))?.parse::<usize>().map_err(|_| format!("{name}: not a number"));
+            let (pos, rot) =
+                sunpetal_runtime::nativecam::set_ps2_path(&root, w.get(1).ok_or("SCENE is missing")?, idx(2, "RECORD")?, idx(3, "PATH")?, number::<f32>(w.get(4), "T", None)?)?;
+            done(json!({"pos": pos, "rot": rot}))
+        }
+        "cam" if w.first() == Some(&"ps2") => {
+            // cam ps2 EX EY EZ PITCH YAW ROLL [t]: the PS2 camera (K-235.3); `cam ps2 off` is the game's own
+            if w.get(1) == Some(&"off") {
+                sunpetal_runtime::nativecam::clear_ps2();
+                return done(json!({}));
+            }
+            let n = |i: usize, name: &str| number(w.get(i + 1), name, None);
+            sunpetal_runtime::nativecam::set_ps2(
+                [n(0, "EX")?, n(1, "EY")?, n(2, "EZ")?],
+                n(3, "PITCH")?,
+                n(4, "YAW")?,
+                n(5, "ROLL")?,
+                [16.0, -18.5996, -13.0],
+                w.get(7) == Some(&"t"),
+            );
+            done(json!({}))
+        }
         "cam" => {
             // cam YAW PITCH [DX DY DZ]: extra turn (degrees) and move of the scene camera; `cam 0 0` is the game's own view
             sunpetal_runtime::nativecam::set(

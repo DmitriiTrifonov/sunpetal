@@ -99,6 +99,16 @@ pub fn run(line: &str) -> Result<String, String> {
             session::story_value(0),
             nds::vblanks()
         )),
+        "cam" if w.first() == Some(&"ps2") => {
+            // cam ps2 EX EY EZ PITCH YAW ROLL [T]: the PS2 camera (place in PS2 units, radians); `cam ps2 off` ends it
+            if w.get(1) == Some(&"off") {
+                nativecam::clear_ps2();
+                return Ok("the game's own camera".into());
+            }
+            let n = |i: usize, name: &str| num(&w[1..], i, name, None);
+            nativecam::set_ps2([n(0, "EX")?, n(1, "EY")?, n(2, "EZ")?], n(3, "PITCH")?, n(4, "YAW")?, n(5, "ROLL")?, [16.0, -18.5996, -13.0], w.get(7) == Some(&"t"));
+            Ok("PS2 camera set".into())
+        }
         "cam" => {
             nativecam::set(num(w, 0, "YAW", Some(0.0))?, num(w, 1, "PITCH", Some(0.0))?, [num(w, 2, "DX", Some(0.0))?, num(w, 3, "DY", Some(0.0))?, num(w, 4, "DZ", Some(0.0))?]);
             Ok(if w.len() >= 2 && w[0] == "0" && w[1] == "0" { "the game's own camera".into() } else { "camera set".into() })
