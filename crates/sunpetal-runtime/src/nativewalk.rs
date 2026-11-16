@@ -38,6 +38,27 @@ pub fn enable(root: &str, scene: &str, area: usize) -> Result<(), String> {
     Ok(())
 }
 
+/// A room of the export (`rooms.tsv`: scene and index) on the DS hero: the PS2 camera after the hero and the PS2 walk, together.
+/// The room's index is its camera record and its Scene3D area both (Y-25). Fails if the table has no such room.
+pub fn room(root: &str, scene: &str, index: usize) -> Result<(), String> {
+    let table = std::fs::read_to_string(std::path::Path::new(root).join("rooms.tsv")).map_err(|e| format!("rooms.tsv: {}", e))?;
+    let known = table.lines().skip(1).any(|l| {
+        let mut c = l.split('\t');
+        c.next() == Some(scene) && c.next().and_then(|i| i.parse::<usize>().ok()) == Some(index)
+    });
+    if !known {
+        return Err(format!("rooms.tsv has no room {} {}", scene, index));
+    }
+    nativecam::follow_ps2_path(root, scene, index, None)?;
+    enable(root, scene, index)
+}
+
+/// Back to the game's own camera and walk.
+pub fn room_off() {
+    nativecam::clear_ps2();
+    disable();
+}
+
 pub fn disable() {
     *WALK.lock().unwrap() = None;
 }

@@ -167,6 +167,17 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             sunpetal_runtime::console::start_chapter(number(w.first(), "N", None)?)?;
             done(json!({}))
         }
+        "ps2room" => {
+            // ps2room SCENE ROOM / ps2room off: the PS2 camera and walk of a room of rooms.tsv together (K-235, K-236)
+            if w.first() == Some(&"off") {
+                sunpetal_runtime::nativewalk::room_off();
+                return done(json!({}));
+            }
+            let root = std::env::var("SUNPETAL_EE_EXPORT").map_err(|_| "SUNPETAL_EE_EXPORT is not set")?;
+            let room = w.get(1).ok_or("ROOM is missing")?.parse::<usize>().map_err(|_| "ROOM: not a number".to_string())?;
+            sunpetal_runtime::nativewalk::room(&root, w.first().ok_or("SCENE is missing")?, room)?;
+            done(json!({}))
+        }
         "charwalk" => {
             // charwalk SCENE [AREA] / charwalk off: the d-pad walks the hero by the PS2 scene (K-236)
             if w.first() == Some(&"off") {
