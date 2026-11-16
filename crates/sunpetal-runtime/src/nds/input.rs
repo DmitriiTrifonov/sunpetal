@@ -101,17 +101,34 @@ pub(super) struct InputRec {
     path: std::path::PathBuf,
     cur: (u32, Option<(i32, i32)>),
     since: u64,
+    /// the next VBlank a checkpoint (`FILE.chk`, see `checkpoint_line`) is written at
+    next_check: u64,
 }
+
+/// Checkpoints go in every this many VBlanks of a recording.
+pub const CHECK_EVERY: u64 = 300;
 
 impl InputRec {
     pub(super) fn from_env() -> Option<InputRec> {
         let path = std::path::PathBuf::from(std::env::var_os("SUNPETAL_INPUT_REC")?);
         let _ = std::fs::write(&path, "");
-        Some(InputRec { path, cur: (0, None), since: 0 })
+        let _ = std::fs::write(path.with_extension("chk"), "");
+        Some(InputRec { path, cur: (0, None), since: 0, next_check: 0 })
     }
 }
 
 impl Nds {
+    /// The file a checkpoint is due into, if a recording runs and `vblanks` has reached the next checkpoint.
+    pub(super) fn check_due(&mut self) -> Option<(std::path::PathBuf, u64)> {
+        let now = self.vblanks;
+        let r = self.inrec.as_mut()?;
+        if now < r.next_check {
+            return None;
+        }
+        r.next_check = now / CHECK_EVERY * CHECK_EVERY + CHECK_EVERY;
+        Some((r.path.with_extension("chk"), now))
+    }
+
     fn input_record(&mut self, keys: u32, pen: Option<(i32, i32)>) {
         let now = self.vblanks;
         let Some(r) = &mut self.inrec else { return };

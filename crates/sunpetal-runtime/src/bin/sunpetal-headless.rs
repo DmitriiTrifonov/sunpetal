@@ -19,7 +19,7 @@ fn main() -> ExitCode {
         match a.as_str() {
             "--vblanks" | "--out" | "--save" | "--save-size" | "--dump-textures" | "--dump-bg" | "--dump-2d" | "--pack-2d" | "--texture-pack" | "--overlay" | "--data"
             | "--lang" | "--shots" | "--shot-every" | "--input" | "--wav" | "--scale" | "--outline" | "--outline-width" | "--shadow" | "--shadow-radius" | "--texture-filter"
-            | "--wide" | "--msaa" | "--renderer" => rest.push((a, args.next().unwrap_or_default())),
+            | "--wide" | "--msaa" | "--renderer" | "--check" => rest.push((a, args.next().unwrap_or_default())),
             "--trace" | "--draw-all" | "--pipeline" => rest.push((a, String::new())),
             _ if cfg.is_none() => cfg = Some(Config::new(a)),
             _ => {
@@ -42,6 +42,7 @@ fn main() -> ExitCode {
     let mut extras = nds::Extras::default();
     let mut renderer = nds::Renderer::Software;
     let mut pipeline = false;
+    let mut check: std::collections::BTreeMap<u64, String> = std::collections::BTreeMap::new();
     for (k, v) in rest {
         match k.as_str() {
             "--vblanks" => cfg.stop_vblanks = v.parse().unwrap_or(0),
@@ -64,6 +65,14 @@ fn main() -> ExitCode {
             "--texture-filter" => extras.filter = nds::TexFilter::parse(&v),
             "--shadow-radius" => extras.shadow_radius = v.parse().unwrap_or(2.0),
             "--pipeline" => pipeline = true,
+            // --check FILE.chk: the checkpoints a recording of input (SUNPETAL_INPUT_REC) wrote beside it (K-149)
+            "--check" => match std::fs::read_to_string(&v) {
+                Ok(t) => check.extend(t.lines().filter_map(|l| Some((l.split(' ').next()?.parse().ok()?, l.to_string())))),
+                Err(e) => {
+                    eprintln!("{}: {}", v, e);
+                    return ExitCode::from(2);
+                }
+            },
             "--renderer" => match v.as_str() {
                 "gpu" => renderer = nds::Renderer::Gpu,
                 "software" => renderer = nds::Renderer::Software,
@@ -103,6 +112,14 @@ fn main() -> ExitCode {
             break;
         }
         let v = nds::vblanks();
+        if let Some(want) = check.remove(&v) {
+            let got = nds::checkpoint_line(v);
+            if got != want {
+                eprintln!("replay diverged at VBlank {}: recorded `{}`, now `{}`", v, want, got);
+                std::process::exit(3);
+            }
+            eprintln!("checkpoint {} ok", v);
+        }
         if wav.is_some() {
             samples.extend(nds::take_samples());
         }
