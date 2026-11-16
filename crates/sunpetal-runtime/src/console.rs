@@ -103,10 +103,11 @@ pub fn run(line: &str) -> Result<String, String> {
         }
         "scene" => Ok(nds::script_scene().unwrap_or_else(|| "(none yet)".into())),
         "where" => Ok(format!(
-            "scene {}  map {:?}  pos {:?}  step {:?}  frame {}",
+            "scene {}  map {:?}  pos {:?}  angle {:?}  step {:?}  frame {}",
             nds::script_scene().unwrap_or_else(|| "-".into()),
             session::hero_map(),
             session::hero_pos(),
+            session::hero_angle(),
             session::story_value(0),
             nds::vblanks()
         )),

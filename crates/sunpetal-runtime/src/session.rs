@@ -1316,6 +1316,17 @@ pub fn hero_pos() -> Option<[i32; 3]> {
     Some([word(h + 0x18)? as i32, word(h + 0x1C)? as i32, word(h + 0x20)? as i32])
 }
 
+/// The hero's facing, a 16-bit angle (0x10000 a full turn; `SETDIRECTION`'s unit).
+pub fn hero_angle() -> Option<u32> {
+    word(hero()? + 0x4C)
+}
+
+/// Turns the hero to the 16-bit angle `a`; false if there is no hero.
+pub fn hero_set_angle(a: u32) -> bool {
+    let Some(h) = hero() else { return false };
+    debug::poke(h + 0x4C, &a.to_le_bytes())
+}
+
 /// Puts the hero at `pos`; false if there is no hero.
 pub fn hero_teleport(pos: [i32; 3]) -> bool {
     let Some(h) = hero() else { return false };

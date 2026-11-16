@@ -85,6 +85,37 @@ pub fn turn_frames(diff: f32) -> (u32, bool) {
     }
 }
 
+/// A turn of the face toward a heading (`SetTurnDirection`, `walk.md` §4): the whole difference in `total` equal frames.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Turn {
+    start: f32,
+    diff: f32,
+    total: u32,
+    done: u32,
+    target: f32,
+}
+
+fn wrap(a: f32) -> f32 {
+    use std::f32::consts::PI;
+    (a + PI).rem_euclid(2.0 * PI) - PI
+}
+
+/// One frame of the face: `face` goes toward `target` (radians, 0 is +z, π/2 is +x). A new target starts a turn; a small one
+/// (no whole frame) snaps. `turn` keeps the running one.
+pub fn face_step(turn: &mut Option<Turn>, face: f32, target: f32) -> f32 {
+    if turn.is_none_or(|t| wrap(t.target - target).abs() > 1e-3) {
+        let diff = wrap(target - face);
+        let (total, _) = turn_frames(diff);
+        *turn = Some(Turn { start: face, diff, total, done: 0, target });
+    }
+    let t = turn.as_mut().unwrap();
+    if t.done >= t.total {
+        return wrap(t.target);
+    }
+    t.done += 1;
+    wrap(t.start + t.diff * t.done as f32 / t.total as f32)
+}
+
 /// Where `p` (x, z) stands against a convex polygon walked in the positive direction (`ContainPointClosedLine`, `hit.md` §8.1):
 /// 1 inside, 0 on the edge, -1 outside. Points are (x, z).
 fn contain_closed(poly: &[[f32; 2]], p: [f32; 2]) -> i32 {
@@ -293,6 +324,25 @@ mod tests {
         let y = floor_height(&a, 2.0, 2.0).unwrap();
         assert!((y - (10.0 + 2.0 + 4.0)).abs() < 1e-4, "{}", y);
         assert_eq!(floor_height(&a, 20.0, 20.0), None);
+    }
+
+    #[test]
+    fn the_face_turns_in_equal_frames_and_a_small_turn_snaps() {
+        let mut t = None;
+        // 90 degrees: 18 frames of 5 degrees
+        let mut f = 0.0;
+        for _ in 0..18 {
+            f = face_step(&mut t, f, std::f32::consts::FRAC_PI_2);
+        }
+        assert!((f - std::f32::consts::FRAC_PI_2).abs() < 1e-5, "{}", f);
+        assert!((face_step(&mut t, f, std::f32::consts::FRAC_PI_2) - f).abs() < 1e-5);
+        // across the wrap the short way
+        let mut t = None;
+        let f = face_step(&mut t, 3.0, -3.0);
+        assert!(f > 3.0 || f < -3.0, "{}", f);
+        // 3 degrees snap
+        let mut t = None;
+        assert!((face_step(&mut t, 0.0, 0.05) - 0.05).abs() < 1e-6);
     }
 
     #[test]
