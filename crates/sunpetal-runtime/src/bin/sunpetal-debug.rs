@@ -236,6 +236,13 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             let items: Vec<_> = f.items.iter().map(|i| json!({"model": i.model, "mesh": i.mesh, "slot": i.slot, "polys": i.polys})).collect();
             done(json!({"hash": format!("{:016x}", f.hash()), "view": f.view, "proj": f.proj, "named_polys": f.named_polys(), "items": items}))
         }
+        "cam" if w.first() == Some(&"ps2follow") => {
+            // cam ps2follow SCENE RECORD PATH: the camera on that path of the export, T from the hero's place each frame
+            let root = std::env::var("SUNPETAL_EE_EXPORT").map_err(|_| "SUNPETAL_EE_EXPORT is not set")?;
+            let idx = |i: usize, name: &str| w.get(i).ok_or(format!("{name} is missing"))?.parse::<usize>().map_err(|_| format!("{name}: not a number"));
+            sunpetal_runtime::nativecam::follow_ps2_path(&root, w.get(1).ok_or("SCENE is missing")?, idx(2, "RECORD")?, idx(3, "PATH")?)?;
+            done(json!({}))
+        }
         "cam" if w.first() == Some(&"ps2path") => {
             // cam ps2path SCENE RECORD PATH T: a path of the PS2 export (SUNPETAL_EE_EXPORT = out/export/v1) at T, as the camera
             let root = std::env::var("SUNPETAL_EE_EXPORT").map_err(|_| "SUNPETAL_EE_EXPORT is not set")?;

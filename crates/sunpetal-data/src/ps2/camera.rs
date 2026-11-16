@@ -42,6 +42,37 @@ impl CamPath {
         Some(out)
     }
 
+    /// The parameter `T` the game's camera takes on this path for a subject at `subject` (`camera.md` §8.2,
+    /// `SetCurrentSegment`): the subject is projected on the XZ line of each segment, the nearest segment wins (a tie: the
+    /// smaller way along it), `T = (FrameNo[seg] + u ∓ C) / FrameNo[last]` with the camera `C = 30·scale` behind the
+    /// projection (when the path follows: flag bits 1 and 3 clear). Not done: `GetCorrection` at the ends of paths of
+    /// three keys and more (it matters only near a corner). `reverse` is the path's direction (`bReverse`).
+    pub fn follow_t(&self, subject: [f32; 3], scale: f32, reverse: bool) -> Option<f32> {
+        let last = self.keys.last()?.frame;
+        if self.keys.len() < 2 || last <= 0.0 {
+            return None;
+        }
+        let mut best: Option<(f32, f32, usize)> = None; // distance, way along, segment
+        for i in 0..self.keys.len() - 1 {
+            let (a, b) = (&self.keys[i], &self.keys[i + 1]);
+            let (ax, az) = (b.pos[0] - a.pos[0], b.pos[2] - a.pos[2]);
+            let (bx, bz) = (subject[0] - a.pos[0], subject[2] - a.pos[2]);
+            let len = ax.hypot(az);
+            if len == 0.0 {
+                continue;
+            }
+            let u = (bx * ax + bz * az) / len;
+            let d = ((az * bx - ax * bz) / len).abs();
+            if best.is_none_or(|(bd, bu, _)| d < bd || (d == bd && u < bu)) {
+                best = Some((d, u, i));
+            }
+        }
+        let (_, u, i) = best?;
+        let c = if self.flag & 0b1010 == 0 { scale * 30.0 } else { 0.0 };
+        let t = (self.keys[i].frame + u + if reverse { c } else { -c }) / last;
+        Some(t.clamp(0.0, 1.0))
+    }
+
     /// The camera's turn (about x, about y) at `t`: linear between the keys, a jump of more than a quarter turn is
     /// taken as a wrap of 2π (`SplineRot`).
     pub fn rotation(&self, t: f32) -> Option<[f32; 2]> {
@@ -140,6 +171,18 @@ mod tests {
             let q = p.position(t, 1.0).unwrap();
             assert!((0..3).all(|k| (q[k] - want[k]).abs() < 1e-4), "t {} got {:?} want {:?}", t, q, want);
         }
+    }
+
+    #[test]
+    fn the_camera_follows_thirty_units_behind_the_projection() {
+        let mut a = key(0.0, [0.0, 0.0, 0.0], [0.0; 2], [0.0; 3]);
+        let mut b = key(100.0, [100.0, 0.0, 0.0], [0.0; 2], [0.0; 3]);
+        (a.frame, b.frame) = (0.0, 100.0);
+        let p = path(vec![a, b]);
+        // subject at x 60 (3 off the line): u = 60, T = (60 - 30) / 100
+        assert!((p.follow_t([60.0, 5.0, 3.0], 1.0, false).unwrap() - 0.3).abs() < 1e-6);
+        assert!((p.follow_t([60.0, 5.0, 3.0], 1.0, true).unwrap() - 0.9).abs() < 1e-6);
+        assert_eq!(p.follow_t([10.0, 0.0, 0.0], 1.0, false), Some(0.0));
     }
 
     #[test]

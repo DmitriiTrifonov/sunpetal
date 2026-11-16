@@ -21,6 +21,16 @@ struct Ps2 {
 }
 static PS2: std::sync::Mutex<Option<Ps2>> = std::sync::Mutex::new(None);
 
+/// A PS2 path the camera runs along after the hero (K-235.4): T comes from the hero's place every frame.
+struct Follow {
+    path: sunpetal_data::ps2::export::CamPath,
+    scale: f32,
+}
+static FOLLOW: std::sync::Mutex<Option<Follow>> = std::sync::Mutex::new(None);
+/// The pointer to the world (its first word the hero, whose place is at +0x18, 1/4096) and the PS2 -> DS shift.
+const WORLD: u32 = 0x0206_B45C + 4;
+const SHIFT: [f64; 3] = [16.0, -18.5996, -13.0];
+
 static ON: AtomicBool = AtomicBool::new(false);
 static YAW: AtomicI32 = AtomicI32::new(0); // degrees * 100
 static PITCH: AtomicI32 = AtomicI32::new(0);
@@ -65,6 +75,25 @@ pub fn set_ps2_path(root: &str, scene: &str, record: usize, path: usize, t: f32)
 
 pub fn clear_ps2() {
     *PS2.lock().unwrap() = None;
+    *FOLLOW.lock().unwrap() = None;
+}
+
+/// The camera runs along a path of the export after the hero (`cam ps2follow`): `T` from `CamPath::follow_t`, the turn
+/// the path's own (the game's look at the subject, `camera.md` §5, is not done).
+pub fn follow_ps2_path(root: &str, scene: &str, record: usize, path: usize) -> Result<(), String> {
+    let ex = sunpetal_data::ps2::export::Export::open(root).map_err(|e| e.to_string())?;
+    let cams = ex.cameras(scene).map_err(|e| e.to_string())?;
+    let cam = cams.get(record).and_then(|c| c.camera.as_ref()).ok_or("no camera in that record")?;
+    let p = cam.paths.get(path).ok_or("no such path")?.clone();
+    *FOLLOW.lock().unwrap() = Some(Follow { path: p, scale: cam.scale });
+    set_ps2([0.0; 3], 0.0, 0.0, 0.0, SHIFT, false);
+    Ok(())
+}
+
+/// The pitch and yaw (radians) that turn a PS2 camera at `eye` to `target` (the same units).
+fn look_at(eye: [f64; 3], target: [f64; 3]) -> (f32, f32) {
+    let d: Vec<f64> = (0..3).map(|i| target[i] - eye[i]).collect();
+    ((d[1].atan2(d[0].hypot(d[2]))) as f32, (-d[0]).atan2(-d[2]) as f32)
 }
 
 type M = [i64; 12]; // columns of 3: x axis, y axis, z axis, translation
@@ -123,7 +152,27 @@ unsafe extern "C" fn after(c: *mut Cpu) {
     if !ON.load(Relaxed) || !SCENE_CALL.contains(&lr) {
         return;
     }
-    if let Some(p) = *PS2.lock().unwrap() {
+    let mut ps2 = *PS2.lock().unwrap();
+    if let (Some(p), Some(f)) = (ps2.as_mut(), FOLLOW.lock().unwrap().as_ref()) {
+        let hero = mem_read32(c, WORLD);
+        let hero = if hero != 0 { mem_read32(c, hero) } else { 0 };
+        if hero != 0 {
+            // the hero in the export's units: the DS world less the shift, tenths of it
+            let at = |o: u32| (mem_read32(c, hero + o) as i32) as f64 / 4096.0;
+            let s = [(at(0x18) - SHIFT[0]) * 10.0, (at(0x1C) - SHIFT[1]) * 10.0, (at(0x20) - SHIFT[2]) * 10.0];
+            if let Some(t) = f.path.follow_t([s[0] as f32, s[1] as f32, s[2] as f32], f.scale, false) {
+                if let (Some(pos), Some(rot)) = (f.path.position(t, f.scale), f.path.rotation(t)) {
+                    p.eye = [pos[0] as f64 * 0.1, pos[1] as f64 * 0.1, pos[2] as f64 * 0.1];
+                    let _ = rot;
+                    // the game looks at the subject (its chest: a unit above the feet)
+                    let hero_ps2 = [at(0x18) - SHIFT[0], at(0x1C) - SHIFT[1] + 1.0, at(0x20) - SHIFT[2]];
+                    let (pitch, yaw) = look_at(p.eye, hero_ps2);
+                    p.angles = [pitch, yaw, 0.0];
+                }
+            }
+        }
+    }
+    if let Some(p) = ps2 {
         for (i, v) in ps2_view(&p).iter().enumerate() {
             mem_write32(c, VIEW + 4 * i as u32, *v as i32 as u32);
         }
@@ -158,6 +207,18 @@ mod tests {
             let v: f64 = (0..3).map(|j| m[3 * j + i] as f64 / 4096.0 * e[j]).sum::<f64>() + m[9 + i] as f64 / 4096.0;
             assert!(v.abs() < 0.01, "{v}");
         }
+    }
+
+    #[test]
+    fn look_at_points_the_view_at_the_target() {
+        let eye = [-17.4, 20.2, 9.0];
+        let tgt = [-10.0, 18.0, 15.0];
+        let (pitch, yaw) = look_at(eye, tgt);
+        let m = ps2_view(&Ps2 { eye, angles: [pitch, yaw, 0.0], shift: [0.0; 3], transpose: false });
+        let d: Vec<f64> = (0..3).map(|i| tgt[i] - eye[i]).collect();
+        let n = d.iter().map(|v| v * v).sum::<f64>().sqrt();
+        let dot: f64 = (0..3).map(|j| -(m[3 * j + 2] as f64) / 4096.0 * d[j] / n).sum();
+        assert!(dot > 0.999, "{dot}");
     }
 
     #[test]
