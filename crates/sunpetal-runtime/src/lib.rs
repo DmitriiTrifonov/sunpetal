@@ -21,6 +21,8 @@ pub mod nativeinput;
 pub mod nativeload;
 pub mod nativestep;
 pub mod nativethin;
+#[cfg(feature = "debug-tools")]
+pub mod nativewalk;
 pub mod nds;
 pub mod savefile;
 pub mod scene;

@@ -524,6 +524,9 @@ pub use input::KEY_NAMES;
 /// Live input for the next frame: the buttons held (bit i of `KEY_NAMES`) and the stylus on the
 /// lower screen (x 0-255, y 0-191), if down. A script (`Config::input`) is replaced from here on.
 pub fn set_input(keys: u32, pen: Option<(i32, i32)>) {
+    // the PS2 walk (K-236) takes the d-pad and moves the hero itself
+    #[cfg(feature = "debug-tools")]
+    let keys = crate::nativewalk::frame(keys);
     let due = nds(|n| {
         n.script.clear();
         n.set_input(keys, pen);

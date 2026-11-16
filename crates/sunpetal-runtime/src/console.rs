@@ -12,6 +12,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("setvalue", "setvalue I V: story value I = V (0 is the chapter's step)"),
     ("value", "value [I]: story value I (default 0)"),
     ("where", "where: scene, map, place, story step"),
+    ("ps2walk", "ps2walk SCENE [AREA]: the d-pad walks the hero by the PS2 scene's walls and floor; `ps2walk off` ends it"),
     ("scene", "scene: the script file the game read last"),
     ("cam", "cam YAW PITCH [DX DY DZ]: the scene camera turned (degrees) and moved; `cam 0 0` is the game's"),
     ("shot", "shot: the window's picture and its parts to artifacts/shots"),
@@ -89,6 +90,16 @@ pub fn run(line: &str) -> Result<String, String> {
         "chapter" => {
             start_chapter(num(w, 0, "N", None)?)?;
             Ok("chapter asked for; the scene starts in a few frames".into())
+        }
+        "ps2walk" => {
+            // ps2walk SCENE [AREA]: the d-pad walks the hero on the PS2 scene's walls and floor (SUNPETAL_EE_EXPORT); `ps2walk off`
+            if w.first() == Some(&"off") {
+                crate::nativewalk::disable();
+                return Ok("the game's own walk".into());
+            }
+            let root = std::env::var("SUNPETAL_EE_EXPORT").map_err(|_| "SUNPETAL_EE_EXPORT is not set")?;
+            crate::nativewalk::enable(&root, w.first().ok_or("SCENE is missing")?, num(w, 1, "AREA", Some(0usize))?)?;
+            Ok("PS2 walk on".into())
         }
         "scene" => Ok(nds::script_scene().unwrap_or_else(|| "(none yet)".into())),
         "where" => Ok(format!(

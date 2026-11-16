@@ -31,6 +31,14 @@ static FOLLOW: std::sync::Mutex<Option<Follow>> = std::sync::Mutex::new(None);
 const WORLD: u32 = 0x0206_B45C + 4;
 const SHIFT: [f64; 3] = [16.0, -18.5996, -13.0];
 
+/// The camera's turn about y (radians, f32 bits), what the walk is relative to (`g_cameracorrection`).
+static YAW_NOW: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// The yaw the last PS2 view was built with (0 with the game's own camera).
+pub fn yaw() -> f32 {
+    f32::from_bits(YAW_NOW.load(Relaxed))
+}
+
 static ON: AtomicBool = AtomicBool::new(false);
 static YAW: AtomicI32 = AtomicI32::new(0); // degrees * 100
 static PITCH: AtomicI32 = AtomicI32::new(0);
@@ -172,6 +180,7 @@ unsafe extern "C" fn after(c: *mut Cpu) {
             }
         }
     }
+    YAW_NOW.store(ps2.map_or(0.0, |p| p.angles[1]).to_bits(), Relaxed);
     if let Some(p) = ps2 {
         for (i, v) in ps2_view(&p).iter().enumerate() {
             mem_write32(c, VIEW + 4 * i as u32, *v as i32 as u32);

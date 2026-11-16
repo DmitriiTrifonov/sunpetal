@@ -167,6 +167,17 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             sunpetal_runtime::console::start_chapter(number(w.first(), "N", None)?)?;
             done(json!({}))
         }
+        "ps2walk" => {
+            // ps2walk SCENE [AREA] / ps2walk off: the d-pad walks the hero by the PS2 scene (K-236)
+            if w.first() == Some(&"off") {
+                sunpetal_runtime::nativewalk::disable();
+                return done(json!({}));
+            }
+            let root = std::env::var("SUNPETAL_EE_EXPORT").map_err(|_| "SUNPETAL_EE_EXPORT is not set")?;
+            let area = w.get(1).map_or(Ok(0), |a| a.parse::<usize>().map_err(|_| "AREA: not a number".to_string()))?;
+            sunpetal_runtime::nativewalk::enable(&root, w.first().ok_or("SCENE is missing")?, area)?;
+            done(json!({}))
+        }
         "scene" => done(json!({"scene": s.scene()})),
         // where: scene, map and the hero's place (the mark a place of data/places.toml is checked by, K-221 А1.4)
         "where" => done(json!({"scene": s.scene(), "map": s.map(), "pos": sunpetal_runtime::session::hero_pos()})),
