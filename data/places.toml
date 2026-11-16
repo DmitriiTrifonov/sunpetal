@@ -1,0 +1,48 @@
+# Каталог мест (K-221, А1.4): куда идти и что считать «пришли». Читают tools/auto/places.py и shoot.py.
+# id — имя места; desc — что это; goto — `--goto Cnn_yy` на копии сохранения `save` (по умолчанию build/full100.sav),
+# без goto — старт с титула; autoplay — `--autoplay`; steps — команды REPL до снимка (маршруты скилла screen-recon);
+# expect — признак: scene (журнал сцен) и map (номер карты), `where` после steps должен их повторить.
+
+[[place]]
+id = "c02_walk"
+desc = "Свободная ходьба в комнате 402 (после диалога главы 2)"
+goto = "C02_01"
+autoplay = true
+steps = ["skip 100", "advance 20"]
+expect = { scene = "C02_01", map = 46 }
+
+[[place]]
+id = "c02_walk_menu"
+desc = "Меню ходьбы: значки слева на нижнем экране"
+goto = "C02_01"
+autoplay = true
+steps = ["skip 100", "advance 20", "press START 3", "advance 40"]
+expect = { scene = "C02_01", map = 46 }
+
+[[place]]
+id = "c02_suitcase"
+desc = "Чемодан: устройство Катарины (циферблат сверху)"
+goto = "C02_01"
+autoplay = true
+steps = ["skip 100", "advance 20", "press START 3", "advance 40", "tap 25 43 4", "advance 100"]
+expect = { scene = "C02_01" }  # в устройстве карты нет
+
+[[place]]
+id = "c04_start"
+desc = "Начало главы 4"
+goto = "C04_01"
+steps = ["advance 120"]
+expect = { scene = "C04_01", map = 46 }
+
+[[place]]
+id = "c05_start"
+desc = "Начало главы 5"
+goto = "C05_01"
+steps = ["advance 120"]
+expect = { scene = "C05_01", map = 46 }
+
+[[place]]
+id = "title"
+desc = "Титул: «PRESS START» (без goto, чистый старт)"
+steps = ["advance 1500"]
+expect = { scene = "C19_01" }
