@@ -85,8 +85,80 @@ pub fn turn_frames(diff: f32) -> (u32, bool) {
     }
 }
 
-/// The wall hit: the end `q` of a step from `p` (x, z) kept out of the area's shapes (rectangles and ellipses;
-/// polygons are not done, nor the switching of zones by the game's events): a rectangle gives only the coordinate of the face crossed (the hero slides along it).
+/// Where `p` (x, z) stands against a convex polygon walked in the positive direction (`ContainPointClosedLine`, `hit.md` §8.1):
+/// 1 inside, 0 on the edge, -1 outside. Points are (x, z).
+fn contain_closed(poly: &[[f32; 2]], p: [f32; 2]) -> i32 {
+    let (mut on, mut out) = (false, false);
+    for (i, cur) in poly.iter().enumerate() {
+        let prev = poly[(i + poly.len() - 1) % poly.len()];
+        let c = (cur[0] - prev[0]) * (p[1] - prev[1]) - (cur[1] - prev[1]) * (p[0] - prev[0]);
+        on |= c == 0.0;
+        out |= c < 0.0;
+    }
+    if out {
+        -1
+    } else if on {
+        0
+    } else {
+        1
+    }
+}
+
+/// `q` projected on the line of edge `i` (`hit.md` §8.2).
+fn project_on_edge(poly: &[[f32; 2]], i: usize, q: [f32; 2]) -> [f32; 2] {
+    let (cur, prev) = (poly[i], poly[(i + poly.len() - 1) % poly.len()]);
+    let (dx, dz) = (cur[0] - prev[0], cur[1] - prev[1]);
+    let cross = dx * (q[1] - prev[1]) - dz * (q[0] - prev[0]);
+    let l2 = dx * dx + dz * dz;
+    [q[0] + dz * cross / l2, q[1] - dx * cross / l2]
+}
+
+/// `OutContainPointClosedLine`: `q` pushed out along the nearest edge (least `cross / L`).
+fn push_out(poly: &[[f32; 2]], q: [f32; 2]) -> [f32; 2] {
+    let mut best: Option<(f32, usize)> = None;
+    for (i, cur) in poly.iter().enumerate() {
+        let prev = poly[(i + poly.len() - 1) % poly.len()];
+        let (dx, dz) = (cur[0] - prev[0], cur[1] - prev[1]);
+        let d = (dx * (q[1] - prev[1]) - dz * (q[0] - prev[0])) / (dx * dx + dz * dz).sqrt();
+        if best.is_none_or(|(bd, _)| d < bd) {
+            best = Some((d, i));
+        }
+    }
+    best.map_or(q, |(_, i)| project_on_edge(poly, i, q))
+}
+
+/// The step `p` -> `q` against a polygon wall (`CrossLineLine`, `hit.md` §8.3): the end moved if the step hits it.
+fn collide_polygon(poly: &[[f32; 2]], p: [f32; 2], q: [f32; 2]) -> [f32; 2] {
+    if poly.len() < 3 {
+        return q;
+    }
+    match contain_closed(poly, p) {
+        1 => return push_out(poly, q),
+        0 => match contain_closed(poly, q) {
+            1 => return push_out(poly, q),
+            0 => return q,
+            _ => {}
+        },
+        _ => {}
+    }
+    if q == p {
+        return q;
+    }
+    for (i, cur) in poly.iter().enumerate() {
+        let prev = poly[(i + poly.len() - 1) % poly.len()];
+        let (dx, dz) = (cur[0] - prev[0], cur[1] - prev[1]);
+        let cross = |v: [f32; 2]| dx * (v[1] - prev[1]) - dz * (v[0] - prev[0]);
+        let s1 = (p[1] - prev[1]) * (q[0] - p[0]) - (p[0] - prev[0]) * (q[1] - p[1]);
+        let s2 = (p[1] - cur[1]) * (q[0] - p[0]) - (p[0] - cur[0]) * (q[1] - p[1]);
+        if cross(p) <= 0.0 && cross(q) > 0.0 && s1 <= 0.0 && s2 > 0.0 {
+            return project_on_edge(poly, i, q);
+        }
+    }
+    q
+}
+
+/// The wall hit: the end `q` of a step from `p` (x, z) kept out of the area's shapes (rectangles, ellipses and polygons;
+/// not done: the switching of zones by the game's events): a rectangle gives only the coordinate of the face crossed (the hero slides along it).
 pub fn collide(area: &Area3d, p: [f32; 2], q: [f32; 2]) -> [f32; 2] {
     let mut q = q;
     for h in area.hit.iter().filter(|h| h.enabled) {
@@ -137,7 +209,7 @@ pub fn collide(area: &Area3d, p: [f32; 2], q: [f32; 2]) -> [f32; 2] {
                     q = [cx + (q[0] - cx) * k, cz + (q[1] - cz) * k];
                 }
             }
-            HitShape::Polygon(_) => {}
+            HitShape::Polygon(ref poly) => q = collide_polygon(poly, p, q),
         }
     }
     q
@@ -269,5 +341,39 @@ mod tests {
             eprintln!("{run}: {n} frames, worst {worst}");
             assert!(worst < 1e-3, "{run}: {worst}");
         }
+    }
+
+    /// The triangle of R01's room 3 against the live walk of Y-28b (`out/y28b/probe.json`, 240 frames, 201 in contact): the end of
+    /// each step within 1e-4 of the game's.
+    #[test]
+    fn the_polygon_wall_follows_the_live_walk() {
+        let Some(root) = std::env::var_os("SUNPETAL_EE_EXPORT") else { return };
+        let root = std::path::PathBuf::from(root);
+        let Ok(text) = std::fs::read_to_string(root.join("../../y28b/probe.json")) else { return };
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let mut area = super::super::export::Export::open(&root).unwrap().scene("R01").unwrap().areas[3].clone();
+        apply_initial_zones(&mut area, &std::fs::read_to_string(root.join("zones.tsv")).unwrap(), "R01", 3);
+        let (mut worst, mut n) = (0f32, 0);
+        for row in v["rows"].as_array().unwrap() {
+            let (b, a) = (&row["before"], &row["after"]);
+            let g = |o: &serde_json::Value, i: usize| o["key"][i].as_f64().unwrap() as f32;
+            let (dx, dy) = (b["dx"].as_i64().unwrap() as f32, b["dy"].as_i64().unwrap() as f32);
+            let speed = match b["state"].as_i64().unwrap() {
+                1 => 0.25,
+                2 => 0.5,
+                _ => continue,
+            };
+            let m = dx.hypot(dy);
+            if m == 0.0 {
+                continue;
+            }
+            // a scripted walk (mode 1) goes by the world: speed times the stick's unit direction
+            let (p, q) = ([g(b, 0), g(b, 2)], [g(b, 0) + speed * dx / m, g(b, 2) + speed * dy / m]);
+            let got = collide(&area, p, q);
+            worst = worst.max((got[0] - g(a, 0)).abs()).max((got[1] - g(a, 2)).abs());
+            n += 1;
+        }
+        assert!(n > 100, "{n} frames");
+        assert!(worst < 1e-4, "worst {worst}");
     }
 }
