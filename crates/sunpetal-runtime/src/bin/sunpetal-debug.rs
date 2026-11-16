@@ -248,10 +248,11 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             done(json!({"hash": format!("{:016x}", f.hash()), "view": f.view, "proj": f.proj, "named_polys": f.named_polys(), "items": items}))
         }
         "cam" if w.first() == Some(&"ps2follow") => {
-            // cam ps2follow SCENE RECORD PATH: the camera on that path of the export, T from the hero's place each frame
+            // cam ps2follow SCENE RECORD [PATH]: the camera of that room (record = the room's index in rooms.tsv) after the hero: the path from
+            // the camera areas, or the PATH given; T from the hero's place each frame
             let root = std::env::var("SUNPETAL_EE_EXPORT").map_err(|_| "SUNPETAL_EE_EXPORT is not set")?;
             let idx = |i: usize, name: &str| w.get(i).ok_or(format!("{name} is missing"))?.parse::<usize>().map_err(|_| format!("{name}: not a number"));
-            sunpetal_runtime::nativecam::follow_ps2_path(&root, w.get(1).ok_or("SCENE is missing")?, idx(2, "RECORD")?, idx(3, "PATH")?)?;
+            sunpetal_runtime::nativecam::follow_ps2_path(&root, w.get(1).ok_or("SCENE is missing")?, idx(2, "RECORD")?, w.get(3).map(|_| idx(3, "PATH")).transpose()?)?;
             done(json!({}))
         }
         "cam" if w.first() == Some(&"ps2path") => {

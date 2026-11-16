@@ -66,6 +66,8 @@ pub struct CamArea {
     pub index: u32,
     pub mode: u32,
     pub shape: u32,
+    /// 1: the shape is on (z, x), 2: (x, y), 3: (y, z) (`camera.md` §8.3); 0 when the file does not say.
+    pub plane: u32,
     /// −1, 0 or 1 (the direction the path is walked).
     pub path_dir: i32,
     pub fields: Vec<f32>,
@@ -134,6 +136,7 @@ pub fn parse_cameras(text: &str) -> R<Vec<SceneCamera>> {
                         index: u(a, "index")?,
                         mode: u(a, "mode")?,
                         shape: u(a, "shape")?,
+                        plane: a.get("plane").and_then(Value::as_u64).unwrap_or(0) as u32,
                         path_dir: a.get("path_dir").and_then(Value::as_i64).ok_or("no integer `path_dir`")? as i32,
                         fields: a.get("fields").and_then(Value::as_array).map(|x| x.iter().filter_map(|n| n.as_f64().map(|n| n as f32)).collect()).unwrap_or_default(),
                     })

@@ -21,10 +21,24 @@ struct Ps2 {
 }
 static PS2: std::sync::Mutex<Option<Ps2>> = std::sync::Mutex::new(None);
 
-/// A PS2 path the camera runs along after the hero (K-235.4): T comes from the hero's place every frame.
+/// The PS2 camera of a room that follows the hero (K-235.4; `camera.md` §8, §9): the camera area the hero is in gives the
+/// path, `T` comes from the hero's place, the eye is the path at `T` (a change of path is blended over 360 frames), the
+/// view looks at the hero (pitch at once, yaw held to a turn of 0.031 rad a frame).
 struct Follow {
-    path: sunpetal_data::ps2::export::CamPath,
-    scale: f32,
+    cam: sunpetal_data::ps2::export::Camera,
+    areas: Vec<sunpetal_data::ps2::export::CamArea>,
+    /// the area the hero is in now, the path in use and whether it is walked backwards
+    area: Option<usize>,
+    path: usize,
+    reverse: bool,
+    /// the yaw held (the game's convention), the blend count and the eye it blends from
+    yaw: Option<f32>,
+    switch: u32,
+    old_eye: [f32; 3],
+    /// the eye of the last frame (export units)
+    eye: [f32; 3],
+    /// a path chosen by the user stays whatever the areas say
+    fixed: bool,
 }
 static FOLLOW: std::sync::Mutex<Option<Follow>> = std::sync::Mutex::new(None);
 /// The pointer to the world (its first word the hero, whose place is at +0x18, 1/4096) and the PS2 -> DS shift.
@@ -88,17 +102,71 @@ pub fn clear_ps2() {
 
 /// The camera runs along a path of the export after the hero (`cam ps2follow`): `T` from `CamPath::follow_t`, the turn
 /// the path's own (the game's look at the subject, `camera.md` §5, is not done).
-pub fn follow_ps2_path(root: &str, scene: &str, record: usize, path: usize) -> Result<(), String> {
+pub fn follow_ps2_path(root: &str, scene: &str, record: usize, path: Option<usize>) -> Result<(), String> {
     let ex = sunpetal_data::ps2::export::Export::open(root).map_err(|e| e.to_string())?;
     let cams = ex.cameras(scene).map_err(|e| e.to_string())?;
-    let cam = cams.get(record).and_then(|c| c.camera.as_ref()).ok_or("no camera in that record")?;
-    let p = cam.paths.get(path).ok_or("no such path")?.clone();
-    *FOLLOW.lock().unwrap() = Some(Follow { path: p, scale: cam.scale });
+    let sc = cams.get(record).ok_or("no such record")?;
+    let cam = sc.camera.clone().ok_or("no camera in that record")?;
+    let first = path.unwrap_or(cam.start_path.max(0) as usize);
+    if first >= cam.paths.len() {
+        return Err("no such path".into());
+    }
+    *FOLLOW.lock().unwrap() =
+        Some(Follow { cam, areas: sc.areas.clone(), area: None, path: first, reverse: false, yaw: None, switch: 0, old_eye: [0.0; 3], eye: [0.0; 3], fixed: path.is_some() });
     set_ps2([0.0; 3], 0.0, 0.0, 0.0, SHIFT, false);
     Ok(())
 }
 
-/// The pitch and yaw (radians) that turn a PS2 camera at `eye` to `target` (the same units).
+/// One frame of the follow: the area and path, `T`, the eye and the view for the hero at `s` (export units).
+fn follow_frame(f: &mut Follow, p: &mut Ps2, s: [f32; 3]) {
+    use std::f32::consts::PI;
+    use sunpetal_data::ps2::camera::select_area;
+    if !f.fixed {
+        let now = select_area(&f.areas, s, f.area);
+        if let Some(i) = now {
+            let a = &f.areas[i];
+            if f.area != now && a.mode == 2 && (a.index as usize) < f.cam.paths.len() {
+                if f.area.is_some() && f.path != a.index as usize {
+                    f.switch = 360;
+                    f.old_eye = f.eye;
+                }
+                f.path = a.index as usize;
+                // which sign of `path_dir` is backwards is not known (the probe's frames have -1 and walk forwards)
+                f.reverse = a.path_dir > 0;
+            }
+        }
+        f.area = now;
+    }
+    let path = &f.cam.paths[f.path];
+    let Some(t) = path.follow_t(s, f.cam.scale, f.reverse) else { return };
+    let Some(pos) = path.position(t, f.cam.scale) else { return };
+    let w = f.switch as f32 / 360.0;
+    f.switch = f.switch.saturating_sub(1);
+    let eye = [0, 1, 2].map(|i| pos[i] * (1.0 - w) + f.old_eye[i] * w);
+    f.eye = eye;
+    p.eye = eye.map(|v| v as f64 * 0.1);
+    let (dx, dz) = (s[0] - eye[0], s[2] - eye[2]);
+    let ty = s[1] + f.cam.scale * 15.0;
+    let pitch = (ty - eye[1]).atan2(dx.hypot(dz)).max(-1.2566371);
+    // path flag bit 1 set: the path's own turn; clear: a look at the hero, its yaw held to 0.031 rad a frame
+    let want = if path.flag & 2 != 0 { path.rotation(t).map_or(0.0, |r| r[1]) } else { (-dx).atan2(dz) };
+    let held = f.yaw.map_or(want, |y| {
+        let mut d = (want - y) % (2.0 * PI);
+        if d > PI {
+            d -= 2.0 * PI;
+        } else if d < -PI {
+            d += 2.0 * PI;
+        }
+        y + d.clamp(-0.031, 0.031)
+    });
+    f.yaw = Some(held);
+    // ours is the game's yaw turned: π - yaw (the same view)
+    p.angles = [pitch, PI - held, 0.0];
+}
+
+/// The pitch and yaw (radians) that turn a PS2 camera at `eye` to `target` (the same units): the view's own convention,
+/// which the follow reaches through the game's yaw (`π - yaw`); kept as the check of that conversion.
+#[cfg(test)]
 fn look_at(eye: [f64; 3], target: [f64; 3]) -> (f32, f32) {
     let d: Vec<f64> = (0..3).map(|i| target[i] - eye[i]).collect();
     ((d[1].atan2(d[0].hypot(d[2]))) as f32, (-d[0]).atan2(-d[2]) as f32)
@@ -161,26 +229,18 @@ unsafe extern "C" fn after(c: *mut Cpu) {
         return;
     }
     let mut ps2 = *PS2.lock().unwrap();
-    if let (Some(p), Some(f)) = (ps2.as_mut(), FOLLOW.lock().unwrap().as_ref()) {
+    if let (Some(p), Some(f)) = (ps2.as_mut(), FOLLOW.lock().unwrap().as_mut()) {
         let hero = mem_read32(c, WORLD);
         let hero = if hero != 0 { mem_read32(c, hero) } else { 0 };
         if hero != 0 {
             // the hero in the export's units: the DS world less the shift, tenths of it
             let at = |o: u32| (mem_read32(c, hero + o) as i32) as f64 / 4096.0;
-            let s = [(at(0x18) - SHIFT[0]) * 10.0, (at(0x1C) - SHIFT[1]) * 10.0, (at(0x20) - SHIFT[2]) * 10.0];
-            if let Some(t) = f.path.follow_t([s[0] as f32, s[1] as f32, s[2] as f32], f.scale, false) {
-                if let (Some(pos), Some(rot)) = (f.path.position(t, f.scale), f.path.rotation(t)) {
-                    p.eye = [pos[0] as f64 * 0.1, pos[1] as f64 * 0.1, pos[2] as f64 * 0.1];
-                    let _ = rot;
-                    // the game looks at the subject (its chest: a unit above the feet)
-                    let hero_ps2 = [at(0x18) - SHIFT[0], at(0x1C) - SHIFT[1] + 1.0, at(0x20) - SHIFT[2]];
-                    let (pitch, yaw) = look_at(p.eye, hero_ps2);
-                    p.angles = [pitch, yaw, 0.0];
-                }
-            }
+            let s = [((at(0x18) - SHIFT[0]) * 10.0) as f32, ((at(0x1C) - SHIFT[1]) * 10.0) as f32, ((at(0x20) - SHIFT[2]) * 10.0) as f32];
+            follow_frame(f, p, s);
         }
     }
-    YAW_NOW.store(ps2.map_or(0.0, |p| p.angles[1]).to_bits(), Relaxed);
+    // the walk is relative to the game's `g_cameracorrection`: the yaw in the game's convention (ours is its π - yaw)
+    YAW_NOW.store(ps2.map_or(0.0, |p| std::f32::consts::PI - p.angles[1]).to_bits(), Relaxed);
     if let Some(p) = ps2 {
         for (i, v) in ps2_view(&p).iter().enumerate() {
             mem_write32(c, VIEW + 4 * i as u32, *v as i32 as u32);

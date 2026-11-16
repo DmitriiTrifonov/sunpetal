@@ -26,7 +26,11 @@ static WALK: Mutex<Option<Walk>> = Mutex::new(None);
 /// Switches the walk on for the area `area` (index in `scenes/<scene>.json`'s `scene3d`) of the export at `root`.
 pub fn enable(root: &str, scene: &str, area: usize) -> Result<(), String> {
     let data = Export::open(root).and_then(|e| e.scene(scene)).map_err(|e| e.to_string())?;
-    let area = data.areas.into_iter().nth(area).ok_or("no such area")?;
+    let index = area;
+    let mut area = data.areas.into_iter().nth(area).ok_or("no such area")?;
+    // the walls and floors a new game has on (zones.tsv); the events that switch them later are not followed
+    let zones = std::fs::read_to_string(std::path::Path::new(root).join("zones.tsv")).map_err(|e| format!("zones.tsv: {}", e))?;
+    sunpetal_data::ps2::walk::apply_initial_zones(&mut area, &zones, scene, index);
     *WALK.lock().unwrap() = Some(Walk { area, last: None, written: None });
     Ok(())
 }

@@ -37,22 +37,27 @@ impl CamPath {
         let linear = self.keys.len() < 3;
         let mut out = [0.0; 3];
         for k in 0..3 {
-            out[k] = hermite(a.pos[k], b.pos[k], scale * a.param[k], scale * b.param[k], h, u, linear);
+            out[k] = {
+                // the z tangent goes in with a minus (`camera.md` §9.2)
+                let sign = if k == 2 { -1.0 } else { 1.0 };
+                hermite(a.pos[k], b.pos[k], sign * scale * a.param[k], sign * scale * b.param[k], h, u, linear)
+            };
         }
         Some(out)
     }
 
-    /// The parameter `T` the game's camera takes on this path for a subject at `subject` (`camera.md` §8.2,
-    /// `SetCurrentSegment`): the subject is projected on the XZ line of each segment, the nearest segment wins (a tie: the
-    /// smaller way along it), `T = (FrameNo[seg] + u ∓ C) / FrameNo[last]` with the camera `C = 30·scale` behind the
-    /// projection (when the path follows: flag bits 1 and 3 clear). Not done: `GetCorrection` at the ends of paths of
-    /// three keys and more (it matters only near a corner). `reverse` is the path's direction (`bReverse`).
+    /// The parameter `T` the game's camera takes on this path for a subject at `subject` (`camera.md` §9.1,
+    /// `SetCurrentSegment` and `GetCorrection`): the subject is projected on the XZ line of each segment; the segment
+    /// whose way along it is within the segment and whose distance is least wins (none within: least distance of all);
+    /// the corner correction of the ends of a path of three keys and more; `T = (FrameNo[seg] + u - C - corr) / FrameNo[last]`
+    /// with the camera `C = 30·scale` behind the projection. `reverse` is the path's direction (`bReverse`: `+C`).
     pub fn follow_t(&self, subject: [f32; 3], scale: f32, reverse: bool) -> Option<f32> {
         let last = self.keys.last()?.frame;
         if self.keys.len() < 2 || last <= 0.0 {
             return None;
         }
-        let mut best: Option<(f32, f32, usize)> = None; // distance, way along, segment
+        // (inside the segment, distance, way along, segment, signed distance)
+        let mut best: Option<(bool, f32, f32, usize, f32)> = None;
         for i in 0..self.keys.len() - 1 {
             let (a, b) = (&self.keys[i], &self.keys[i + 1]);
             let (ax, az) = (b.pos[0] - a.pos[0], b.pos[2] - a.pos[2]);
@@ -62,14 +67,43 @@ impl CamPath {
                 continue;
             }
             let u = (bx * ax + bz * az) / len;
-            let d = ((az * bx - ax * bz) / len).abs();
-            if best.is_none_or(|(bd, bu, _)| d < bd || (d == bd && u < bu)) {
-                best = Some((d, u, i));
+            let cross = az * bx - ax * bz;
+            let d = if cross > 0.0 { -(cross.abs() / len) } else { cross.abs() / len };
+            let inside = u >= 0.0 && u <= len;
+            let better = match best {
+                None => true,
+                Some((bi, bd, bu, _, _)) => (inside && !bi) || (inside == bi && (d.abs() < bd || (d.abs() == bd && u < bu))),
+            };
+            if better {
+                best = Some((inside, d.abs(), u, i, d));
             }
         }
-        let (_, u, i) = best?;
-        let c = if self.flag & 0b1010 == 0 { scale * 30.0 } else { 0.0 };
-        let t = (self.keys[i].frame + u + if reverse { c } else { -c }) / last;
+        let (_, _, u, i, d) = best?;
+        let (a, b) = (&self.keys[i], &self.keys[i + 1]);
+        let len = (b.pos[0] - a.pos[0]).hypot(b.pos[2] - a.pos[2]);
+        let h = len / 2.0;
+        let mut corr = 0.0;
+        if self.keys.len() >= 3 {
+            let (theta, first) = if u < h { (a.theta, true) } else { (b.theta, false) };
+            if theta.abs() > 0.01 {
+                if first {
+                    let r = d / theta.tan();
+                    if r <= u {
+                        corr = r * (h - u) / (h - r);
+                    }
+                } else {
+                    let r = d / (-theta).tan();
+                    if u <= len + r {
+                        corr = r * (u - h) / (h + r);
+                    }
+                }
+            }
+            if corr.abs() > h || !corr.is_finite() {
+                corr = 0.0;
+            }
+        }
+        let c = scale * 30.0;
+        let t = (a.frame + u + if reverse { c } else { -c } - corr) / last;
         Some(t.clamp(0.0, 1.0))
     }
 
@@ -94,6 +128,32 @@ impl CamPath {
         }
         Some(out)
     }
+}
+
+/// Whether the area holds the point (x, y, z): its shape on the area's plane, the edge counted in (`ContainPoint`).
+pub fn area_contains(a: &super::export::CamArea, p: [f32; 3]) -> bool {
+    let (u, v) = match a.plane {
+        1 => (p[2], p[0]),
+        2 => (p[0], p[1]),
+        3 => (p[1], p[2]),
+        _ => return false,
+    };
+    let f = &a.fields;
+    match (a.shape, f.len()) {
+        (3, 4..) => u >= f[0] && u <= f[0] + f[2] && v >= f[1] && v <= f[1] + f[3],
+        (2, 4..) => f[2] != 0.0 && f[3] != 0.0 && ((u - f[0]) / f[2]).powi(2) + ((v - f[1]) / f[3]).powi(2) <= 1.0,
+        // lines (polygons) are not read from the file's fields yet
+        _ => false,
+    }
+}
+
+/// The camera area the hero is in (`camera.md` §8.3): the current one while it holds the hero, else the first in the
+/// table that does; `None` when no area does.
+pub fn select_area(areas: &[super::export::CamArea], hero: [f32; 3], current: Option<usize>) -> Option<usize> {
+    if let Some(c) = current.filter(|c| areas.get(*c).is_some_and(|a| area_contains(a, hero))) {
+        return Some(c);
+    }
+    areas.iter().position(|a| area_contains(a, hero))
 }
 
 type Mat = [[f32; 4]; 4];
@@ -186,6 +246,19 @@ mod tests {
     }
 
     #[test]
+    fn an_area_holds_a_point_by_its_plane_and_keeps_the_current_one() {
+        use super::super::export::CamArea;
+        let rect = |plane, f: [f32; 4]| CamArea { index: 0, mode: 2, shape: 3, plane, path_dir: 0, fields: f.to_vec() };
+        // plane 1 is (z, x): z 0..10, x 0..10
+        let areas = vec![rect(1, [0.0, 0.0, 10.0, 10.0]), rect(1, [5.0, 5.0, 10.0, 10.0])];
+        assert_eq!(select_area(&areas, [1.0, 0.0, 1.0], None), Some(0));
+        // both hold (7, 7): the first in the table, but the current one stays
+        assert_eq!(select_area(&areas, [7.0, 0.0, 7.0], None), Some(0));
+        assert_eq!(select_area(&areas, [7.0, 0.0, 7.0], Some(1)), Some(1));
+        assert_eq!(select_area(&areas, [50.0, 0.0, 50.0], Some(1)), None);
+    }
+
+    #[test]
     fn a_turn_across_the_wrap_takes_the_short_way() {
         let p = path(vec![key(0.0, [0.0; 3], [0.0, 3.0], [0.0; 3]), key(1.0, [0.0; 3], [0.0, -3.0], [0.0; 3])]);
         let y = p.rotation(0.5).unwrap()[1];
@@ -223,5 +296,26 @@ mod tests {
                 },
             );
         assert!(found.is_some(), "no two-key path of R01 gives [-181.1018, 203.4204, 90]");
+    }
+
+    /// R13, record 0, path 2 (`out/y27/probe.json` of sunpetal-ee): the subject (the camera's `Target`) at six places; `T`
+    /// within 1e-5 of the runtime's, the corner correction included.
+    #[test]
+    fn the_real_export_gives_the_runtime_t_with_the_corner_correction() {
+        let Some(root) = std::env::var_os("SUNPETAL_EE_EXPORT") else { return };
+        let root = std::path::PathBuf::from(root);
+        let Ok(text) = std::fs::read_to_string(root.join("../../y27/probe.json")) else { return };
+        let probe: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let cams = crate::ps2::export::Export::open(&root).unwrap().cameras("R13").unwrap();
+        let cam = cams[0].camera.as_ref().unwrap();
+        let path = &cam.paths[2];
+        let n = probe.as_array().unwrap().len();
+        for fr in probe.as_array().unwrap() {
+            let g = |k: &str, i: usize| fr["gpa"][k][i].as_f64().unwrap() as f32;
+            let want = fr["gpa"]["T"].as_f64().unwrap() as f32;
+            let t = path.follow_t([g("target", 0), g("target", 1), g("target", 2)], cam.scale, false).unwrap();
+            assert!((t - want).abs() < 1e-5, "frame {}: T {t} want {want}", fr["frame"]);
+        }
+        assert!(n >= 6, "{n} frames");
     }
 }

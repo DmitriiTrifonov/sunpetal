@@ -3,6 +3,33 @@
 //! (`export::Area3d`); the units are the export's (tenths of the DS world's).
 use super::export::{Area3d, HitShape};
 
+/// Sets which walls and floors are on as a new game has them (`zones.tsv` of the export, `hit.md` §7): the file's own
+/// `enabled` is 0 everywhere, the state is the save's. `scene3d` is the room's index. Zones the table does not name stay off.
+pub fn apply_initial_zones(area: &mut Area3d, zones_tsv: &str, scene: &str, scene3d: usize) {
+    for h in &mut area.hit {
+        h.enabled = false;
+    }
+    for t in &mut area.height {
+        t.enabled = false;
+    }
+    let mut rows = zones_tsv.lines();
+    let Some(head) = rows.next() else { return };
+    let col = |n: &str| head.split('\t').position(|h| h == n);
+    let (Some(cs), Some(c3), Some(ck), Some(cz), Some(ce)) = (col("scene"), col("scene3d"), col("kind"), col("zone"), col("initial_enabled")) else { return };
+    for row in rows {
+        let c: Vec<&str> = row.split('\t').collect();
+        if c.len() <= ce || c[cs] != scene || c[c3].parse() != Ok(scene3d) {
+            continue;
+        }
+        let (Ok(z), on) = (c[cz].parse::<usize>(), c[ce] == "1") else { continue };
+        match c[ck] {
+            "hit" => area.hit.get_mut(z).iter_mut().for_each(|h| h.enabled = on),
+            "height" => area.height.get_mut(z).iter_mut().for_each(|t| t.enabled = on),
+            _ => {}
+        }
+    }
+}
+
 /// The processed stick axis of a raw byte `raw` (0..=255, centre 127) given the value it had (`ghmPadAnalogProc`):
 /// dead zone 48, gives -128..=127, a change of 2 or less is dropped unless it lands on the rest or an end.
 pub fn pad_axis(raw: u8, old: i8) -> i8 {
@@ -59,11 +86,10 @@ pub fn turn_frames(diff: f32) -> (u32, bool) {
 }
 
 /// The wall hit: the end `q` of a step from `p` (x, z) kept out of the area's shapes (rectangles and ellipses;
-/// polygons are not done, nor the save's switching of zones): a rectangle gives only the coordinate of the face crossed (the hero slides along it).
+/// polygons are not done, nor the switching of zones by the game's events): a rectangle gives only the coordinate of the face crossed (the hero slides along it).
 pub fn collide(area: &Area3d, p: [f32; 2], q: [f32; 2]) -> [f32; 2] {
     let mut q = q;
-    // the file's `enabled` is 0 everywhere (the save decides; a fresh game has them on): all are taken
-    for h in &area.hit {
+    for h in area.hit.iter().filter(|h| h.enabled) {
         match h.shape {
             HitShape::Rect { x0, z0, dx, dz } => {
                 let (x1, z1) = (x0 + dx, z0 + dz);
@@ -119,7 +145,7 @@ pub fn collide(area: &Area3d, p: [f32; 2], q: [f32; 2]) -> [f32; 2] {
 
 /// The floor's height at `(x, z)`: the first triangle that holds the point (`ContainPoint3D`).
 pub fn floor_height(area: &Area3d, x: f32, z: f32) -> Option<f32> {
-    area.height.iter().filter(|t| t.points.len() == 3).find_map(|t| {
+    area.height.iter().filter(|t| t.enabled && t.points.len() == 3).find_map(|t| {
         let (p0, p1, p2) = (t.points[0], t.points[1], t.points[2]);
         let c0 = (z - p0[2]) * (p1[0] - p0[0]) - (x - p0[0]) * (p1[2] - p0[2]);
         let c1 = (z - p1[2]) * (p2[0] - p1[0]) - (x - p1[0]) * (p2[2] - p1[2]);
@@ -213,7 +239,9 @@ mod tests {
         let Ok(text) = std::fs::read_to_string(&probe) else { return };
         let v: serde_json::Value = serde_json::from_str(&text).unwrap();
         let scene = super::super::export::Export::open(&root).unwrap().scene("R01").unwrap();
-        let area = &scene.areas[0];
+        let mut area = scene.areas[0].clone();
+        apply_initial_zones(&mut area, &std::fs::read_to_string(root.join("zones.tsv")).unwrap(), "R01", 0);
+        let area = &area;
         for run in ["straight", "diagonal", "wall"] {
             let fr = v[run].as_array().unwrap();
             let f = |i: usize, k: &str| fr[i][k].as_f64().unwrap() as f32;
