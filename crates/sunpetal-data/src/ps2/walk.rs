@@ -70,9 +70,39 @@ pub fn stick_step(stick: (i8, i8), camera_correction: f32, s: Speeds) -> [f32; 2
     [speed * angle.sin(), speed * angle.cos()]
 }
 
-/// The direction the hero faces for a stick (0 is +z, π/2 is +x), `SetTargetDirection`.
-pub fn stick_direction(stick: (i8, i8), camera_correction: f32) -> Option<f32> {
-    (stick != (0, 0)).then(|| (stick.0 as f32).atan2(stick.1 as f32) - std::f32::consts::PI - camera_correction)
+/// The direction the hero faces for a stick (0 is +z, π/2 is +x), `SetTargetDirection` (`walk.md` §4, Y-28): the stick's own angle,
+/// without the camera (the camera's `−π−corr` is the angle of the step, not of the face).
+pub fn stick_direction(stick: (i8, i8)) -> Option<f32> {
+    (stick != (0, 0)).then(|| (stick.0 as f32).atan2(stick.1 as f32))
+}
+
+/// The face and the move state of the hero (`walk.md` §4): the move of a frame goes by the state the previous frame left
+/// (0 stands: the first frame of a walk, and the frame a big turn starts, never moves), a turn in progress holds the walk.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Walker {
+    pub face: f32,
+    pub turn: Option<Turn>,
+    /// 0 stands, 1 walks (a turn goes on), 2 free to run
+    pub state: u8,
+}
+
+impl Walker {
+    /// One frame for the stick; returns the state the step of this frame goes by (0 no step, 1 walk speed, 2 the stick's own).
+    pub fn frame(&mut self, stick: (i8, i8)) -> u8 {
+        let used = self.state;
+        match stick_direction(stick) {
+            None => {
+                self.state = 0;
+                self.turn = None;
+            }
+            Some(target) => {
+                self.face = face_step(&mut self.turn, self.face, target);
+                let running = self.turn.is_some_and(|t| t.done < t.total);
+                self.state = if running { 1 } else { 2 };
+            }
+        }
+        used
+    }
 }
 
 /// Frames of a turn by `diff` radians (`SetTurnDirection`), and whether the hero stands still for the first one.
@@ -343,6 +373,30 @@ mod tests {
         // 3 degrees snap
         let mut t = None;
         assert!((face_step(&mut t, 0.0, 0.05) - 0.05).abs() < 1e-6);
+    }
+
+    /// The face and the state of the live walk of R01 (`out/y21/probe.json`, three runs): the face of each frame within 1e-3, the state exactly.
+    #[test]
+    fn the_walker_follows_the_live_face_and_state() {
+        let Some(root) = std::env::var_os("SUNPETAL_EE_EXPORT") else { return };
+        let Ok(text) = std::fs::read_to_string(std::path::PathBuf::from(root).join("../../y21/probe.json")) else { return };
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        for run in ["straight", "diagonal", "wall"] {
+            let fr = v[run].as_array().unwrap();
+            let mut w = Walker { face: fr[0]["rot"].as_f64().unwrap() as f32, ..Default::default() };
+            for r in fr {
+                let b = |k: &str| r[k].as_i64().unwrap() as u8 as i8;
+                w.frame((b("dx"), b("dy")));
+                assert_eq!(w.state as i64, r["state"].as_i64().unwrap(), "{run} frame {}", r["frame"]);
+                // a rest frame's face is the game's own (a script turned it)
+                if w.state == 0 {
+                    w.face = r["rot"].as_f64().unwrap() as f32;
+                    continue;
+                }
+                let want = r["rot"].as_f64().unwrap() as f32;
+                assert!(wrap(w.face - want).abs() < 1e-3, "{run} frame {}: face {} want {}", r["frame"], w.face, want);
+            }
+        }
     }
 
     #[test]
