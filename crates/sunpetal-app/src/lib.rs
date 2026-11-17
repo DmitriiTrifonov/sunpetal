@@ -229,6 +229,8 @@ struct App {
     keymap: HashMap<KeyCode, u32>,
     mouse: (f32, f32),
     pen_down: bool,
+    /// Alt is held: the digit row is the F row (a Mac's F keys need Fn)
+    alt: bool,
     /// The finger that is the stylus.
     touch: Option<u64>,
     /// The lower screen shows the dial puzzle (from the last frame).
@@ -1301,8 +1303,10 @@ impl ApplicationHandler for App {
                     self.win_size = (s.width, s.height);
                 }
             }
+            WindowEvent::ModifiersChanged(m) => self.alt = m.state().alt_key(),
             WindowEvent::KeyboardInput { event, .. } => {
                 let PhysicalKey::Code(code) = event.physical_key else { return };
+                let code = if self.alt { alt_f_key(code) } else { code };
                 let down = event.state == ElementState::Pressed;
                 // the game did not start or stopped: Esc or Enter closes, nothing else goes to the game or the menu
                 if self.stopped_msg.is_some() {
@@ -1508,6 +1512,26 @@ pub struct Options {
 }
 
 /// Runs the game in a window until it closes.
+/// Alt+digit row is the F row: 1…9 are F1…F9, 0 is F10, - is F11, = is F12.
+fn alt_f_key(code: KeyCode) -> KeyCode {
+    use KeyCode::*;
+    match code {
+        Digit1 => F1,
+        Digit2 => F2,
+        Digit3 => F3,
+        Digit4 => F4,
+        Digit5 => F5,
+        Digit6 => F6,
+        Digit7 => F7,
+        Digit8 => F8,
+        Digit9 => F9,
+        Digit0 => F10,
+        Minus => F11,
+        Equal => F12,
+        c => c,
+    }
+}
+
 pub fn run(o: Options, el: EventLoop<()>) {
     let (mut app, shared, _stream) = prepare(o, false);
     el.set_control_flow(ControlFlow::Poll);
@@ -1708,6 +1732,7 @@ fn prepare(o: Options, scripted: bool) -> (App, Arc<Shared>, Option<cpal::Stream
         keymap: HashMap::new(),
         mouse: (0.0, 0.0),
         pen_down: false,
+        alt: false,
         touch: None,
         dial_scene: false,
         dial: None,
@@ -2235,5 +2260,18 @@ mod stopped_tests {
 pub(crate) fn apply_variants(v: &std::collections::BTreeMap<String, String>) {
     for (group, variant) in v {
         sunpetal_runtime::nds::set_pack_2d_variant(group, variant);
+    }
+}
+
+#[cfg(test)]
+mod alt_f_tests {
+    use super::*;
+
+    #[test]
+    fn the_digit_row_with_alt_is_the_f_row() {
+        assert_eq!(alt_f_key(KeyCode::Digit7), KeyCode::F7);
+        assert_eq!(alt_f_key(KeyCode::Digit0), KeyCode::F10);
+        assert_eq!(alt_f_key(KeyCode::Equal), KeyCode::F12);
+        assert_eq!(alt_f_key(KeyCode::KeyA), KeyCode::KeyA);
     }
 }
