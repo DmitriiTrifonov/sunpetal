@@ -19,13 +19,14 @@ pub mod nativeend;
 pub mod nativeflag;
 pub mod nativeinput;
 pub mod nativeload;
-#[cfg(feature = "debug-tools")]
 pub mod nativeroom;
 pub mod nativestep;
 pub mod nativethin;
+#[cfg(feature = "debug-tools")]
 pub mod nativewalk;
 pub mod nds;
 pub mod savefile;
+#[cfg(feature = "debug-tools")]
 pub mod scene;
 pub mod sched;
 #[cfg(feature = "debug-tools")]

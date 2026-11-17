@@ -544,10 +544,24 @@ pub fn set_input(keys: u32, pen: Option<(i32, i32)>) {
 /// Where the game is after `vblank` VBlanks: `VBLANK STEP MAP X Y Z` (the story's step counter, the hero's map and place;
 /// `-` for what the game does not tell yet). The scene is not in it: the cartridge's reads are logged only by the debug build.
 pub fn checkpoint_line(vblank: u64) -> String {
-    let dash = |s: Option<String>| s.unwrap_or_else(|| "-".into());
-    let pos = crate::session::hero_pos();
-    let at = |i: usize| dash(pos.map(|p| p[i].to_string()));
-    format!("{} {} {} {} {} {}", vblank, dash(crate::session::story_value(0).map(|v| v.to_string())), dash(crate::session::hero_map().map(|m| m.to_string())), at(0), at(1), at(2))
+    // the story and the hero are read by the debug build only
+    #[cfg(not(feature = "debug-tools"))]
+    return format!("{} - - - - -", vblank);
+    #[cfg(feature = "debug-tools")]
+    {
+        let dash = |s: Option<String>| s.unwrap_or_else(|| "-".into());
+        let pos = crate::session::hero_pos();
+        let at = |i: usize| dash(pos.map(|p| p[i].to_string()));
+        format!(
+            "{} {} {} {} {} {}",
+            vblank,
+            dash(crate::session::story_value(0).map(|v| v.to_string())),
+            dash(crate::session::hero_map().map(|m| m.to_string())),
+            at(0),
+            at(1),
+            at(2)
+        )
+    }
 }
 
 /// The picture's scale: the 3D is drawn at 256 x `n` by 192 x `n`, and the screens come out that

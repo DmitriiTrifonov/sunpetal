@@ -21,6 +21,8 @@ advice() {
 
 must cargo build --workspace
 must cargo test --workspace --lib
+# как CI: рантайм без debug-tools (там ломалась сборка 2026-11-17: session/nativeroom/scene только с debug-tools)
+must cargo check -p sunpetal-runtime --features gpu --all-targets
 advice cargo fmt --all --check
 advice cargo clippy --workspace --all-targets -- -D warnings
 

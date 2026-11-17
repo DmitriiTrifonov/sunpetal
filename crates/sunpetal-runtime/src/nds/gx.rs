@@ -1952,7 +1952,9 @@ impl Nds {
     /// queue behind it runs.
     pub(super) fn gx_vblank(&mut self) {
         // the room events count VBlanks, not swaps: the game swaps at its own pace (K-237)
+        #[cfg(feature = "debug-tools")]
         let ult = &self.gx.ult;
+        #[cfg(feature = "debug-tools")]
         if !ult.is_empty() {
             crate::nativeroom::frame(|model, bone| ult.iter().find(|u| u.model == model).and_then(|u| u.bones.get(bone as usize)).map(|b| [b.rest[0], b.rest[1], b.rest[2]]));
         }
