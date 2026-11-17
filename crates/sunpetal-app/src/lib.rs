@@ -111,6 +111,9 @@ fn paint_dialogue(ctx: &egui::Context, r: layout::Rect, wide: f32, left: bool, t
     let (ds_x, ds_cy) = (if left { 58.0 } else { 10.0 }, middle.unwrap_or(168.0));
     let x0 = r.x + (wide + ds_x) * kx;
     let lines: Vec<&str> = text.split('\n').map(|l| l.trim_end_matches('\r')).collect();
+    // the lines stay in the panel's band (y 146..190) whatever the middle says: a stale or odd middle must not push the
+    // last line out of the window (B-35)
+    let ds_cy = text_centre(ds_cy, lines.len(), PITCH);
     let top = ds_cy - lines.len() as f32 * PITCH / 2.0;
     let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("dialogue")));
     let id = egui::FontId::new(SIZE * ky, fonts::dialogue_family(font));
@@ -126,6 +129,32 @@ fn paint_dialogue(ctx: &egui::Context, r: layout::Rect, wide: f32, left: bool, t
     for (i, l) in lines.iter().enumerate() {
         let at = egui::pos2(x0, r.y + (top + i as f32 * PITCH) * ky + shift);
         p.text(at, egui::Align2::LEFT_TOP, l, id.clone(), egui::Color32::from_rgb(16, 16, 24));
+    }
+}
+
+/// The middle of `n` rows of text (`pitch` DS pixels apart) kept inside the panel's band, y 146..190 (DS pixels): the
+/// last row never goes below the window whatever the panel's middle says (B-35). Too many rows for the band: the usual middle.
+fn text_centre(middle: f32, n: usize, pitch: f32) -> f32 {
+    let half = n as f32 * pitch / 2.0;
+    if 146.0 + half <= 190.0 - half {
+        middle.clamp(146.0 + half, 190.0 - half)
+    } else {
+        168.0
+    }
+}
+
+#[cfg(test)]
+mod text_centre_tests {
+    use super::text_centre;
+
+    #[test]
+    fn the_rows_stay_in_the_band() {
+        // a middle where it should be stays; a low one (two rows) is lifted so that the last row ends in the band
+        assert_eq!(text_centre(168.0, 2, 14.0), 168.0);
+        assert_eq!(text_centre(183.0, 2, 14.0), 176.0);
+        assert_eq!(text_centre(120.0, 1, 14.0), 153.0);
+        // four rows do not fit: the usual middle
+        assert_eq!(text_centre(183.0, 4, 14.0), 168.0);
     }
 }
 
@@ -1040,7 +1069,8 @@ impl App {
                             let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("skipfade")));
                             p.rect_filled(ctx.content_rect(), 0.0, egui::Color32::from_black_alpha((fade * 255.0) as u8));
                         }
-                        if let (Some(text), Some(r)) = (&vline, vrect) {
+                        // not over the settings menu: it is drawn above the picture, and the line would lie across its buttons (B-36)
+                        if let (Some(text), Some(r), false) = (&vline, vrect, menu.open) {
                             paint_dialogue(ctx, r, vwide, *portrait_left, &text.0, text.1, &settings.video.dialogue_font);
                         }
                         if corner_on {
