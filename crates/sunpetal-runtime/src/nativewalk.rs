@@ -52,6 +52,19 @@ pub fn room(root: &str, scene: &str, index: usize) -> Result<(), String> {
     enable(root, scene, index)
 }
 
+/// Switches one wall (`hit`) or floor (`height`) zone of the walking room on or off, as the PS2 events `SetHitEnabled`/`SetHeightEnabled` do
+/// (`hit.md` §7: the byte's bit 0). The game's own events are PS2 scripts that this run does not execute, so zones follow by hand.
+pub fn set_zone(kind: &str, zone: usize, on: bool) -> Result<(), String> {
+    let mut g = WALK.lock().unwrap();
+    let w = g.as_mut().ok_or("the PS2 walk is off")?;
+    match kind {
+        "hit" => w.area.hit.get_mut(zone).map(|h| h.enabled = on),
+        "height" => w.area.height.get_mut(zone).map(|t| t.enabled = on),
+        _ => return Err("kind is hit or height".into()),
+    }
+    .ok_or_else(|| format!("the room has no {} zone {}", kind, zone))
+}
+
 /// Back to the game's own camera and walk.
 pub fn room_off() {
     nativecam::clear_ps2();
