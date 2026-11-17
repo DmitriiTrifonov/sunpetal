@@ -142,7 +142,18 @@ pub fn area_contains(a: &super::export::CamArea, p: [f32; 3]) -> bool {
     match (a.shape, f.len()) {
         (3, 4..) => u >= f[0] && u <= f[0] + f[2] && v >= f[1] && v <= f[1] + f[3],
         (2, 4..) => f[2] != 0.0 && f[3] != 0.0 && ((u - f[0]) / f[2]).powi(2) + ((v - f[1]) / f[3]).powi(2) <= 1.0,
-        // lines (polygons) are not read from the file's fields yet
+        // a closed line: all the cross products of one sign (a zero is the edge, which counts in), `ContainPointClosedLine`
+        (1, 6..) if f.len().is_multiple_of(2) => {
+            let n = f.len() / 2;
+            let (mut neg, mut pos) = (false, false);
+            for i in 0..n {
+                let (a, b) = ((f[2 * i], f[2 * i + 1]), (f[2 * ((i + 1) % n)], f[2 * ((i + 1) % n) + 1]));
+                let c = (b.0 - a.0) * (v - a.1) - (b.1 - a.1) * (u - a.0);
+                neg |= c < 0.0;
+                pos |= c > 0.0;
+            }
+            !(neg && pos)
+        }
         _ => false,
     }
 }
@@ -256,6 +267,19 @@ mod tests {
         assert_eq!(select_area(&areas, [7.0, 0.0, 7.0], None), Some(0));
         assert_eq!(select_area(&areas, [7.0, 0.0, 7.0], Some(1)), Some(1));
         assert_eq!(select_area(&areas, [50.0, 0.0, 50.0], Some(1)), None);
+    }
+
+    #[test]
+    fn a_closed_line_holds_its_inside_edge_included_either_winding() {
+        use super::super::export::CamArea;
+        let tri = |f: [f32; 6]| CamArea { index: 0, mode: 2, shape: 1, plane: 2, path_dir: 0, fields: f.to_vec() };
+        // plane 2 is (x, y)
+        for a in [tri([0.0, 0.0, 10.0, 0.0, 0.0, 10.0]), tri([0.0, 0.0, 0.0, 10.0, 10.0, 0.0])] {
+            assert!(area_contains(&a, [2.0, 2.0, 0.0]));
+            assert!(area_contains(&a, [5.0, 5.0, 0.0]), "on the edge");
+            assert!(!area_contains(&a, [8.0, 8.0, 0.0]));
+            assert!(!area_contains(&a, [-1.0, 1.0, 0.0]));
+        }
     }
 
     #[test]

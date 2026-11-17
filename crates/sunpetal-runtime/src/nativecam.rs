@@ -131,8 +131,8 @@ fn follow_frame(f: &mut Follow, p: &mut Ps2, s: [f32; 3]) {
                     f.old_eye = f.eye;
                 }
                 f.path = a.index as usize;
-                // which sign of `path_dir` is backwards is not known (the probe's frames have -1 and walk forwards)
-                f.reverse = a.path_dir > 0;
+                // `setPathDirection` keeps bit 0 of the area's `path_dir` (0x16a450): 1 (and -1) is backwards; no live frame with 1 was read back yet
+                f.reverse = a.path_dir & 1 != 0;
             }
         }
         f.area = now;

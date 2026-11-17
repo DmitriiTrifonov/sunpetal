@@ -138,7 +138,12 @@ pub fn parse_cameras(text: &str) -> R<Vec<SceneCamera>> {
                         shape: u(a, "shape")?,
                         plane: a.get("plane").and_then(Value::as_u64).unwrap_or(0) as u32,
                         path_dir: a.get("path_dir").and_then(Value::as_i64).ok_or("no integer `path_dir`")? as i32,
-                        fields: a.get("fields").and_then(Value::as_array).map(|x| x.iter().filter_map(|n| n.as_f64().map(|n| n as f32)).collect()).unwrap_or_default(),
+                        // a rectangle or an ellipse: four numbers; a line: points `[u, v]`, kept flat as u0, v0, u1, v1, …
+                        fields: a
+                            .get("fields")
+                            .and_then(Value::as_array)
+                            .map(|x| x.iter().flat_map(|n| n.as_array().map_or(vec![n], |p| p.iter().collect())).filter_map(|n| n.as_f64().map(|n| n as f32)).collect())
+                            .unwrap_or_default(),
                     })
                 })
                 .collect::<R<_>>()?;
