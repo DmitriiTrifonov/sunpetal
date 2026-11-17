@@ -1,13 +1,7 @@
 [
-  {
-    "model": "no44_401r_kaigao",
-    "bone": 2,
-    "map": 44,
-    "x": [-169.854, -120.623],
-    "z": [-172.162, -140.681],
-    "delay": 47,
-    "step": 3,
-    "on_script": true,
-    "motion": "85bcbcd4a3"
-  }
+ {"model": "no44_401r_kaigao", "bone": 2, "map": 44, "x": [-169.854, -120.623], "z": [-172.162, -140.681], "delay": 47, "motion": "85bcbcd4a3", "step": 3, "on_script": true, "scene": "C01_25", "call": 1},
+ {"model": "no45_room_402e", "bone": 5, "map": 45, "x": [-148.606, -128.696], "z": [43.767, 60.073], "delay": 0, "motion": "5083f806da", "step": null, "on_script": true, "scene": "C07_33", "call": 1},
+ {"model": "no45_room_402e", "bone": 6, "map": 45, "x": [-148.606, -128.696], "z": [43.767, 60.073], "delay": 0, "motion": "7de1c1479f", "step": null, "on_script": true, "scene": "C07_33", "call": 1},
+ {"model": "no09_daina", "bone": 84, "map": 9, "x": [-1000000.0, 1000000.0], "z": [-1000000.0, 1000000.0], "delay": 0, "motion": "6c4662b89a", "step": null, "on_script": true, "scene": "C17_07", "call": 1},
+ {"model": "no09_daina", "bone": 85, "map": 9, "x": [-1000000.0, 1000000.0], "z": [-1000000.0, 1000000.0], "delay": 0, "motion": "47f3e2aba4", "step": null, "on_script": true, "scene": "C17_07", "call": 1}
 ]

@@ -102,6 +102,8 @@ pub fn frame(rest_of: impl Fn(&str, u16) -> Option<[f32; 3]>) {
         return;
     }
     let (Some(map), Some(pos)) = (crate::session::hero_map(), crate::session::hero_pos()) else { return };
+    // the scene the game read last: the one whose script has just started, at a script's start
+    let scene = crate::nds::script_scene();
     let mut states = STATES.lock().unwrap();
     while states.len() < t.len() {
         states.push(State { stage: Stage::Idle, keys: None, read: false, was_running: false });
@@ -121,7 +123,13 @@ pub fn frame(rest_of: impl Fn(&str, u16) -> Option<[f32; 3]>) {
         let running = crate::nds::script_mark().is_some_and(|w| w == u32::MAX || w <= 0x1000);
         let started = running && !s.was_running;
         s.was_running = running;
-        let inside = map == e.map && if e.on_script { started && e.holds_within(x, z, 6.0) } else { e.holds(x, z) };
+        // a named scene decides alone: the script is the DS game's own trigger, and the zone and the map are the PS2's (the room
+        // may stand shifted from the DS one, the door of A45 does by some 180 units); the model is drawn only where it stands
+        let inside = match (&e.scene, e.on_script) {
+            (Some(s), true) => started && scene.as_ref() == Some(s),
+            (None, true) => started && map == e.map && e.holds_within(x, z, 6.0),
+            _ => map == e.map && e.holds(x, z),
+        };
         // the story decides first: before the event's step it is not played (a new game takes the object back), past it it has been
         let story = e.step.and_then(|n| crate::session::story_value(0).map(|v| v.cmp(&n)));
         s.stage = step_in_story(story, s.stage, inside, e.delay, keys.len() as u32);

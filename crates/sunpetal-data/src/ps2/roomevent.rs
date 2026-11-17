@@ -20,6 +20,8 @@ pub struct RoomEvent {
     /// Starts when the DS game starts a script on this map at this step (the zone only has to hold, widened by `margin`),
     /// not when the hero enters the zone: the DS event is its own, and fires where ours may not reach (K-237).
     pub on_script: bool,
+    /// The DS scene whose script starts it (with `on_script`): another script on the map does not (K-242); none: any.
+    pub scene: Option<String>,
 }
 
 impl RoomEvent {
@@ -56,6 +58,7 @@ pub fn parse(text: &str) -> Result<Vec<RoomEvent>, String> {
                 motion: e.get("motion").and_then(Value::as_str).ok_or("no `motion`")?.to_string(),
                 step: e.get("step").and_then(Value::as_i64).map(|s| s as i32),
                 on_script: e.get("on_script").and_then(Value::as_bool).unwrap_or(false),
+                scene: e.get("scene").and_then(Value::as_str).map(str::to_string),
             })
         })
         .collect()
@@ -92,7 +95,8 @@ mod tests {
 
     #[test]
     fn the_table_and_the_keys_read() {
-        let t = parse(r#"[{"model":"m","bone":2,"map":44,"x":[-1,1],"z":[-2,2],"delay":90,"motion":"abc","step":3,"on_script":true}]"#).unwrap();
+        let t = parse(r#"[{"model":"m","bone":2,"map":44,"x":[-1,1],"z":[-2,2],"delay":90,"motion":"abc","step":3,"on_script":true,"scene":"C01_25"}]"#).unwrap();
+        assert_eq!(t[0].scene.as_deref(), Some("C01_25"));
         assert!(t[0].on_script && t[0].holds_within(1.5, 0.0, 1.0) && !t[0].holds(1.5, 0.0));
         assert_eq!(t[0].step, Some(3));
         assert_eq!(t[0].bone, 2);
