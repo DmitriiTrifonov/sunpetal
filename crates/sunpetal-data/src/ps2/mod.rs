@@ -11,6 +11,7 @@ pub mod iso;
 pub mod lf;
 pub mod mesh;
 pub mod pose;
+pub mod roomevent;
 pub mod scenedb;
 pub mod sha1;
 pub mod tblock;

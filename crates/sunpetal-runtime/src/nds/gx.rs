@@ -272,6 +272,10 @@ struct Ult {
     /// What the model is made of, whatever it is bound to: two DS models may stand on one PS2 scene (a room and
     /// its furniture), and the scene is then drawn once (`ult_once`).
     source: u64,
+    /// The bones and the binding, for the parts of a bone an event moves (`nativeroom.rs`): drawn in the bone's pose of the moment.
+    bones: Vec<sunpetal_data::spm2::Bone>,
+    place: [f64; 12],
+    unit: f64,
     /// In the order of drawing (by pass).
     parts: Vec<UltPart>,
 }
@@ -285,6 +289,8 @@ struct UltPart {
     pal: u32,
     /// The polygon alpha (1-31): 31 but for a see-through material whose vertices say less.
     alpha: u32,
+    /// The bone an event moves, whose triangles these are: their places are the bone's own (not yet through the bone or the binding).
+    bone: Option<u16>,
     /// Each vertex: its place in the anchor mesh's space, colour (0-31), texture coordinates (texels × 16).
     tris: Vec<[UltVertex; 3]>,
 }
@@ -299,6 +305,11 @@ pub(super) const ULT_FMT: u8 = 200;
 /// The bones' matrices in the model's space at rest (rows x, y, z of three, then the place): a bone is
 /// T · Ry · Rz · Rx under its parent.
 fn ult_bones(bones: &[sunpetal_data::spm2::Bone]) -> Vec<[f64; 12]> {
+    (0..bones.len()).map(|i| ult_bone_world(bones, i, None)).collect()
+}
+
+/// The matrix of bone `i`, with bone `with.0` in the pose `with.1` instead of its rest.
+fn ult_bone_world(bones: &[sunpetal_data::spm2::Bone], i: usize, with: Option<(usize, [f32; 6])>) -> [f64; 12] {
     fn local(r: &[f32; 6]) -> [f64; 12] {
         let (sx, cx) = (r[3] as f64).sin_cos();
         let (sy, cy) = (r[4] as f64).sin_cos();
@@ -329,20 +340,15 @@ fn ult_bones(bones: &[sunpetal_data::spm2::Bone]) -> Vec<[f64; 12]> {
         }
         o
     }
-    fn world(bones: &[sunpetal_data::spm2::Bone], i: usize, done: &mut [Option<[f64; 12]>]) -> [f64; 12] {
-        if let Some(m) = done[i] {
-            return m;
-        }
-        let l = local(&bones[i].rest);
-        let m = match bones[i].parent {
-            Some(p) => mul(&world(bones, p as usize, done), &l),
-            None => l,
-        };
-        done[i] = Some(m);
-        m
+    let rest = match with {
+        Some((b, p)) if b == i => p,
+        _ => bones[i].rest,
+    };
+    let l = local(&rest);
+    match bones[i].parent {
+        Some(p) if (p as usize) < bones.len() && p as usize != i => mul(&ult_bone_world(bones, p as usize, with), &l),
+        _ => l,
     }
-    let mut done = vec![None; bones.len()];
-    (0..bones.len()).map(|i| world(bones, i, &mut done)).collect()
 }
 
 /// A point through a matrix of `ult_bones`' layout.
@@ -355,6 +361,7 @@ impl Ult {
     fn new(m: &sunpetal_data::spm2::Model, pictures: &mut u32) -> Option<Ult> {
         let b = m.bind.as_ref()?;
         let bones = ult_bones(&m.bones);
+        let moved = crate::nativeroom::animated_bones(&b.model);
         // the binding's rows are the DS axes' (x, y, z of three), then the shift
         let place: [f64; 12] = std::array::from_fn(|i| b.place[i] as f64);
         let vert = |i: u32| {
@@ -394,7 +401,15 @@ impl Ult {
             let texel = |(q, c, uv): ([f64; 3], [i32; 3], [f32; 2])| -> UltVertex {
                 (q, c, [(uv[0] * w).round().clamp(-32768.0, 32767.0) as i32, (uv[1] * h).round().clamp(-32768.0, 32767.0) as i32])
             };
-            let tris = m.idx[p.first as usize..(p.first + p.count) as usize].chunks_exact(3).map(|t| [texel(vert(t[0])), texel(vert(t[1])), texel(vert(t[2]))]).collect();
+            let ix = &m.idx[p.first as usize..(p.first + p.count) as usize];
+            // the bone of a triangle is its first vertex's; an event's bone keeps its triangles apart, in its own space
+            let bone_of = |t: &[u32]| Some(m.verts[t[0] as usize].bone).filter(|b| moved.contains(b));
+            let raw = |i: u32| -> UltVertex {
+                let v = &m.verts[i as usize];
+                let (_, c, uv) = vert(i);
+                texel(([v.pos[0] as f64, v.pos[1] as f64, v.pos[2] as f64], c, uv))
+            };
+            let tris = ix.chunks_exact(3).filter(|t| bone_of(t).is_none()).map(|t| [texel(vert(t[0])), texel(vert(t[1])), texel(vert(t[2]))]).collect();
             // a see-through material's vertices carry its alpha (0x80 = 1.0 on the PS2); the picture's own
             // alpha comes through the texture
             let alpha = if m.materials[p.material as usize].blend == 2 {
@@ -404,7 +419,13 @@ impl Ult {
             } else {
                 31
             };
-            parts.push(UltPart { key, tex, pal, alpha, tris });
+            for &bone in &moved {
+                let own: Vec<[UltVertex; 3]> = ix.chunks_exact(3).filter(|t| bone_of(t) == Some(bone)).map(|t| [raw(t[0]), raw(t[1]), raw(t[2])]).collect();
+                if !own.is_empty() {
+                    parts.push(UltPart { key, tex, pal, alpha, bone: Some(bone), tris: own });
+                }
+            }
+            parts.push(UltPart { key, tex, pal, alpha, bone: None, tris });
         }
         // FNV-1a over the places and the triangles
         let mut source = 0xcbf2_9ce4_8422_2325u64;
@@ -412,7 +433,17 @@ impl Ult {
         for x in bytes {
             source = (source ^ x as u64).wrapping_mul(0x0100_0000_01b3);
         }
-        Some(Ult { model: b.model.clone(), size: b.size, anchor: b.mesh, only_mesh: b.only_mesh && b.mesh.is_some(), source, parts })
+        Some(Ult {
+            model: b.model.clone(),
+            size: b.size,
+            anchor: b.mesh,
+            only_mesh: b.only_mesh && b.mesh.is_some(),
+            source,
+            bones: m.bones.clone(),
+            place,
+            unit: m.unit as f64,
+            parts,
+        })
     }
 
     fn from_env() -> Vec<Ult> {
@@ -1105,6 +1136,10 @@ impl Nds {
 
     /// The VBlank of a swap: the frame's replaced batches go with its lists.
     fn ult_swap(&mut self) {
+        let ult = &self.gx.ult;
+        if !ult.is_empty() {
+            crate::nativeroom::frame(|model, bone| ult.iter().find(|u| u.model == model).and_then(|u| u.bones.get(bone as usize)).map(|b| [b.rest[0], b.rest[1], b.rest[2]]));
+        }
         self.ult_pend_close();
         let g = &mut self.gx;
         g.ult_close();
@@ -1154,8 +1189,18 @@ impl Nds {
                 // a picture the pack does not have: the vertices' colours alone
                 let has = part.key.is_some_and(|k| pack.get(&k).is_some());
                 (self.gx.tex_param, self.gx.pltt_base) = if has { (part.tex, part.pal) } else { (0, 0) };
+                // an event's bone: its pose of the moment (its rest while no event holds it), then the binding
+                let moved = part.bone.map(|b| {
+                    let u = &self.gx.ult[u];
+                    let pose = crate::nativeroom::pose(&u.model, b);
+                    ((ult_bone_world(&u.bones, b as usize, pose.map(|p| (b as usize, p)))), u.place, u.unit)
+                });
                 for t in &part.tris {
                     let v = t.map(|(q, c, uv)| {
+                        let q = match &moved {
+                            Some((w, place, unit)) => ult_point(place, ult_point(w, q).map(|x| x * unit)),
+                            None => q,
+                        };
                         let mut nv = V::default();
                         for i in 0..4 {
                             nv.p[i] = (q[0] * m[i] as f64 + q[1] * m[4 + i] as f64 + q[2] * m[8 + i] as f64 + m[12 + i] as f64).round() as i32;
