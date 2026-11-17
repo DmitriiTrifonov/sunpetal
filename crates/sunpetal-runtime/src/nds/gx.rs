@@ -1136,16 +1136,18 @@ impl Nds {
 
     /// The VBlank of a swap: the frame's replaced batches go with its lists.
     fn ult_swap(&mut self) {
-        let ult = &self.gx.ult;
-        if !ult.is_empty() {
-            crate::nativeroom::frame(|model, bone| ult.iter().find(|u| u.model == model).and_then(|u| u.bones.get(bone as usize)).map(|b| [b.rest[0], b.rest[1], b.rest[2]]));
-        }
         self.ult_pend_close();
+        // the game's own pictures (F12, "Standard DS"): the texture pack is set aside, and a replacement model without its
+        // pictures would be drawn in the vertices' colours alone, white; the DS model stays (B-37)
+        let originals = self.stash.is_some();
         let g = &mut self.gx;
         g.ult_close();
         g.ult_hide_r = std::mem::take(&mut g.ult_hide);
         g.ult_at_r.clear();
         for u in 0..g.ult.len() {
+            if originals {
+                break;
+            }
             // the anchor mesh's matrix (of its batches, the one with most polygons); with no anchor named, the mesh with most
             let anchor = g.ult[u].anchor;
             // (a named anchor's matrix holds even when all its polygons were clipped away)
@@ -1937,6 +1939,11 @@ impl Nds {
     /// At the VBlank: a SWAP_BUFFERS waiting sends the lists to the rendering engine and the
     /// queue behind it runs.
     pub(super) fn gx_vblank(&mut self) {
+        // the room events count VBlanks, not swaps: the game swaps at its own pace (K-237)
+        let ult = &self.gx.ult;
+        if !ult.is_empty() {
+            crate::nativeroom::frame(|model, bone| ult.iter().find(|u| u.model == model).and_then(|u| u.bones.get(bone as usize)).map(|b| [b.rest[0], b.rest[1], b.rest[2]]));
+        }
         if !self.gx.swap_pending {
             return;
         }

@@ -7,6 +7,7 @@
     "z": [-172.162, -140.681],
     "delay": 47,
     "step": 3,
+    "on_script": true,
     "motion": "85bcbcd4a3"
   }
 ]

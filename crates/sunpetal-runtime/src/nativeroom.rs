@@ -69,7 +69,9 @@ pub fn step_in_story(story: Option<std::cmp::Ordering>, stage: Stage, inside: bo
     use std::cmp::Ordering::*;
     match (story, stage) {
         (Some(Less), _) => Stage::Idle,
-        (Some(Greater), Stage::Idle | Stage::Waiting(_)) => Stage::Done,
+        // a save loaded past the step finds it done; an event already waiting or playing goes on (the script moves the
+        // step on while the painting is still falling)
+        (Some(Greater), Stage::Idle) => Stage::Done,
         (Some(Greater), st) => step(st, false, delay, frames),
         (_, st) => step(st, inside, delay, frames),
     }
@@ -84,6 +86,8 @@ struct State {
     stage: Stage,
     keys: Option<Keys>,
     read: bool,
+    /// Whether a script was running at the last frame (an event starts on the edge).
+    was_running: bool,
 }
 
 #[cfg(feature = "debug-tools")]
@@ -100,7 +104,7 @@ pub fn frame(rest_of: impl Fn(&str, u16) -> Option<[f32; 3]>) {
     let (Some(map), Some(pos)) = (crate::session::hero_map(), crate::session::hero_pos()) else { return };
     let mut states = STATES.lock().unwrap();
     while states.len() < t.len() {
-        states.push(State { stage: Stage::Idle, keys: None, read: false });
+        states.push(State { stage: Stage::Idle, keys: None, read: false, was_running: false });
     }
     // the DS place in 1/4096 units is the PS2's scene units over ten (this room's shift is none, K-237)
     let (x, z) = (pos[0] as f32 / 4096.0 * 10.0, pos[2] as f32 / 4096.0 * 10.0);
@@ -113,7 +117,11 @@ pub fn frame(rest_of: impl Fn(&str, u16) -> Option<[f32; 3]>) {
             }
         }
         let Some(keys) = s.keys.as_ref().filter(|k| !k.is_empty()) else { continue };
-        let inside = map == e.map && e.holds(x, z);
+        // a running script holds -1 or a wait's count (a few hundred at most); idle is -2 (`nds::script_idle`)
+        let running = crate::nds::script_mark().is_some_and(|w| w == u32::MAX || w <= 0x1000);
+        let started = running && !s.was_running;
+        s.was_running = running;
+        let inside = map == e.map && if e.on_script { started && e.holds_within(x, z, 6.0) } else { e.holds(x, z) };
         // the story decides first: before the event's step it is not played (a new game takes the object back), past it it has been
         let story = e.step.and_then(|n| crate::session::story_value(0).map(|v| v.cmp(&n)));
         s.stage = step_in_story(story, s.stage, inside, e.delay, keys.len() as u32);
@@ -160,6 +168,7 @@ mod tests {
         // at the step: the zone starts it; the script moving the step on does not stop a running event
         assert_eq!(step_in_story(Some(Equal), Stage::Idle, true, 5, 9), Stage::Waiting(5));
         assert_eq!(step_in_story(Some(Greater), Stage::Playing(3), true, 5, 9), Stage::Playing(4));
+        assert_eq!(step_in_story(Some(Greater), Stage::Waiting(3), true, 5, 9), Stage::Waiting(2));
         assert_eq!(step_in_story(None, Stage::Idle, true, 5, 9), Stage::Waiting(5));
     }
 }

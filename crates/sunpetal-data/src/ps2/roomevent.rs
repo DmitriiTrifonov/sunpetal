@@ -17,12 +17,20 @@ pub struct RoomEvent {
     pub motion: String,
     /// The story step (`SETVALUE 0 n`) at which the DS game plays the event: before it the object is at rest, after it already moved.
     pub step: Option<i32>,
+    /// Starts when the DS game starts a script on this map at this step (the zone only has to hold, widened by `margin`),
+    /// not when the hero enters the zone: the DS event is its own, and fires where ours may not reach (K-237).
+    pub on_script: bool,
 }
 
 impl RoomEvent {
     /// Whether the PS2-unit place (x, z) is inside the zone (the edge counts in).
     pub fn holds(&self, x: f32, z: f32) -> bool {
-        x >= self.x[0] && x <= self.x[1] && z >= self.z[0] && z <= self.z[1]
+        self.holds_within(x, z, 0.0)
+    }
+
+    /// The same with the zone widened by `margin` on every side.
+    pub fn holds_within(&self, x: f32, z: f32, margin: f32) -> bool {
+        x >= self.x[0] - margin && x <= self.x[1] + margin && z >= self.z[0] - margin && z <= self.z[1] + margin
     }
 }
 
@@ -47,6 +55,7 @@ pub fn parse(text: &str) -> Result<Vec<RoomEvent>, String> {
                 delay: e.get("delay").and_then(Value::as_u64).unwrap_or(0) as u32,
                 motion: e.get("motion").and_then(Value::as_str).ok_or("no `motion`")?.to_string(),
                 step: e.get("step").and_then(Value::as_i64).map(|s| s as i32),
+                on_script: e.get("on_script").and_then(Value::as_bool).unwrap_or(false),
             })
         })
         .collect()
@@ -83,7 +92,8 @@ mod tests {
 
     #[test]
     fn the_table_and_the_keys_read() {
-        let t = parse(r#"[{"model":"m","bone":2,"map":44,"x":[-1,1],"z":[-2,2],"delay":90,"motion":"abc","step":3}]"#).unwrap();
+        let t = parse(r#"[{"model":"m","bone":2,"map":44,"x":[-1,1],"z":[-2,2],"delay":90,"motion":"abc","step":3,"on_script":true}]"#).unwrap();
+        assert!(t[0].on_script && t[0].holds_within(1.5, 0.0, 1.0) && !t[0].holds(1.5, 0.0));
         assert_eq!(t[0].step, Some(3));
         assert_eq!(t[0].bone, 2);
         assert!(t[0].holds(0.0, 2.0) && !t[0].holds(2.0, 0.0));
