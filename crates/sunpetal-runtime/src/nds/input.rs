@@ -105,6 +105,12 @@ pub(super) struct InputRec {
     next_check: u64,
 }
 
+/// A hotkey's line in `FILE.hot` of a recording: `VBL:WHAT`. The hotkeys (the originals' graphics F12, the skip F7) change
+/// what is drawn and how fast the machine runs, never the game's state, so a replay of `FILE` needs them only to be seen again.
+pub fn hotkey_line(vblank: u64, what: &str) -> String {
+    format!("{}:{}", vblank, what)
+}
+
 /// Checkpoints go in every this many VBlanks of a recording.
 pub const CHECK_EVERY: u64 = 300;
 
@@ -113,6 +119,7 @@ impl InputRec {
         let path = std::path::PathBuf::from(std::env::var_os("SUNPETAL_INPUT_REC")?);
         let _ = std::fs::write(&path, "");
         let _ = std::fs::write(path.with_extension("chk"), "");
+        let _ = std::fs::write(path.with_extension("hot"), "");
         Some(InputRec { path, cur: (0, None), since: 0, next_check: 0 })
     }
 }
@@ -127,6 +134,16 @@ impl Nds {
         }
         r.next_check = now / CHECK_EVERY * CHECK_EVERY + CHECK_EVERY;
         Some((r.path.with_extension("chk"), now))
+    }
+
+    /// Writes a hotkey's line to the recording's `.hot` file; nothing when no recording runs.
+    pub(super) fn note_hotkey(&mut self, what: &str) {
+        let now = self.vblanks;
+        let Some(r) = &self.inrec else { return };
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(r.path.with_extension("hot")) {
+            let _ = writeln!(f, "{}", hotkey_line(now, what));
+        }
     }
 
     fn input_record(&mut self, keys: u32, pen: Option<(i32, i32)>) {
@@ -158,3 +175,11 @@ impl Nds {
 
 /// The names of the buttons, by bit of the mask `set_input` takes.
 pub const KEY_NAMES: [&str; 12] = ["A", "B", "SELECT", "START", "RIGHT", "LEFT", "UP", "DOWN", "R", "L", "X", "Y"];
+
+#[cfg(test)]
+mod hotkey_tests {
+    #[test]
+    fn a_hotkey_line_is_the_vblank_and_the_word() {
+        assert_eq!(super::hotkey_line(30245, "originals:on"), "30245:originals:on");
+    }
+}

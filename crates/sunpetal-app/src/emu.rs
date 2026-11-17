@@ -322,6 +322,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     // SUNPETAL_SCRIPT_OBSERVER=1: the native script interpreter beside the game's runner (K-162), mismatches to stderr
     let observing = std::env::var_os("SUNPETAL_SCRIPT_OBSERVER").is_some_and(|v| v != "0") && nds::script_observer_start();
     let mut showing_originals = false;
+    let mut was_skipping = false;
     let (mut still, mut skipped, mut last_print, mut idle_for, mut wait_for) = (0u32, 0u32, 0u64, 0u32, 0u32);
     let (mut step, mut no_step) = ((0u32, 0u32), 0u32);
     let mut racing;
@@ -503,6 +504,10 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         }
         let t1 = Instant::now();
         let skipping = shared.skip.load(Ordering::Relaxed);
+        if skipping != was_skipping {
+            nds::note_hotkey(if skipping { "skip:on" } else { "skip:off" });
+            was_skipping = skipping;
+        }
         let idle = nds::script_idle();
         {
             let now = nds::script_scene();

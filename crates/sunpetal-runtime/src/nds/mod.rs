@@ -1138,9 +1138,15 @@ pub fn set_pack_2d(path: Option<&std::path::Path>) -> Result<usize, String> {
     Ok(n)
 }
 
+/// Notes a hotkey (`originals:on`, `skip:off`, …) in the input recording's `.hot` file at this VBlank (K-149).
+pub fn note_hotkey(what: &str) {
+    nds(|d| d.note_hotkey(what))
+}
+
 /// Shows the game's own pictures (`true`) or brings the packs back (`false`), at once and without reading a file: the
 /// texture pack and the 2D pack are set aside as they are, so the switch is a swap. Loading another pack ends it.
 pub fn set_originals(on: bool) {
+    note_hotkey(if on { "originals:on" } else { "originals:off" });
     nds(|d| match (on, d.stash.take()) {
         (true, None) => d.stash = Some((std::mem::replace(&mut d.texpack.pack, std::sync::Arc::new(texpack::Pack::empty())), d.gpu.pack.take())),
         (true, stash) => d.stash = stash,
