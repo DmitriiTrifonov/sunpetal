@@ -1117,10 +1117,13 @@ impl App {
                         if menu.open {
                             menu.pack_groups = shared.pack_groups.lock().unwrap().clone();
                             menu.originals = shared.originals.load(Ordering::Relaxed);
+                            menu.ultimate = shared.ultimate.load(Ordering::Relaxed);
+                            menu.models = shared.models.load(Ordering::Relaxed);
                             menu.dump_2d_new = shared.dump_2d_new.load(Ordering::Relaxed);
                             menu.dump_on_touch = shared.dump_on_touch.load(Ordering::Relaxed);
                             action = menu.show(ctx, settings, &names, internal);
                             shared.originals.store(menu.originals, Ordering::Relaxed);
+                            shared.ultimate.store(menu.ultimate, Ordering::Relaxed);
                             shared.dump_2d_new.store(menu.dump_2d_new, Ordering::Relaxed);
                             shared.dump_on_touch.store(menu.dump_on_touch, Ordering::Relaxed);
                         }
@@ -1707,7 +1710,15 @@ fn prepare(o: Options, scripted: bool) -> (App, Arc<Shared>, Option<cpal::Stream
             Err(e) => eprintln!("SUNPETAL_EXTRA_PACK: {}", e),
         }
     }
+    // the PS2 models: the data files' `MODL` parts (the texture pack and the data file), and `SUNPETAL_ULT_MODELS` (K-241)
+    let mut model_files: Vec<PathBuf> = cfg.texture_pack.iter().flat_map(|p| std::env::split_paths(p)).chain(cfg.data.iter().cloned()).collect();
+    model_files.retain(|p| p.is_file() && sunpetal_data::container::Container::tags(p).is_ok_and(|t| t.contains(sunpetal_data::models::TAG)));
+    model_files.dedup();
+    let has_models = !model_files.is_empty() || std::env::var_os("SUNPETAL_ULT_MODELS").is_some_and(|v| !v.is_empty());
+    sunpetal_runtime::nds::set_model_files(model_files);
     let shared = Shared::new();
+    shared.models.store(has_models, Ordering::Relaxed);
+    shared.ultimate.store(has_models && settings.video.graphics == "ultimate", Ordering::Relaxed);
     shared.scale.store(settings.video.res, Ordering::Relaxed);
     shared.renderer.store((config::parse_renderer(&settings.video.renderer) == Some(sunpetal_runtime::nds::Renderer::Gpu)) as u8, Ordering::Relaxed);
     shared.pipeline.store(settings.emulation.pipeline, Ordering::Relaxed);

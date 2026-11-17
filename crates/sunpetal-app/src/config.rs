@@ -70,8 +70,8 @@ pub struct Video {
     /// the game's own sprites); a group left out draws its default. Last: a table.
     pub pack_variants: BTreeMap<String, String>,
     /// The graphics level chosen in the short menu: `standard` (the game's own pictures: no packs), `enhanced` (the
-    /// packs: PS2 textures and the redrawn 2D) or `ultimate` (the same and the PS2 models, K-111: not made yet, so it
-    /// draws as `enhanced`). F12 swaps `standard` and `enhanced` for the session.
+    /// packs: PS2 textures and the redrawn 2D) or `ultimate` (the same and the PS2 models, K-241: offered when the data
+    /// holds models, otherwise it draws as `enhanced`). F12 swaps `standard` and `enhanced` for the session.
     pub graphics: String,
 }
 

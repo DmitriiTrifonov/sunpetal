@@ -446,42 +446,50 @@ impl Ult {
         })
     }
 
+    /// The models of `SUNPETAL_ULT_MODELS` and of the data files the app named (`set_model_files`).
     fn from_env() -> Vec<Ult> {
-        let Some(path) = std::env::var_os("SUNPETAL_ULT_MODELS").map(std::path::PathBuf::from) else { return Vec::new() };
-        let read = || -> Result<Vec<sunpetal_data::spm2::Model>, String> {
-            let mut out = Vec::new();
-            if path.is_dir() {
-                let mut names: Vec<std::path::PathBuf> =
-                    std::fs::read_dir(&path).map_err(|e| e.to_string())?.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "spm")).collect();
-                names.sort();
-                for n in names {
-                    let d = std::fs::read(&n).map_err(|e| format!("{}: {}", n.display(), e))?;
-                    if d.starts_with(sunpetal_data::spm2::MAGIC) {
-                        out.push(sunpetal_data::spm2::Model::decode(&n.file_stem().unwrap_or_default().to_string_lossy(), &d)?);
-                    }
+        let mut paths: Vec<std::path::PathBuf> = std::env::var_os("SUNPETAL_ULT_MODELS").map(std::path::PathBuf::from).into_iter().collect();
+        paths.extend(MODEL_FILES.lock().unwrap().iter().cloned());
+        let mut pictures = 0;
+        let mut all = Vec::new();
+        for path in paths {
+            match Ult::read_models(&path) {
+                Ok(models) => {
+                    let ult: Vec<Ult> = models.iter().filter_map(|m| Ult::new(m, &mut pictures)).collect();
+                    eprintln!("models: {} of {} from {} stand for DS models", ult.len(), models.len(), path.display());
+                    all.extend(ult);
                 }
-            } else {
-                let c = sunpetal_data::container::Container::read_only(&path, |t| t == sunpetal_data::models::TAG)?;
-                for s in c.all(sunpetal_data::models::TAG) {
-                    out.extend(sunpetal_data::spm2::unpack(&s.data)?);
-                }
-            }
-            Ok(out)
-        };
-        match read() {
-            Ok(models) => {
-                let mut pictures = 0;
-                let ult: Vec<Ult> = models.iter().filter_map(|m| Ult::new(m, &mut pictures)).collect();
-                eprintln!("models: {} of {} from {} stand for DS models", ult.len(), models.len(), path.display());
-                ult
-            }
-            Err(e) => {
-                eprintln!("models: {}: {}", path.display(), e);
-                Vec::new()
+                Err(e) => eprintln!("models: {}: {}", path.display(), e),
             }
         }
+        all
+    }
+
+    /// The `SPM2` models of a folder of `*.spm` or of a data file's `MODL` part.
+    fn read_models(path: &std::path::Path) -> Result<Vec<sunpetal_data::spm2::Model>, String> {
+        let mut out = Vec::new();
+        if path.is_dir() {
+            let mut names: Vec<std::path::PathBuf> =
+                std::fs::read_dir(path).map_err(|e| e.to_string())?.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "spm")).collect();
+            names.sort();
+            for n in names {
+                let d = std::fs::read(&n).map_err(|e| format!("{}: {}", n.display(), e))?;
+                if d.starts_with(sunpetal_data::spm2::MAGIC) {
+                    out.push(sunpetal_data::spm2::Model::decode(&n.file_stem().unwrap_or_default().to_string_lossy(), &d)?);
+                }
+            }
+        } else {
+            let c = sunpetal_data::container::Container::read_only(path, |t| t == sunpetal_data::models::TAG)?;
+            for s in c.all(sunpetal_data::models::TAG) {
+                out.extend(sunpetal_data::spm2::unpack(&s.data)?);
+            }
+        }
+        Ok(out)
     }
 }
+
+/// The data files whose `MODL` part holds replacement models (the app names them before the machine starts); `SUNPETAL_ULT_MODELS` adds one.
+pub(super) static MODEL_FILES: std::sync::Mutex<Vec<std::path::PathBuf>> = std::sync::Mutex::new(Vec::new());
 
 /// Of the frame's replacements, the first of each source stays: the DS models that stand on one PS2 scene are
 /// all hidden, and the scene is drawn once.
@@ -594,6 +602,8 @@ pub(super) struct Gx {
     swap_count: std::collections::HashMap<u32, u32>,
     swap_mtime: Option<std::time::SystemTime>,
     ult: Vec<Ult>,
+    /// Whether the replacements are drawn (the graphics level "ultimate"); off, the DS models stay.
+    pub(super) ult_on: bool,
     files: super::modelsrc::Files,
     /// The open run of a replaced model's polygons: where it began in the list, and its entry of `ult_seen`.
     ult_open: Option<(usize, usize)>,
@@ -701,6 +711,7 @@ impl Gx {
             swap_count: Default::default(),
             swap_mtime: None,
             ult: Ult::from_env(),
+            ult_on: true,
             files: Default::default(),
             ult_open: None,
             ult_hide: Vec::new(),
@@ -1141,6 +1152,7 @@ impl Nds {
         // pictures would be drawn in the vertices' colours alone, white; the DS model stays (B-37)
         let originals = self.stash.is_some();
         let g = &mut self.gx;
+        let originals = originals || !g.ult_on;
         g.ult_close();
         g.ult_hide_r = std::mem::take(&mut g.ult_hide);
         g.ult_at_r.clear();

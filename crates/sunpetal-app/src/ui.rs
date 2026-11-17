@@ -49,6 +49,9 @@ pub struct Menu {
     pub pack_groups: std::collections::BTreeMap<String, Vec<String>>,
     /// The game's own pictures instead of the packs (F12; the window copies it from and back to the emulation).
     pub originals: bool,
+    /// The PS2 models are drawn (the level "ultimate"), and whether the data holds any (the window copies both).
+    pub ultimate: bool,
+    pub models: bool,
     /// Debug: the 2D dumps (the window copies them from and back to the emulation).
     pub dump_2d_new: bool,
     pub dump_on_touch: bool,
@@ -86,6 +89,8 @@ impl Menu {
             focus_style: false,
             pack_groups: Default::default(),
             originals: false,
+            ultimate: false,
+            models: false,
             dump_2d_new: false,
             dump_on_touch: false,
             forced_full: false,
@@ -185,7 +190,7 @@ impl Menu {
     fn graphics_row(&mut self, ui: &mut egui::Ui, s: &mut Settings, tx: &dyn Fn(&'static str, &'static str) -> String) {
         let now = if self.originals {
             "standard"
-        } else if s.video.graphics == "ultimate" {
+        } else if self.ultimate && self.models {
             "ultimate"
         } else {
             "enhanced"
@@ -197,9 +202,17 @@ impl Menu {
         };
         let mut pick = now.to_string();
         let combo_r = Spin::from_label(tx("Graphics (F12: standard / enhanced)", "Графика (F12: стандартный / улучшенный)")).selected_text(name(now)).show(ui);
-        arrow_pick(ui, &combo_r, &mut pick, &["standard".to_string(), "enhanced".to_string()]);
+        let mut levels = vec!["standard".to_string(), "enhanced".to_string()];
+        if self.models {
+            levels.push("ultimate".to_string());
+        }
+        arrow_pick(ui, &combo_r, &mut pick, &levels);
         if pick != now {
+            // F12 only swaps the packs for the game's own pictures: the level it returns to is kept
             self.originals = pick == "standard";
+            if pick != "standard" {
+                self.ultimate = pick == "ultimate";
+            }
             s.video.graphics = pick;
         }
     }

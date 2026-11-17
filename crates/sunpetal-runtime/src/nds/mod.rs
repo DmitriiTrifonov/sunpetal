@@ -1158,6 +1158,16 @@ pub fn set_originals(on: bool) {
     })
 }
 
+/// Names the data files whose `MODL` part holds PS2 replacement models; call before the machine starts.
+pub fn set_model_files(files: Vec<std::path::PathBuf>) {
+    *gx::MODEL_FILES.lock().unwrap() = files;
+}
+
+/// Draws the PS2 replacement models (`true`, the graphics level "ultimate") or leaves the DS ones; takes effect with the next swap.
+pub fn set_ultimate(on: bool) {
+    nds(|d| d.gx.ult_on = on);
+}
+
 /// The 2D pack's groups of variant pictures and the variants of each (`pack2d`: `…@group.variant.png`).
 pub fn pack_2d_groups() -> std::collections::BTreeMap<String, Vec<String>> {
     nds(|d| d.gpu.pack.as_ref().map(|p| p.groups().into_iter().map(|(g, v)| (g, v.into_iter().collect())).collect()).unwrap_or_default())

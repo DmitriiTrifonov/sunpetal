@@ -99,6 +99,9 @@ pub struct Shared {
     pub skip: AtomicBool,
     /// Show the game's own pictures instead of the packs (F12): the packs are set aside, not dropped.
     pub originals: AtomicBool,
+    /// The graphics level "ultimate": the PS2 replacement models are drawn (K-241); `models`: there are some to draw.
+    pub ultimate: AtomicBool,
+    pub models: AtomicBool,
     /// Debug menu: write the 2D pictures not seen before to artifacts/shots/new_2d (the same as SUNPETAL_DUMP_2D_NEW=1).
     pub dump_2d_new: AtomicBool,
     /// Debug menu: each touch of the lower screen writes the frames after it to artifacts/shots/touch_N (SUNPETAL_DUMP_ON_TOUCH=1).
@@ -186,6 +189,8 @@ impl Shared {
             fast: AtomicBool::new(false),
             skip: AtomicBool::new(false),
             originals: AtomicBool::new(false),
+            ultimate: AtomicBool::new(false),
+            models: AtomicBool::new(false),
             dump_2d_new: AtomicBool::new(std::env::var_os("SUNPETAL_DUMP_2D_NEW").is_some_and(|v| v != "0")),
             dump_on_touch: AtomicBool::new(std::env::var_os("SUNPETAL_DUMP_ON_TOUCH").is_some_and(|v| v != "0")),
             dialogue: AtomicBool::new(false),
@@ -322,6 +327,7 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
     // SUNPETAL_SCRIPT_OBSERVER=1: the native script interpreter beside the game's runner (K-162), mismatches to stderr
     let observing = std::env::var_os("SUNPETAL_SCRIPT_OBSERVER").is_some_and(|v| v != "0") && nds::script_observer_start();
     let mut showing_originals = false;
+    let mut showing_ultimate = None;
     let mut was_skipping = false;
     let (mut still, mut skipped, mut last_print, mut idle_for, mut wait_for) = (0u32, 0u32, 0u64, 0u32, 0u32);
     let (mut step, mut no_step) = ((0u32, 0u32), 0u32);
@@ -415,6 +421,11 @@ fn run(cfg: Config, shared: Arc<Shared>, audio: Option<Arc<Ring>>) {
         if want_originals != showing_originals {
             nds::set_originals(want_originals);
             showing_originals = want_originals;
+        }
+        let want_ultimate = shared.ultimate.load(Ordering::Relaxed);
+        if showing_ultimate != Some(want_ultimate) {
+            nds::set_ultimate(want_ultimate);
+            showing_ultimate = Some(want_ultimate);
         }
         nds::set_draw(draw);
         let t0 = Instant::now();
