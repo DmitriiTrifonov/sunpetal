@@ -18,6 +18,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("scene", "scene: the script file the game read last"),
     ("cam", "cam YAW PITCH [DX DY DZ]: the scene camera turned (degrees) and moved; `cam 0 0` is the game's"),
     ("shot", "shot: the window's picture and its parts to artifacts/shots"),
+    ("bookmark", "bookmark NAME: the place kept (input from the start, the start save, the checkpoints) in artifacts/bookmarks/NAME"),
     ("help", "help: this list"),
 ];
 
@@ -56,6 +57,46 @@ pub fn start_chapter(n: u32) -> Result<(), String> {
         && nds::debug::poke(MODE_CONTROL + 4, &MODE_WORLD.to_le_bytes())
         && nds::debug::poke(MODE_CONTROL + 8, &0u32.to_le_bytes());
     ok.then_some(()).ok_or_else(|| "the controller's memory is not there".into())
+}
+
+/// `bookmark NAME` (K-221, А1.6): the session's recording of input (`SUNPETAL_INPUT_REC`, which the window starts with the debug
+/// menu), the save it started from and its checkpoints, copied to `artifacts/bookmarks/NAME`, with where the hero is; and a line
+/// in `artifacts/bookmarks/places.toml` for `tools/auto/places.py`. A replay with `sunpetal-headless` comes back to this frame.
+fn bookmark(name: &str) -> Result<String, String> {
+    use std::path::Path;
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        return Err("NAME: letters, digits, _ and - only".into());
+    }
+    let rec = std::env::var_os("SUNPETAL_INPUT_REC").ok_or("no recording runs: start the window with SUNPETAL_DEBUG_MENU=1")?;
+    let rec = Path::new(&rec);
+    let root = rec.parent().and_then(Path::parent).ok_or("the recording has no folder")?;
+    let dir = root.join(name);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let copy = |from: &Path, to: &str| std::fs::copy(from, dir.join(to)).map(|_| ()).map_err(|e| format!("{}: {}", from.display(), e));
+    nds::flush_save();
+    copy(rec, "input.txt")?;
+    copy(&rec.with_file_name("start.sav"), "start.sav")?;
+    copy(&rec.with_extension("chk"), "input.chk")?;
+    let frame = nds::vblanks();
+    let (scene, map) = (nds::script_scene(), session::hero_map());
+    let meta = serde_json::json!({
+        "name": name,
+        "frame": frame,
+        "scene": scene,
+        "map": map,
+        "pos": session::hero_pos(),
+        "angle": session::hero_angle(),
+        "step": session::story_value(0),
+    })
+    .to_string()
+        + "\n";
+    std::fs::write(dir.join("meta.json"), meta).map_err(|e| e.to_string())?;
+    let mut line = format!("\n[[place]]\nid = {:?}\ndesc = \"закладка автора\"\nreplay = {:?}\nframes = {}\n", name, dir.display().to_string(), frame);
+    let expect: Vec<String> = scene.iter().map(|s| format!("scene = {:?}", s)).chain(map.iter().map(|m| format!("map = {}", m))).collect();
+    line.push_str(&format!("expect = {{ {} }}\n", expect.join(", ")));
+    use std::io::Write;
+    std::fs::OpenOptions::new().create(true).append(true).open(root.join("places.toml")).and_then(|mut f| f.write_all(line.as_bytes())).map_err(|e| e.to_string())?;
+    Ok(format!("bookmark {} at frame {} in {}", name, frame, dir.display()))
 }
 
 /// Runs one machine-side command; the answer, one line per `\n`. Call between frames.
@@ -122,6 +163,7 @@ pub fn run(line: &str) -> Result<String, String> {
             Ok("PS2 walk on".into())
         }
         "scene" => Ok(nds::script_scene().unwrap_or_else(|| "(none yet)".into())),
+        "bookmark" => bookmark(w.first().ok_or("NAME is missing")?),
         "where" => Ok(format!(
             "scene {}  map {:?}  pos {:?}  angle {:?}  step {:?}  frame {}",
             nds::script_scene().unwrap_or_else(|| "-".into()),

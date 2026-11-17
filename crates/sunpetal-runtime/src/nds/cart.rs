@@ -113,6 +113,10 @@ impl Nds {
                 save = s;
             }
         }
+        // a recording of input (`SUNPETAL_INPUT_REC`) replays from the save as it was at the start: kept beside it (K-221, bookmarks)
+        if let Some(rec) = std::env::var_os("SUNPETAL_INPUT_REC") {
+            let _ = fs::write(std::path::Path::new(&rec).with_file_name("start.sav"), &save);
+        }
         let c = &mut self.cart;
         *c = Cart::new();
         c.rom = rom;

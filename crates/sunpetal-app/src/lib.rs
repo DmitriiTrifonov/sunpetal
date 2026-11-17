@@ -1612,6 +1612,13 @@ fn prepare(o: Options, scripted: bool) -> (App, Arc<Shared>, Option<cpal::Stream
     if let Some(l) = o.lang {
         settings.game.language = if l == "none" { String::new() } else { l };
     }
+    // the debug menu records the session's input from its start, so that a bookmark (console `bookmark NAME`) can replay it (K-221)
+    if std::env::var("SUNPETAL_DEBUG_MENU").is_ok_and(|v| !v.is_empty() && v != "0") && std::env::var_os("SUNPETAL_INPUT_REC").is_none() {
+        let dir = PathBuf::from("artifacts/bookmarks/.session");
+        if std::fs::create_dir_all(&dir).is_ok() {
+            std::env::set_var("SUNPETAL_INPUT_REC", dir.join("input.txt"));
+        }
+    }
     let mut cfg = Config::new(&rom);
     // saves go beside the ROM; with no ROM file, beside the data file
     let beside = if rom.as_os_str().is_empty() { o.pack.as_deref() } else { Some(rom.as_path()) };

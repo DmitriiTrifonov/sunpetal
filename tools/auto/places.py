@@ -4,6 +4,7 @@
     places.py list
     places.py check ROM [--save build/full100.sav] [--only a,b] [--jobs N] [--debug BIN]
     places.py where ROM ID [--save ...]            # что говорит `where` в месте (для записи expect)
+    places.py replay ROM ID [--out F.png]          # закладка: повтор записи ввода безголово, контрольные точки, кадр
 
 `check` приводит игру в каждое место (`sunpetal-debug --repl`, копия сохранения) и сверяет `where` с `expect`.
 Код возврата 1, если место не дошло или признак не совпал. `run_place` пригоден для shoot.py.
@@ -20,13 +21,19 @@ import tomllib
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
 PLACES = os.path.join(ROOT, 'data', 'places.toml')
+# закладки автора (консоль окна `bookmark ИМЯ`, K-221 А1.6): не в git, дописываются в этот файл
+BOOKMARKS = os.path.join(ROOT, 'artifacts', 'bookmarks', 'places.toml')
+HEADLESS = os.path.join(ROOT, 'target', 'release', 'sunpetal-headless')
 DEBUG = os.path.join(ROOT, 'target', 'release', 'sunpetal-debug')
 SAVE = os.path.join(ROOT, 'build', 'full100.sav')
 
 
-def load_places(path=PLACES):
+def load_places(path=PLACES, bookmarks=BOOKMARKS):
     with open(path, 'rb') as f:
         places = tomllib.load(f)['place']
+    if bookmarks and os.path.exists(bookmarks):
+        with open(bookmarks, 'rb') as f:
+            places += tomllib.load(f).get('place', [])
     ids = [p['id'] for p in places]
     if len(set(ids)) != len(ids):
         raise SystemExit('places: ids repeat')
@@ -64,6 +71,39 @@ def run_place(place, rom, save=SAVE, after=(), debug=DEBUG, timeout=300):
     return where, replies[i + 1:]
 
 
+def run_replay(place, rom, out=None, headless=HEADLESS, timeout=900):
+    """Закладка (`replay` — папка с input.txt, start.sav, input.chk): повтор ввода безголово до кадра `frames`, сверка
+    контрольных точек записи (`--check`), кадр на `frames` в PNG. Возвращает (число сошедшихся точек, путь PNG);
+    расхождение или сбой — ValueError."""
+    d = place['replay']
+    if not os.path.isabs(d):
+        d = os.path.join(ROOT, d)
+    frames = int(place['frames'])
+    with tempfile.TemporaryDirectory() as tmp:
+        work = os.path.join(tmp, 'work.sav')
+        shutil.copy(os.path.join(d, 'start.sav'), work)
+        with open(os.path.join(d, 'input.txt')) as f:
+            inp = f.read().strip().rstrip(',')
+        # контрольные точки только до кадра закладки
+        chk = os.path.join(tmp, 'input.chk')
+        with open(os.path.join(d, 'input.chk')) as f, open(chk, 'w') as g:
+            g.writelines(l for l in f if l.split(' ')[0].isdigit() and int(l.split(' ')[0]) <= frames)
+        cmd = [headless, rom, '--save', work, '--input', inp, '--vblanks', str(frames), '--shots', str(frames), '--out', tmp, '--check', chk]
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            raise ValueError('timeout')
+        if r.returncode != 0:
+            raise ValueError('replay: код %s; %s' % (r.returncode, (r.stderr or r.stdout)[-300:]))
+        ok = r.stderr.count('checkpoint ') - r.stderr.count('diverged')
+        png = os.path.join(tmp, 'v%d.png' % frames)
+        if out and os.path.exists(png):
+            shutil.copy(png, out)
+        else:
+            out = None
+    return ok, out
+
+
 def verdict(place, where):
     """None, если признак совпал; иначе строка с расхождением."""
     bad = []
@@ -76,6 +116,12 @@ def verdict(place, where):
 
 def check(places, rom, save, jobs, debug):
     def one(p):
+        if p.get('replay'):
+            try:
+                n, _ = run_replay(p, rom)
+                return p['id'], None, {'checkpoints': n}
+            except ValueError as e:
+                return p['id'], str(e), None
         try:
             w, _ = run_place(p, rom, save, debug=debug)
             return p['id'], verdict(p, w), w
@@ -89,6 +135,11 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest='cmd', required=True)
     sub.add_parser('list')
+    r = sub.add_parser('replay')
+    r.add_argument('rom')
+    r.add_argument('id')
+    r.add_argument('--out')
+    r.add_argument('--headless', default=HEADLESS)
     for name in ('check', 'where'):
         s = sub.add_parser(name)
         s.add_argument('rom')
@@ -103,7 +154,19 @@ def main():
     places = load_places()
     if a.cmd == 'list':
         for p in places:
-            print(f'{p["id"]:16} {"goto " + p["goto"] if p.get("goto") else "старт":12} {p.get("desc", "")}')
+            how = 'закладка' if p.get('replay') else ('goto ' + p['goto'] if p.get('goto') else 'старт')
+            print(f'{p["id"]:16} {how:12} {p.get("desc", "")}')
+        return 0
+    if a.cmd == 'replay':
+        p = next((p for p in places if p['id'] == a.id and p.get('replay')), None)
+        if not p:
+            raise SystemExit(f'places: нет закладки {a.id}')
+        try:
+            ok, png = run_replay(p, a.rom, a.out, a.headless)
+        except ValueError as e:
+            print('ПРОВАЛ ' + str(e))
+            return 1
+        print(f'ok: кадр {p["frames"]}, контрольных точек сошлось {ok}' + (f', {png}' if png else ''))
         return 0
     if a.cmd == 'where':
         p = next((p for p in places if p['id'] == a.id), None)
