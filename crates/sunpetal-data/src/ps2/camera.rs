@@ -169,6 +169,75 @@ pub fn select_area(areas: &[super::export::CamArea], hero: [f32; 3], current: Op
 
 type Mat = [[f32; 4]; 4];
 
+/// An angle taken into [-π, π].
+fn wrap(a: f32) -> f32 {
+    use std::f32::consts::{PI, TAU};
+    let mut a = a;
+    if a > PI {
+        a -= TAU;
+    } else if a < -PI {
+        a += TAU;
+    }
+    a
+}
+
+/// The yaw of the game's camera along a path (`SetCurrentPos` 0x126a40; `camera.md` §9.2, checked frame by frame by
+/// `sunpetal-ee` Y-30/Y-32/Y-39): a look at the subject with a dead zone of `π/N` (the path's flag bit 1 clear), the
+/// path's own turn blended 0.05/0.95 (bit 1 set), or a continuous look (`bPanDisabled`, bit 4).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CamYaw {
+    pub yaw: f32,
+    /// the dead zone's width is `π/n`: `n` follows `n0` (24; 8 running; 10000 with the flag's bit 3) by 0.95/0.05 a frame
+    pub n: f32,
+    bit3: bool,
+}
+
+impl CamYaw {
+    pub fn new(yaw: f32) -> CamYaw {
+        CamYaw { yaw, n: 24.0, bit3: false }
+    }
+
+    /// One frame of the look at the subject: `want = atan2(eyeX - targetX, targetZ - eyeZ)`, `n0` the width's goal.
+    pub fn look(&mut self, want: f32, n0: f32) {
+        use std::f32::consts::PI;
+        let old = self.n;
+        self.n = 0.95 * self.n + 0.05 * n0;
+        let (step_old, step_new) = (PI / old, PI / self.n);
+        let diff = wrap(want - self.yaw);
+        if diff.abs() > step_new {
+            self.bit3 = true;
+        }
+        if self.bit3 {
+            let s = if diff > 0.0 { 1.0 } else { -1.0 };
+            let tmp = self.yaw + (diff - s * step_old);
+            let before = self.yaw;
+            self.yaw = if diff.abs() > step_new { self.yaw + (diff - s * step_new) } else { tmp };
+            if (tmp - before).abs() < 0.01 {
+                self.bit3 = false;
+            }
+            self.yaw = wrap(self.yaw);
+        }
+    }
+
+    /// One frame of the path's own turn: the target (`SplineRot`) blended in by 0.05 when the path delays (`bDelay`),
+    /// else taken at once; a target more than a half turn off is moved by 2π first.
+    pub fn follow_path(&mut self, target: f32, delay: bool) {
+        use std::f32::consts::TAU;
+        let mut t = target;
+        if t - self.yaw > std::f32::consts::PI {
+            t -= TAU;
+        } else if t - self.yaw < -std::f32::consts::PI {
+            t += TAU;
+        }
+        self.yaw = wrap(if delay { 0.05 * t + 0.95 * self.yaw } else { t });
+    }
+
+    /// One frame of the continuous look (`PanMode` 2).
+    pub fn look_smooth(&mut self, want: f32) {
+        self.yaw = wrap(self.yaw + 0.05 * wrap(want - self.yaw));
+    }
+}
+
 fn mul(a: &Mat, b: &Mat) -> Mat {
     let mut r = [[0.0; 4]; 4];
     for i in 0..4 {
@@ -220,6 +289,43 @@ mod tests {
 
     fn path(keys: Vec<CamKey>) -> CamPath {
         CamPath { flag: 1, last_frame: 0, keys }
+    }
+
+    #[test]
+    fn the_yaw_stands_in_its_dead_zone_and_follows_at_its_edge() {
+        let mut y = CamYaw::new(0.0);
+        // inside π/24: it stands
+        for _ in 0..10 {
+            y.look(0.1, 24.0);
+        }
+        assert_eq!(y.yaw, 0.0);
+        // outside: it comes to within a step of the goal and stays there (R13: the rest is π/24, Y-30)
+        for _ in 0..50 {
+            y.look(1.0, 24.0);
+        }
+        let rest = (1.0 - y.yaw).abs();
+        assert!((rest - std::f32::consts::PI / 24.0).abs() < 1e-3, "{}", rest);
+        // the goal's n settles at n0
+        assert!((y.n - 24.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn the_path_turn_blends_and_flips_across_the_wrap() {
+        // R01 room 1 path 4 (Y-39): -3.1355622 goes to the key's -3.1415925 by 0.05/0.95
+        let mut y = CamYaw::new(-3.1355622);
+        for _ in 0..119 {
+            y.follow_path(-3.1415925, true);
+        }
+        assert!((y.yaw - -3.1415794).abs() < 2e-5, "{}", y.yaw);
+        // path 5: yaw +π, target -π: the target is +π, the yaw stays
+        let mut z = CamYaw::new(3.1355622);
+        for _ in 0..119 {
+            z.follow_path(-3.1415925, true);
+        }
+        assert!((z.yaw - 3.1415794).abs() < 2e-5, "{}", z.yaw);
+        // no delay: at once
+        z.follow_path(0.5, false);
+        assert_eq!(z.yaw, 0.5);
     }
 
     #[test]

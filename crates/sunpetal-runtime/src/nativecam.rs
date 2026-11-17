@@ -23,7 +23,7 @@ static PS2: std::sync::Mutex<Option<Ps2>> = std::sync::Mutex::new(None);
 
 /// The PS2 camera of a room that follows the hero (K-235.4; `camera.md` §8, §9): the camera area the hero is in gives the
 /// path, `T` comes from the hero's place, the eye is the path at `T` (a change of path is blended over 360 frames), the
-/// view looks at the hero (pitch at once, yaw held to a turn of 0.031 rad a frame).
+/// view looks at the hero (pitch at once, the yaw as the game's: a dead zone, `CamYaw`).
 struct Follow {
     cam: sunpetal_data::ps2::export::Camera,
     areas: Vec<sunpetal_data::ps2::export::CamArea>,
@@ -31,8 +31,9 @@ struct Follow {
     area: Option<usize>,
     path: usize,
     reverse: bool,
-    /// the yaw held (the game's convention), the blend count and the eye it blends from
-    yaw: Option<f32>,
+    /// the yaw of the game's camera (its convention) and whether the path blends its turn (`bDelay`); the blend count and the eye it blends from
+    yaw: Option<sunpetal_data::ps2::camera::CamYaw>,
+    delay: bool,
     switch: u32,
     old_eye: [f32; 3],
     /// the eye of the last frame (export units)
@@ -111,8 +112,19 @@ pub fn follow_ps2_path(root: &str, scene: &str, record: usize, path: Option<usiz
     if first >= cam.paths.len() {
         return Err("no such path".into());
     }
-    *FOLLOW.lock().unwrap() =
-        Some(Follow { cam, areas: sc.areas.clone(), area: None, path: first, reverse: false, yaw: None, switch: 0, old_eye: [0.0; 3], eye: [0.0; 3], fixed: path.is_some() });
+    *FOLLOW.lock().unwrap() = Some(Follow {
+        cam,
+        areas: sc.areas.clone(),
+        area: None,
+        path: first,
+        reverse: false,
+        yaw: None,
+        delay: true,
+        switch: 0,
+        old_eye: [0.0; 3],
+        eye: [0.0; 3],
+        fixed: path.is_some(),
+    });
     set_ps2([0.0; 3], 0.0, 0.0, 0.0, SHIFT, false);
     Ok(())
 }
@@ -120,7 +132,7 @@ pub fn follow_ps2_path(root: &str, scene: &str, record: usize, path: Option<usiz
 /// One frame of the follow: the area and path, `T`, the eye and the view for the hero at `s` (export units).
 fn follow_frame(f: &mut Follow, p: &mut Ps2, s: [f32; 3]) {
     use std::f32::consts::PI;
-    use sunpetal_data::ps2::camera::select_area;
+    use sunpetal_data::ps2::camera::{select_area, CamYaw};
     if !f.fixed {
         let now = select_area(&f.areas, s, f.area);
         if let Some(i) = now {
@@ -129,6 +141,8 @@ fn follow_frame(f: &mut Follow, p: &mut Ps2, s: [f32; 3]) {
                 if f.area.is_some() && f.path != a.index as usize {
                     f.switch = 360;
                     f.old_eye = f.eye;
+                    // `SetCurrentPath` 0x126100: the turn blends unless the old and the new path both have bit 2 (`bDelayDisabled`)
+                    f.delay = !(f.cam.paths[f.path].flag & 4 != 0 && f.cam.paths[a.index as usize].flag & 4 != 0);
                 }
                 f.path = a.index as usize;
                 // `setPathDirection` keeps bit 0 of the area's `path_dir` (0x16a450): 1 (and -1) is backwards; no live frame with 1 was read back yet
@@ -148,18 +162,19 @@ fn follow_frame(f: &mut Follow, p: &mut Ps2, s: [f32; 3]) {
     let (dx, dz) = (s[0] - eye[0], s[2] - eye[2]);
     let ty = s[1] + f.cam.scale * 15.0;
     let pitch = (ty - eye[1]).atan2(dx.hypot(dz)).max(-1.2566371);
-    // path flag bit 1 set: the path's own turn; clear: a look at the hero, its yaw held to 0.031 rad a frame
-    let want = if path.flag & 2 != 0 { path.rotation(t).map_or(0.0, |r| r[1]) } else { (-dx).atan2(dz) };
-    let held = f.yaw.map_or(want, |y| {
-        let mut d = (want - y) % (2.0 * PI);
-        if d > PI {
-            d -= 2.0 * PI;
-        } else if d < -PI {
-            d += 2.0 * PI;
-        }
-        y + d.clamp(-0.031, 0.031)
-    });
-    f.yaw = Some(held);
+    // the yaw (camera.md §9.2): the path's flag bit 1 set: its own turn blended 0.05/0.95; clear: a look at the hero with a dead
+    // zone of π/N (N follows 24, or 10000 with bit 3; the game's 8 while running needs the hero's move state: not read); bit 4: a
+    // continuous look
+    let look = (-dx).atan2(dz);
+    let cy = f.yaw.get_or_insert_with(|| CamYaw::new(look));
+    if path.flag & 16 != 0 {
+        cy.look_smooth(look);
+    } else if path.flag & 2 != 0 {
+        cy.follow_path(path.rotation(t).map_or(0.0, |r| r[1]), f.delay);
+    } else {
+        cy.look(look, if path.flag & 8 != 0 { 10000.0 } else { 24.0 });
+    }
+    let held = cy.yaw;
     // ours is the game's yaw turned: π - yaw (the same view)
     p.angles = [pitch, PI - held, 0.0];
 }
