@@ -24,6 +24,8 @@ pub struct RoomEvent {
     pub scene: Option<String>,
     /// With `scene`: the script's own call of `STAGEANIMATION` (1, 2, ...) that starts it; the first starts with the script (K-245).
     pub call: u32,
+    /// The object is hidden this many frames after its motion starts (PS2 `SetObjVisibleScene3D(0, 0)`: C13_06's switch, K-245).
+    pub hide_after: Option<u32>,
 }
 
 impl RoomEvent {
@@ -61,6 +63,7 @@ pub fn parse(text: &str) -> Result<Vec<RoomEvent>, String> {
                 step: e.get("step").and_then(Value::as_i64).map(|s| s as i32),
                 on_script: e.get("on_script").and_then(Value::as_bool).unwrap_or(false),
                 scene: e.get("scene").and_then(Value::as_str).map(str::to_string),
+                hide_after: e.get("hide_after").and_then(Value::as_u64).map(|n| n as u32),
                 call: e.get("call").and_then(Value::as_u64).unwrap_or(1) as u32,
             })
         })
@@ -177,6 +180,9 @@ mod tests {
         assert!(t[0].on_script && t[0].holds_within(1.5, 0.0, 1.0) && !t[0].holds(1.5, 0.0));
         assert_eq!(t[0].step, Some(3));
         assert_eq!(t[0].bone, 2);
+        assert_eq!((t[0].call, t[0].hide_after), (1, None));
+        let h = parse(r#"[{"model":"m","bone":0,"map":1,"x":[0,1],"z":[0,1],"motion":"a","call":2,"hide_after":60}]"#).unwrap();
+        assert_eq!((h[0].call, h[0].hide_after), (2, Some(60)));
         assert!(t[0].holds(0.0, 2.0) && !t[0].holds(2.0, 0.0));
         let k = motion_keys(r#"{"joints":[{"keys":[{"frame":0,"pos":[0,0,0],"rot":[0,0,0]},{"frame":2,"pos":[1,2,3],"rot":[0,0,1.5]}]}]}"#).unwrap();
         assert_eq!(k.len(), 3);

@@ -137,6 +137,8 @@ struct State {
     read: bool,
     /// Whether a script was running at the last frame (an event starts on the edge).
     was_running: bool,
+    /// Frames since the motion started (0 while at rest), for `hide_after`.
+    age: u32,
 }
 
 #[cfg(feature = "debug-tools")]
@@ -157,7 +159,7 @@ pub fn frame(rest_of: impl Fn(&str, u16) -> Option<[f32; 3]>) {
     calls::install();
     let mut states = STATES.lock().unwrap();
     while states.len() < t.len() {
-        states.push(State { stage: Stage::Idle, keys: None, read: false, was_running: false });
+        states.push(State { stage: Stage::Idle, keys: None, read: false, was_running: false, age: 0 });
     }
     // the DS place in 1/4096 units is the PS2's scene units over ten (this room's shift is none, K-237)
     let (x, z) = (pos[0] as f32 / 4096.0 * 10.0, pos[2] as f32 / 4096.0 * 10.0);
@@ -201,6 +203,11 @@ pub fn frame(rest_of: impl Fn(&str, u16) -> Option<[f32; 3]>) {
         // the story decides first: before the event's step it is not played (a new game takes the object back), past it it has been
         let story = e.step.and_then(|n| crate::session::story_value(0).map(|v| v.cmp(&n)));
         s.stage = step_in_story(story, s.stage, inside, e.delay, keys.len() as u32);
+        s.age = match s.stage {
+            Stage::Playing(_) | Stage::Done => s.age.saturating_add(1),
+            _ => 0,
+        };
+        let hidden = e.hide_after.is_some_and(|h| s.age > h);
         let at = match s.stage {
             Stage::Playing(f) => Some(f as usize),
             Stage::Done => Some(keys.len() - 1),
@@ -208,7 +215,9 @@ pub fn frame(rest_of: impl Fn(&str, u16) -> Option<[f32; 3]>) {
         };
         if let (Some(f), Some(rest)) = (at, rest_of(&e.model, e.bone)) {
             let (p, r) = keys[f];
-            set_pose(&e.model, e.bone, [rest[0] + p[0], rest[1] + p[1], rest[2] + p[2], r[0], r[1], r[2]]);
+            // hidden: put far below the room, out of the picture
+            let down = if hidden { -1.0e6 } else { 0.0 };
+            set_pose(&e.model, e.bone, [rest[0] + p[0], rest[1] + p[1] + down, rest[2] + p[2], r[0], r[1], r[2]]);
         }
     }
 }
