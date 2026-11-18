@@ -146,6 +146,7 @@ static STATES: Mutex<Vec<State>> = Mutex::new(Vec::new());
 /// `rest_of(model, bone)` gives the bone's rest place (what the pose's move is added to).
 #[cfg(feature = "debug-tools")]
 pub fn frame(rest_of: impl Fn(&str, u16) -> Option<[f32; 3]>) {
+    crate::nativewalk::auto_tick();
     let t = table();
     if t.is_empty() {
         return;

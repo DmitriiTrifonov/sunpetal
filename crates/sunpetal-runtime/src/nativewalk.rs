@@ -52,6 +52,68 @@ pub fn room(root: &str, scene: &str, index: usize) -> Result<(), String> {
     enable(root, scene, index)
 }
 
+/// `ps2room auto`: on each map the DS game enters, the room of that map from `maps.tsv` (Y-38) is put on, by the DS scene's chapter;
+/// a map with no room leaves the game's own camera and walk. Call once a frame.
+type Room = Option<(String, usize)>;
+struct Auto {
+    root: String,
+    rows: Vec<sunpetal_data::ps2::export::MapRow>,
+    /// the map and scene the room was last chosen for, and the choice
+    last: Option<(u32, Option<String>, Room)>,
+}
+static AUTO: Mutex<Option<Auto>> = Mutex::new(None);
+
+pub fn auto_on(root: &str) -> Result<(), String> {
+    let rows = Export::open(root).and_then(|e| e.maps())?;
+    *AUTO.lock().unwrap() = Some(Auto { root: root.to_string(), rows, last: None });
+    Ok(())
+}
+
+pub fn auto_off() {
+    *AUTO.lock().unwrap() = None;
+    room_off();
+}
+
+pub fn auto_tick() {
+    let mut g = AUTO.lock().unwrap();
+    let Some(auto) = g.as_mut() else { return };
+    let Some(map) = session::hero_map() else { return };
+    // the PS2 camera and walk are for free walking: a running script (a cutscene) has the game's own camera
+    if crate::nds::script_idle() != Some(true) {
+        if auto.last.take().is_some() {
+            drop(g);
+            room_off();
+        }
+        return;
+    }
+    let scene = crate::nds::script_scene();
+    if auto.last.as_ref().is_some_and(|(m, s, _)| *m == map as u32 && *s == scene) {
+        return;
+    }
+    let want = auto.rows.iter().find(|r| r.map == map as u32).and_then(|r| r.room_for(scene.as_deref()));
+    // another scene of the same map that chooses the same room leaves the walk as it is
+    let same = auto.last.as_ref().is_some_and(|(m, _, w)| *m == map as u32 && *w == want);
+    auto.last = Some((map as u32, scene, want.clone()));
+    let root = auto.root.clone();
+    drop(g);
+    if same {
+        return;
+    }
+    match want {
+        Some((s, i)) => match room(&root, &s, i) {
+            Ok(()) => eprintln!("ps2room auto: map {} -> {} room {}", map, s, i),
+            Err(e) => {
+                eprintln!("ps2room auto: map {}: {}", map, e);
+                room_off();
+            }
+        },
+        None => {
+            room_off();
+            eprintln!("ps2room auto: map {} has no PS2 room", map);
+        }
+    }
+}
+
 /// Switches one wall (`hit`) or floor (`height`) zone of the walking room on or off, as the PS2 events `SetHitEnabled`/`SetHeightEnabled` do
 /// (`hit.md` §7: the byte's bit 0). The game's own events are PS2 scripts that this run does not execute, so zones follow by hand.
 pub fn set_zone(kind: &str, zone: usize, on: bool) -> Result<(), String> {

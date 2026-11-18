@@ -294,6 +294,30 @@ pub struct MapRow {
     pub status: String,
     pub confidence: String,
     pub chapter: String,
+    /// The primary room: its Scene3D index in `ps2_scene` (`ps2_scene3d_index`), if the area has one.
+    pub primary: Option<usize>,
+    /// Every room that holds the area's model (`ps2_rooms`, `R13#12;...`): scene and room index.
+    pub rooms: Vec<(String, usize)>,
+}
+
+impl MapRow {
+    /// The room of this area for the DS scene `ds_scene` (`C13_12`): the candidate of that scene's chapter (the DS chapter `Cnn`
+    /// is PS2 `OP` for 0, `Rnn` up to 13, `R(nn+1)` from 14, `R14` being absent), else the primary one (`Y-38`'s rule).
+    pub fn room_for(&self, ds_scene: Option<&str>) -> Option<(String, usize)> {
+        let chapter = ds_scene.and_then(|s| s.strip_prefix('C')).and_then(|s| s.get(..2)).and_then(|n| n.parse::<u32>().ok());
+        let ps2 = chapter.map(|n| match n {
+            0 => "OP".to_string(),
+            1..=13 => format!("R{:02}", n),
+            _ => format!("R{:02}", n + 1),
+        });
+        if let Some(r) = ps2.and_then(|p| self.rooms.iter().find(|(s, _)| *s == p)) {
+            return Some(r.clone());
+        }
+        match (self.ps2_scene.as_str(), self.primary) {
+            ("", _) | (_, None) => None,
+            (s, Some(i)) => Some((s.to_string(), i)),
+        }
+    }
 }
 
 pub fn parse_maps(text: &str) -> R<Vec<MapRow>> {
@@ -301,13 +325,19 @@ pub fn parse_maps(text: &str) -> R<Vec<MapRow>> {
     let head: Vec<&str> = lines.next().ok_or("empty maps.tsv")?.split('\t').collect();
     let col = |n: &str| head.iter().position(|h| *h == n).ok_or_else(|| format!("maps.tsv has no column {}", n));
     let (a, m, s, p, st, c, ch) = (col("ds_area")?, col("ds_model")?, col("ps2_scene")?, col("ps2_model")?, col("status")?, col("confidence")?, col("chapter")?);
+    let (idx, rooms) = (head.iter().position(|h| *h == "ps2_scene3d_index"), head.iter().position(|h| *h == "ps2_rooms"));
     lines
         .filter(|l| !l.trim().is_empty())
         .map(|l| {
             let x: Vec<&str> = l.split('\t').collect();
             let get = |i: usize| x.get(i).map(|s| s.to_string()).ok_or_else(|| format!("short row: {}", l));
             let map = get(a)?.strip_prefix('A').and_then(|n| n.parse().ok()).ok_or_else(|| format!("ds_area in {}", l))?;
-            Ok(MapRow { map, ds_model: get(m)?, ps2_scene: get(s)?, ps2_model: get(p)?, status: get(st)?, confidence: get(c)?, chapter: get(ch)? })
+            let primary = idx.and_then(|i| x.get(i)).and_then(|v| v.parse().ok());
+            let rooms = rooms
+                .and_then(|i| x.get(i))
+                .map(|v| v.split(';').filter_map(|r| r.split_once('#').and_then(|(s, i)| Some((s.to_string(), i.parse().ok()?)))).collect())
+                .unwrap_or_default();
+            Ok(MapRow { map, ds_model: get(m)?, ps2_scene: get(s)?, ps2_model: get(p)?, status: get(st)?, confidence: get(c)?, chapter: get(ch)?, primary, rooms })
         })
         .collect()
 }
@@ -404,6 +434,19 @@ mod tests {
         let m = parse_maps(t).unwrap();
         assert_eq!((m[0].map, m[0].ps2_scene.as_str(), m[0].confidence.as_str()), (16, "R15", "medium"));
         assert!(parse_maps("a\tb\n").is_err());
+    }
+
+    #[test]
+    fn a_room_follows_the_ds_chapter_and_falls_back_to_the_primary() {
+        let t = "ds_area\tds_model\tps2_scene\tps2_scene3d_index\tps2_model\tstatus\tconfidence\tchapter\tps2_rooms\n\
+                 A45\tm\tR00\t1\tx\tswap\tlist\t\tR00#1;R07#2;R15#5\nA23\tm\t\t\tx\tnone\tlow\t\t\n";
+        let m = parse_maps(t).unwrap();
+        assert_eq!(m[0].room_for(Some("C07_33")), Some(("R07".into(), 2)));
+        // chapter 14 is PS2 R15; chapter 3 has no candidate: the primary
+        assert_eq!(m[0].room_for(Some("C14_06")), Some(("R15".into(), 5)));
+        assert_eq!(m[0].room_for(Some("C03_01")), Some(("R00".into(), 1)));
+        assert_eq!(m[0].room_for(None), Some(("R00".into(), 1)));
+        assert_eq!(m[1].room_for(Some("C07_33")), None);
     }
 
     /// With the real export (`SUNPETAL_EE_EXPORT=…/out/export/v1`): every scene reads, and the numbers of the notes hold.

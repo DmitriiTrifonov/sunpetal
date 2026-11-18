@@ -13,7 +13,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("value", "value [I]: story value I (default 0)"),
     ("where", "where: scene, map, place, story step"),
     ("charwalk", "charwalk SCENE [AREA]: the d-pad walks the hero by the PS2 scene's walls and floor; `charwalk off` ends it"),
-    ("ps2room", "ps2room SCENE ROOM: the PS2 camera and walk of a room of rooms.tsv together; `ps2room off` ends both"),
+    ("ps2room", "ps2room SCENE ROOM | auto: the PS2 camera and walk of a room of rooms.tsv together (auto: the room of each DS map by maps.tsv); `ps2room off` ends both"),
     ("zone", "zone hit|height N on|off: a wall or floor zone of the PS2 walk switched (the game's events do it on PS2)"),
     ("scene", "scene: the script file the game read last"),
     ("cam", "cam YAW PITCH [DX DY DZ]: the scene camera turned (degrees) and moved; `cam 0 0` is the game's"),
@@ -136,10 +136,14 @@ pub fn run(line: &str) -> Result<String, String> {
         }
         "ps2room" => {
             if w.first() == Some(&"off") {
-                crate::nativewalk::room_off();
+                crate::nativewalk::auto_off();
                 return Ok("the game's own camera and walk".into());
             }
             let root = std::env::var("SUNPETAL_EE_EXPORT").map_err(|_| "SUNPETAL_EE_EXPORT is not set")?;
+            if w.first() == Some(&"auto") {
+                crate::nativewalk::auto_on(&root)?;
+                return Ok("PS2 room follows the DS map".into());
+            }
             crate::nativewalk::room(&root, w.first().ok_or("SCENE is missing")?, num(w, 1, "ROOM", None)?)?;
             Ok("PS2 room on".into())
         }
