@@ -1177,6 +1177,11 @@ pub fn set_model_files(files: Vec<std::path::PathBuf>) {
     *gx::MODEL_FILES.lock().unwrap() = files;
 }
 
+/// The data files named by `set_model_files`.
+pub fn model_files() -> Vec<std::path::PathBuf> {
+    gx::MODEL_FILES.lock().unwrap().clone()
+}
+
 /// Draws the PS2 replacement models (`true`, the graphics level "ultimate") or leaves the DS ones; takes effect with the next swap.
 pub fn set_ultimate(on: bool) {
     nds(|d| d.gx.ult_on = on);

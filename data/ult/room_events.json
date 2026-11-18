@@ -23,5 +23,17 @@
  {"model": "no64_maze_a", "bone": 0, "map": 64, "x": [-1000000.0, 1000000.0], "z": [-1000000.0, 1000000.0], "delay": 0, "motion": "104f62d8f5", "step": null, "on_script": true, "scene": "C15_09", "call": 1},
  {"model": "no64_maze_a", "bone": 1, "map": 64, "x": [-1000000.0, 1000000.0], "z": [-1000000.0, 1000000.0], "delay": 0, "motion": "ddc7ad6978", "step": null, "on_script": true, "scene": "C15_09", "call": 1},
  {"model": "no65_maze_b", "bone": 0, "map": 65, "x": [-1000000.0, 1000000.0], "z": [-1000000.0, 1000000.0], "delay": 0, "motion": "ddc7ad6978", "step": null, "on_script": true, "scene": "C15_10", "call": 1},
- {"model": "no65_maze_b", "bone": 1, "map": 65, "x": [-1000000.0, 1000000.0], "z": [-1000000.0, 1000000.0], "delay": 0, "motion": "104f62d8f5", "step": null, "on_script": true, "scene": "C15_10", "call": 1}
+ {"model": "no65_maze_b", "bone": 1, "map": 65, "x": [-1000000.0, 1000000.0], "z": [-1000000.0, 1000000.0], "delay": 0, "motion": "104f62d8f5", "step": null, "on_script": true, "scene": "C15_10", "call": 1},
+ {"model": "no03_capsule", "bone": 4, "map": 3, "x": [-1000000.0, 1000000.0], "z": [-1000000.0, 1000000.0], "delay": 0, "motion": "2be5641f0d", "step": null, "on_script": true, "scene": "C13_12", "call": 2},
+ {"model": "no03_capsule", "bone": 5, "map": 3, "x": [-1000000.0, 1000000.0], "z": [-1000000.0, 1000000.0], "delay": 0, "motion": "96dce363d0", "step": null, "on_script": true, "scene": "C13_12", "call": 2},
+ {"model": "no03_capsule", "bone": 10, "map": 3, "x": [-1000000.0, 1000000.0], "z": [-1000000.0, 1000000.0], "delay": 0, "motion": "b36852dc1c", "step": null, "on_script": true, "scene": "C13_13", "call": 2},
+ {"model": "no03_capsule", "bone": 11, "map": 3, "x": [-1000000.0, 1000000.0], "z": [-1000000.0, 1000000.0], "delay": 0, "motion": "14af7f175d", "step": null, "on_script": true, "scene": "C13_13", "call": 2},
+ {"model": "no03_capsule", "bone": 12, "map": 3, "x": [-1000000.0, 1000000.0], "z": [-1000000.0, 1000000.0], "delay": 0, "motion": "b36852dc1c", "step": null, "on_script": true, "scene": "C13_14", "call": 2},
+ {"model": "no03_capsule", "bone": 13, "map": 3, "x": [-1000000.0, 1000000.0], "z": [-1000000.0, 1000000.0], "delay": 0, "motion": "14af7f175d", "step": null, "on_script": true, "scene": "C13_14", "call": 2},
+ {"model": "no03_capsule", "bone": 2, "map": 3, "x": [-1000000.0, 1000000.0], "z": [-1000000.0, 1000000.0], "delay": 0, "motion": "2be5641f0d", "step": null, "on_script": true, "scene": "C13_15", "call": 2},
+ {"model": "no03_capsule", "bone": 3, "map": 3, "x": [-1000000.0, 1000000.0], "z": [-1000000.0, 1000000.0], "delay": 0, "motion": "96dce363d0", "step": null, "on_script": true, "scene": "C13_15", "call": 2},
+ {"model": "no03_capsule", "bone": 8, "map": 3, "x": [-1000000.0, 1000000.0], "z": [-1000000.0, 1000000.0], "delay": 0, "motion": "b36852dc1c", "step": null, "on_script": true, "scene": "C13_16", "call": 2},
+ {"model": "no03_capsule", "bone": 9, "map": 3, "x": [-1000000.0, 1000000.0], "z": [-1000000.0, 1000000.0], "delay": 0, "motion": "14af7f175d", "step": null, "on_script": true, "scene": "C13_16", "call": 2},
+ {"model": "no03_capsule", "bone": 6, "map": 3, "x": [-1000000.0, 1000000.0], "z": [-1000000.0, 1000000.0], "delay": 0, "motion": "2be5641f0d", "step": null, "on_script": true, "scene": "C13_17", "call": 2},
+ {"model": "no03_capsule", "bone": 7, "map": 3, "x": [-1000000.0, 1000000.0], "z": [-1000000.0, 1000000.0], "delay": 0, "motion": "96dce363d0", "step": null, "on_script": true, "scene": "C13_17", "call": 2}
 ]

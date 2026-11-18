@@ -151,6 +151,16 @@ fn run() -> Result<(), String> {
         c.sections.extend(pics.sections.into_iter().filter(|s| &s.tag == b"TEXS"));
         say(&format!("  {} picture section", np));
 
+        // the room motions the table of events names (K-244): the game then needs no export
+        let events = tools.join("..").join("data").join("ult").join("room_events.json");
+        if let Ok(text) = std::fs::read_to_string(&events) {
+            let table = sunpetal_data::ps2::roomevent::parse(&text)?;
+            let motions = sunpetal_data::ps2::roomevent::collect_motions(&table, export)?;
+            let bytes = sunpetal_data::ps2::roomevent::pack_motions(&motions);
+            say(&format!("  {} room motions, {} bytes", motions.len(), bytes.len()));
+            c.add(sunpetal_data::ps2::roomevent::TAG, bytes);
+        }
+
         let roles = std::fs::read_to_string(export.join("../../assets/roles.tsv")).map_err(|e| format!("roles.tsv beside the export: {}", e))?;
         let mut iso = sunpetal_data::ps2::iso::Iso::open(std::fs::File::open(disc).map_err(|e| format!("{}: {}", disc.display(), e))?)?;
         let anim = sunpetal_data::anim::Anim::from_disc(&mut iso, &roles)?;

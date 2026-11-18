@@ -22,6 +22,8 @@ pub struct RoomEvent {
     pub on_script: bool,
     /// The DS scene whose script starts it (with `on_script`): another script on the map does not (K-242); none: any.
     pub scene: Option<String>,
+    /// With `scene`: the script's own call of `STAGEANIMATION` (1, 2, ...) that starts it; the first starts with the script (K-245).
+    pub call: u32,
 }
 
 impl RoomEvent {
@@ -59,6 +61,7 @@ pub fn parse(text: &str) -> Result<Vec<RoomEvent>, String> {
                 step: e.get("step").and_then(Value::as_i64).map(|s| s as i32),
                 on_script: e.get("on_script").and_then(Value::as_bool).unwrap_or(false),
                 scene: e.get("scene").and_then(Value::as_str).map(str::to_string),
+                call: e.get("call").and_then(Value::as_u64).unwrap_or(1) as u32,
             })
         })
         .collect()
@@ -89,6 +92,80 @@ pub fn motion_keys(text: &str) -> Result<Vec<([f32; 3], [f32; 3])>, String> {
     Ok(dense)
 }
 
+/// The data file's part of room motions (K-244): the keys of the motions the table names, so that the game needs no export.
+pub const TAG: &[u8; 4] = b"MOTN";
+
+/// Dense keys of one motion (what `motion_keys` gives).
+pub type Keys = Vec<([f32; 3], [f32; 3])>;
+
+/// The part: `sunpetal-ee`'s `SPM1` motion pack (`notes/formats/motionpack.md`), one joint per motion.
+/// `range` is the frame count (the game holds the last key after it).
+pub fn pack_motions(motions: &std::collections::BTreeMap<String, Keys>) -> Vec<u8> {
+    let mut o = b"SPM1".to_vec();
+    o.extend_from_slice(&(motions.len() as u32).to_le_bytes());
+    for (sha, keys) in motions {
+        let mut name = sha.as_bytes().to_vec();
+        name.resize(10, b'0');
+        o.extend_from_slice(&name);
+        o.extend_from_slice(&(keys.len() as u32).to_le_bytes());
+        o.extend_from_slice(&(keys.len() as u32).to_le_bytes());
+        o.extend_from_slice(&1u16.to_le_bytes());
+        o.extend_from_slice(&0u16.to_le_bytes());
+        for (p, r) in keys {
+            for v in p.iter().chain(r) {
+                o.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+    }
+    o
+}
+
+/// The motions of a part (or of `motions.bin` of `sunpetal-ee`, the same format); of several joints the first is taken.
+pub fn read_motions(b: &[u8]) -> Result<std::collections::HashMap<String, Keys>, String> {
+    if b.get(..4) != Some(b"SPM1") {
+        return Err("not a motion pack".into());
+    }
+    let at = |o: usize, n: usize| b.get(o..o + n).ok_or_else(|| "motion pack is cut short".to_string());
+    let u32at = |o: usize| at(o, 4).map(|x| u32::from_le_bytes(x.try_into().unwrap()));
+    let f32at = |o: usize| at(o, 4).map(|x| f32::from_le_bytes(x.try_into().unwrap()));
+    let (count, mut o, mut out) = (u32at(4)? as usize, 8, std::collections::HashMap::new());
+    for _ in 0..count {
+        let sha = String::from_utf8_lossy(at(o, 10)?).into_owned();
+        let frames = u32at(o + 14)? as usize;
+        let joints = u16::from_le_bytes(at(o + 18, 2)?.try_into().unwrap()) as usize;
+        o += 22;
+        let mut keys = Vec::with_capacity(frames);
+        for j in 0..joints {
+            for _ in 0..frames {
+                if j == 0 {
+                    let v = [0, 1, 2, 3, 4, 5].map(|i| f32at(o + 4 * i));
+                    let g = |i: usize| v[i].clone();
+                    keys.push(([g(0)?, g(1)?, g(2)?], [g(3)?, g(4)?, g(5)?]));
+                }
+                o += 24;
+            }
+        }
+        out.insert(sha, keys);
+    }
+    if o != b.len() {
+        return Err("motion pack has bytes left over".into());
+    }
+    Ok(out)
+}
+
+/// The motions the table names, read from an export's `motions/<sha>.json`.
+pub fn collect_motions(table: &[RoomEvent], export: &std::path::Path) -> Result<std::collections::BTreeMap<String, Keys>, String> {
+    let mut out = std::collections::BTreeMap::new();
+    for e in table {
+        if !out.contains_key(&e.motion) {
+            let path = export.join("motions").join(format!("{}.json", e.motion));
+            let text = std::fs::read_to_string(&path).map_err(|x| format!("{}: {}", path.display(), x))?;
+            out.insert(e.motion.clone(), motion_keys(&text).map_err(|x| format!("{}: {}", path.display(), x))?);
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,6 +183,33 @@ mod tests {
         // frame 1 holds frame 0
         assert_eq!(k[1].0, [0.0; 3]);
         assert_eq!(k[2].1[2], 1.5);
+    }
+
+    #[test]
+    fn the_motion_part_round_trips() {
+        let mut m = std::collections::BTreeMap::new();
+        m.insert("85bcbcd4a3".to_string(), vec![([0.0; 3], [0.0; 3]), ([1.0, 2.0, 3.0], [0.0, 0.0, 1.5])]);
+        m.insert("ab".to_string(), vec![([0.5; 3], [0.25; 3])]);
+        let b = pack_motions(&m);
+        let r = read_motions(&b).unwrap();
+        assert_eq!(r["85bcbcd4a3"], m["85bcbcd4a3"]);
+        assert_eq!(r.len(), 2);
+        assert!(read_motions(&b[..b.len() - 1]).is_err());
+    }
+
+    /// The motions of the real table: our pack carries every one of them, frame for frame like `sunpetal-ee`'s `motions.bin` (Y-48).
+    #[test]
+    fn the_real_table_packs_like_the_ee_motion_pack() {
+        let Some(root) = std::env::var_os("SUNPETAL_EE_EXPORT") else { return };
+        let root = std::path::PathBuf::from(root);
+        let Ok(text) = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/ult/room_events.json")) else { return };
+        let table = parse(&text).unwrap();
+        let mine = read_motions(&pack_motions(&collect_motions(&table, &root).unwrap())).unwrap();
+        let Ok(theirs) = std::fs::read(root.join("../../out/y48/motions.bin")) else { return };
+        let theirs = read_motions(&theirs).unwrap();
+        for (sha, keys) in &mine {
+            assert_eq!(theirs.get(sha), Some(keys), "{}", sha);
+        }
     }
 
     /// The painting of R01 (`sunpetal-ee` F-233): 61 frames, ends turned a quarter about z.

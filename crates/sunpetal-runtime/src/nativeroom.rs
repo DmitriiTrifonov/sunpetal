@@ -20,6 +20,55 @@ pub fn table() -> &'static [RoomEvent] {
     })
 }
 
+/// The motions of the data files the app named (their `MOTN` part), of `SUNPETAL_ULT_MODELS` (a data file, or a folder with
+/// `motions.bin`), read once (K-244). A motion the export has (`SUNPETAL_EE_EXPORT`) and these do not is read from it.
+#[cfg(feature = "debug-tools")]
+fn packed(sha: &str) -> Option<roomevent::Keys> {
+    static M: OnceLock<HashMap<String, roomevent::Keys>> = OnceLock::new();
+    M.get_or_init(|| {
+        let mut all = HashMap::new();
+        let mut paths: Vec<std::path::PathBuf> = std::env::var_os("SUNPETAL_ULT_MODELS").map(std::path::PathBuf::from).into_iter().collect();
+        paths.extend(crate::nds::model_files());
+        for p in paths {
+            let bytes = if p.is_dir() {
+                std::fs::read(p.join("motions.bin")).ok()
+            } else {
+                sunpetal_data::container::Container::read_only(&p, |t| t == roomevent::TAG).ok().and_then(|c| c.get(roomevent::TAG).map(|s| s.data.clone()))
+            };
+            if let Some(m) = bytes.and_then(|b| roomevent::read_motions(&b).map_err(|e| eprintln!("room motions: {}: {}", p.display(), e)).ok()) {
+                all.extend(m);
+            }
+        }
+        all
+    })
+    .get(sha)
+    .cloned()
+}
+
+/// The game's own `STAGEANIMATION` commands (the handler's entry, `docs/native-script-dispatch.csv`), counted since its script began:
+/// the Nth of a scene starts the event whose `call` is N (K-245, the second clip of a shelter).
+#[cfg(feature = "debug-tools")]
+mod calls {
+    use std::cell::Cell;
+    thread_local! {
+        static N: Cell<u32> = const { Cell::new(0) };
+        static ON: Cell<bool> = const { Cell::new(false) };
+    }
+    const HANDLER: u32 = 0x0204_9439;
+
+    pub fn install() {
+        if !ON.with(|o| o.replace(true)) {
+            crate::nds::debug::watch(9, HANDLER, |_| N.with(|n| n.set(n.get() + 1)));
+        }
+    }
+    pub fn count() -> u32 {
+        N.with(Cell::get)
+    }
+    pub fn reset() {
+        N.with(|n| n.set(0));
+    }
+}
+
 /// The bones of `model` some event moves: their vertices are kept apart, so that they can be drawn in any pose.
 pub fn animated_bones(model: &str) -> Vec<u16> {
     let mut v: Vec<u16> = table().iter().filter(|e| e.model == model).map(|e| e.bone).collect();
@@ -78,7 +127,7 @@ pub fn step_in_story(story: Option<std::cmp::Ordering>, stage: Stage, inside: bo
 }
 
 #[cfg(feature = "debug-tools")]
-type Keys = Vec<([f32; 3], [f32; 3])>;
+type Keys = roomevent::Keys;
 
 /// Per event: its stage and its motion's keys (read at the first frame; none if the export is missing).
 #[cfg(feature = "debug-tools")]
@@ -104,18 +153,35 @@ pub fn frame(rest_of: impl Fn(&str, u16) -> Option<[f32; 3]>) {
     let (Some(map), Some(pos)) = (crate::session::hero_map(), crate::session::hero_pos()) else { return };
     // the scene the game read last: the one whose script has just started, at a script's start
     let scene = crate::nds::script_scene();
+    calls::install();
     let mut states = STATES.lock().unwrap();
     while states.len() < t.len() {
         states.push(State { stage: Stage::Idle, keys: None, read: false, was_running: false });
     }
     // the DS place in 1/4096 units is the PS2's scene units over ten (this room's shift is none, K-237)
     let (x, z) = (pos[0] as f32 / 4096.0 * 10.0, pos[2] as f32 / 4096.0 * 10.0);
+    // the count of the scene's commands starts again with each script
+    static LAST: Mutex<(Option<String>, u32)> = Mutex::new((None, 0));
+    let (before, now) = {
+        let mut last = LAST.lock().unwrap();
+        if last.0 != scene {
+            last.0 = scene.clone();
+            calls::reset();
+            last.1 = 0;
+        }
+        let (before, now) = (last.1, calls::count());
+        last.1 = now;
+        (before, now)
+    };
     for (e, s) in t.iter().zip(states.iter_mut()) {
         if !s.read {
             s.read = true;
-            if let Some(root) = std::env::var_os("SUNPETAL_EE_EXPORT") {
-                let path = std::path::Path::new(&root).join("motions").join(format!("{}.json", e.motion));
-                s.keys = std::fs::read_to_string(path).ok().and_then(|t| roomevent::motion_keys(&t).ok());
+            s.keys = packed(&e.motion);
+            if s.keys.is_none() {
+                if let Some(root) = std::env::var_os("SUNPETAL_EE_EXPORT") {
+                    let path = std::path::Path::new(&root).join("motions").join(format!("{}.json", e.motion));
+                    s.keys = std::fs::read_to_string(path).ok().and_then(|t| roomevent::motion_keys(&t).ok());
+                }
             }
         }
         let Some(keys) = s.keys.as_ref().filter(|k| !k.is_empty()) else { continue };
@@ -126,6 +192,7 @@ pub fn frame(rest_of: impl Fn(&str, u16) -> Option<[f32; 3]>) {
         // a named scene decides alone: the script is the DS game's own trigger, and the zone and the map are the PS2's (the room
         // may stand shifted from the DS one, the door of A45 does by some 180 units); the model is drawn only where it stands
         let inside = match (&e.scene, e.on_script) {
+            (Some(s), true) if e.call > 1 => scene.as_ref() == Some(s) && before < e.call && e.call <= now,
             (Some(s), true) => started && scene.as_ref() == Some(s),
             (None, true) => started && map == e.map && e.holds_within(x, z, 6.0),
             _ => map == e.map && e.holds(x, z),
