@@ -1,4 +1,6 @@
 [
+ {"model": "no75_tunnel", "bone": 0, "map": 75, "x": [-1000000.0, 1000000.0], "z": [-1000000.0, 1000000.0], "delay": 10, "motion": "f0989c752e", "step": 0, "on_script": true, "scene": "C00_01", "call": 1},
+ {"model": "no69_road_loop", "bone": 0, "map": 69, "x": [-1000000.0, 1000000.0], "z": [-1000000.0, 1000000.0], "delay": 0, "motion": "22ad9f1b48", "step": null, "on_script": true, "scene": "C00_07", "call": 1},
  {"model": "no44_401r_kaigao", "bone": 2, "map": 44, "x": [-169.854, -120.623], "z": [-172.162, -140.681], "delay": 47, "motion": "85bcbcd4a3", "step": 3, "on_script": true, "scene": "C01_25", "call": 1},
  {"model": "no45_room_402e", "bone": 5, "map": 45, "x": [-148.606, -128.696], "z": [43.767, 60.073], "delay": 0, "motion": "5083f806da", "step": null, "on_script": true, "scene": "C07_33", "call": 1},
  {"model": "no45_room_402e", "bone": 6, "map": 45, "x": [-148.606, -128.696], "z": [43.767, 60.073], "delay": 0, "motion": "7de1c1479f", "step": null, "on_script": true, "scene": "C07_33", "call": 1},
