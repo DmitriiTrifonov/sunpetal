@@ -154,18 +154,28 @@ fn switches(ds_scene: &str) -> Vec<(&'static str, usize, &'static str, usize, bo
 }
 
 /// A DS scene has started: the walls and floors of the walking room that the PS2 event of that scene (found by its place) switches follow it.
-pub fn scene_started(ds_scene: &str) {
+pub fn scene_started(ds_scene: &str) -> usize {
     let mut g = WALK.lock().unwrap();
-    let Some(w) = g.as_mut() else { return };
+    let Some(w) = g.as_mut() else { return 0 };
+    let mut n = 0;
     for (scene, index, kind, zone, on) in switches(ds_scene) {
         if w.room.0 == scene && w.room.1 == index {
             match kind {
                 "hit" => w.area.hit.get_mut(zone).map(|h| h.enabled = on),
                 _ => w.area.height.get_mut(zone).map(|t| t.enabled = on),
             };
+            n += 1;
             eprintln!("ps2room: {} switches {} {} {} of {} {}", ds_scene, kind, zone, if on { "on" } else { "off" }, scene, index);
         }
     }
+    n
+}
+
+/// The walking room and which of its walls and floors are on (for the debugger): (scene, index, hit flags, height flags).
+pub fn zone_state() -> Option<(String, usize, Vec<bool>, Vec<bool>)> {
+    let g = WALK.lock().unwrap();
+    let w = g.as_ref()?;
+    Some((w.room.0.clone(), w.room.1, w.area.hit.iter().map(|h| h.enabled).collect(), w.area.height.iter().map(|t| t.enabled).collect()))
 }
 
 /// Back to the game's own camera and walk.
