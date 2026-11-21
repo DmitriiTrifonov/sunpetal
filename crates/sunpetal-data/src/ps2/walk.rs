@@ -296,6 +296,61 @@ pub fn floor_height(area: &Area3d, x: f32, z: f32) -> Option<f32> {
     })
 }
 
+/// Whether switching one zone can change where the hero walks (`kind` "hit" or "height"): a wall matters if some step
+/// on the floor ends differently with it on and off (the other walls as they are, or all on); a floor triangle matters
+/// if it covers a point no other triangle does. Sampled on a grid of at most ~40k points per zone, so a sliver thinner
+/// than the step can be missed. Used to tell the zone events that matter from decoration (`docs/NEXT.md`, Y-50).
+pub fn zone_matters(area: &Area3d, kind: &str, zone: usize) -> bool {
+    let mut all = area.clone();
+    all.height.iter_mut().for_each(|t| t.enabled = true);
+    let bbox =
+        |pts: &mut dyn Iterator<Item = [f32; 2]>| pts.fold([f32::MAX, f32::MAX, f32::MIN, f32::MIN], |b, p| [b[0].min(p[0]), b[1].min(p[1]), b[2].max(p[0]), b[3].max(p[1])]);
+    let grid = |b: [f32; 4], pad: f32| {
+        let (x0, z0, x1, z1) = (b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad);
+        let step = 2.0f32.max(((x1 - x0) * (z1 - z0) / 40000.0).sqrt());
+        let (nx, nz) = (((x1 - x0) / step) as i32 + 1, ((z1 - z0) / step) as i32 + 1);
+        (0..nx).flat_map(move |i| (0..nz).map(move |j| [x0 + i as f32 * step, z0 + j as f32 * step])).collect::<Vec<_>>()
+    };
+    match kind {
+        "height" => {
+            let Some(t) = area.height.get(zone) else { return false };
+            if t.points.len() != 3 {
+                return false;
+            }
+            let b = bbox(&mut t.points.iter().map(|p| [p[0], p[2]]));
+            let mut off = all.clone();
+            off.height[zone].enabled = false;
+            grid(b, 0.0).into_iter().any(|p| floor_height(&all, p[0], p[1]).is_some() && floor_height(&off, p[0], p[1]).is_none())
+        }
+        "hit" => {
+            let Some(h) = area.hit.get(zone) else { return false };
+            let b = match &h.shape {
+                HitShape::Rect { x0, z0, dx, dz } => [*x0, *z0, x0 + dx, z0 + dz],
+                HitShape::Ellipse { cx, cz, rx, rz } => [cx - rx, cz - rz, cx + rx, cz + rz],
+                HitShape::Polygon(pts) => bbox(&mut pts.iter().copied()),
+            };
+            let pts = grid(b, 4.0);
+            let step = 2.0;
+            let dirs = [[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, -1.0], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]];
+            // the bases: the walls as the room starts with, and all of them on
+            let mut every = all.clone();
+            every.hit.iter_mut().for_each(|h| h.enabled = true);
+            [&all, &every].iter().any(|base| {
+                let (mut on, mut off) = ((*base).clone(), (*base).clone());
+                on.hit[zone].enabled = true;
+                off.hit[zone].enabled = false;
+                pts.iter().filter(|p| floor_height(&all, p[0], p[1]).is_some()).any(|p| {
+                    dirs.iter().any(|d| {
+                        let q = [p[0] + d[0] * step, p[1] + d[1] * step];
+                        collide(&on, *p, q) != collide(&off, *p, q)
+                    })
+                })
+            })
+        }
+        _ => false,
+    }
+}
+
 /// One frame of the hero's walk on the ground: `pos` (x, y, z) goes by the stick and the walls, y to the floor.
 pub fn walk_frame(area: &Area3d, pos: [f32; 3], stick: (i8, i8), camera_correction: f32, s: Speeds) -> [f32; 3] {
     let st = stick_step(stick, camera_correction, s);
@@ -479,5 +534,53 @@ mod tests {
         }
         assert!(n > 100, "{n} frames");
         assert!(worst < 1e-4, "worst {worst}");
+    }
+
+    #[test]
+    fn a_wall_matters_only_where_the_hero_can_walk() {
+        let tri = |x: f32| HeightTri { enabled: true, points: vec![[x, 0.0, 0.0, 1.0], [x + 100.0, 0.0, 0.0, 1.0], [x, 0.0, 100.0, 1.0]] };
+        let mut a = area(vec![rect(10.0, 10.0, 5.0, 5.0), rect(500.0, 500.0, 5.0, 5.0)]);
+        a.height = vec![tri(0.0)];
+        assert!(zone_matters(&a, "hit", 0));
+        assert!(!zone_matters(&a, "hit", 1));
+        a.height.push(tri(0.0));
+        assert!(!zone_matters(&a, "height", 0), "a floor under another floor");
+        a.height.push(tri(300.0));
+        assert!(zone_matters(&a, "height", 2));
+    }
+
+    /// With the real export (`SUNPETAL_EE_EXPORT`): which zones with on/off events matter for walking, to `build/zones/relevance.tsv`.
+    #[test]
+    fn the_real_zones_with_events_are_sorted_by_whether_they_matter() {
+        let Some(root) = std::env::var_os("SUNPETAL_EE_EXPORT") else { return };
+        let root = std::path::PathBuf::from(root);
+        let zones = std::fs::read_to_string(root.join("zones.tsv")).unwrap();
+        let e = super::super::export::Export::open(&root).unwrap();
+        let h: Vec<&str> = zones.lines().next().unwrap().split('\t').collect();
+        let ix = |n: &str| h.iter().position(|x| *x == n).unwrap();
+        let (cs, c3, ck, cz, con, coff) = (ix("scene"), ix("scene3d"), ix("kind"), ix("zone"), ix("on_events"), ix("off_events"));
+        let mut cache: std::collections::HashMap<(String, usize), Area3d> = Default::default();
+        let mut out = String::from("scene\tscene3d\tkind\tzone\tmatters\n");
+        let (mut n, mut m) = (0, 0);
+        for row in zones.lines().skip(1) {
+            let c: Vec<&str> = row.split('\t').collect();
+            if c.len() <= coff || !matches!(c[ck], "hit" | "height") || (c[con].is_empty() && c[coff].is_empty()) {
+                continue;
+            }
+            let (scene, s3, z) = (c[cs].to_string(), c[c3].parse::<usize>().unwrap(), c[cz].parse::<usize>().unwrap());
+            let area = cache.entry((scene.clone(), s3)).or_insert_with(|| {
+                let mut a = e.scene(&scene).unwrap().areas.into_iter().find(|a| a.index as usize == s3).unwrap();
+                apply_initial_zones(&mut a, &zones, &scene, s3);
+                a
+            });
+            let yes = zone_matters(area, c[ck], z);
+            n += 1;
+            m += yes as usize;
+            out += &format!("{}\t{}\t{}\t{}\t{}\n", scene, s3, c[ck], z, yes as u8);
+        }
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../build/zones");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("relevance.tsv"), out).unwrap();
+        eprintln!("zones with events: {}, matter for walking: {}", n, m);
     }
 }
