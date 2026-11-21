@@ -4,7 +4,7 @@
 use crate::{nativecam, session};
 use std::sync::Mutex;
 use sunpetal_data::ps2::export::{Area3d, Export};
-use sunpetal_data::ps2::walk::{walk_frame, Speeds, Walker, SELEKA};
+use sunpetal_data::ps2::walk::{fast_run_allowed, walk_frame, Speeds, Walker, SELEKA, SELEKA_FAST};
 
 /// The PS2 -> DS shift of the world; the export's units are tenths of it.
 const SHIFT: [f64; 3] = [16.0, -18.5996, -13.0];
@@ -24,6 +24,8 @@ struct Walk {
     written: Option<[i32; 3]>,
     /// the face (0 is +z, π/2 is +x) and the turn it is in
     walker: Walker,
+    /// the fast run is let by an event and the run mode is on (`WChara+0xcd`, `+0x13` bit 1; the game's events set them, here `fastrun on`)
+    fast_mode: bool,
 }
 static WALK: Mutex<Option<Walk>> = Mutex::new(None);
 
@@ -35,7 +37,7 @@ pub fn enable(root: &str, scene: &str, area: usize) -> Result<(), String> {
     // the walls and floors a new game has on (zones.tsv); the events that switch them later are not followed
     let zones = std::fs::read_to_string(std::path::Path::new(root).join("zones.tsv")).map_err(|e| format!("zones.tsv: {}", e))?;
     sunpetal_data::ps2::walk::apply_initial_zones(&mut area, &zones, scene, index);
-    *WALK.lock().unwrap() = Some(Walk { area, room: (scene.to_string(), index), last: None, written: None, walker: Walker::default() });
+    *WALK.lock().unwrap() = Some(Walk { area, room: (scene.to_string(), index), fast_mode: false, last: None, written: None, walker: Walker::default() });
     Ok(())
 }
 
@@ -178,6 +180,17 @@ pub fn zone_state() -> Option<(String, usize, Vec<bool>, Vec<bool>)> {
     Some((w.room.0.clone(), w.room.1, w.area.hit.iter().map(|h| h.enabled).collect(), w.area.height.iter().map(|t| t.enabled).collect()))
 }
 
+/// The fast run allowed or not (`walk.md` §3a); its zones that forbid it stay as the room has them.
+pub fn set_fast_mode(on: bool) -> Result<(), String> {
+    WALK.lock().unwrap().as_mut().ok_or("the PS2 walk is off")?.fast_mode = on;
+    Ok(())
+}
+
+/// The hero's move state the last frame left (0 stands, 1 walks, 2 runs, 3 runs fast), while the PS2 walk is on: the camera's dead zone follows it.
+pub fn move_state() -> Option<u8> {
+    WALK.lock().unwrap().as_ref().map(|w| w.walker.state)
+}
+
 /// Back to the game's own camera and walk.
 pub fn room_off() {
     nativecam::clear_ps2();
@@ -208,10 +221,12 @@ pub fn frame(keys: u32) -> u32 {
             w.walker = Walker { face: session::hero_angle().map_or(0.0, |a| (a & 0xFFFF) as f32 / 65536.0 * std::f32::consts::TAU), ..Walker::default() };
         }
         // the game's state machine: the first frame of a walk and of a big turn stand, a turn holds the walk speed
-        let used = w.walker.frame(stick);
+        let fast = w.fast_mode && fast_run_allowed(&w.area, from);
+        let used = w.walker.frame_fast(stick, fast);
         let to = match used {
             0 => from,
             1 => walk_frame(&w.area, from, stick, nativecam::yaw(), Speeds { walk: 0.25, run: 0.25 }),
+            3 => walk_frame(&w.area, from, stick, nativecam::yaw(), Speeds { walk: SELEKA.walk, run: SELEKA_FAST }),
             _ => walk_frame(&w.area, from, stick, nativecam::yaw(), Speeds { walk: SELEKA.walk, run: SELEKA.run }),
         };
         let out = [(to[0] as f64 / 10.0 + SHIFT[0]) * 4096.0, (to[1] as f64 / 10.0 + SHIFT[1]) * 4096.0, (to[2] as f64 / 10.0 + SHIFT[2]) * 4096.0];

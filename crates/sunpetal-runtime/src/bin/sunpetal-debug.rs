@@ -185,6 +185,10 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
         }
         // zones: the walking room's walls (hit) and floors (height) that are on; scenestart SCENE: what the DS scene's event switches in the room, without playing the scene
         "zones" => done(json!(sunpetal_runtime::nativewalk::zone_state().map(|(sc, i, hit, height)| json!({"room": format!("{} {}", sc, i), "hit_on": hit.iter().enumerate().filter(|x| *x.1).map(|x| x.0).collect::<Vec<_>>(), "height_on": height.iter().enumerate().filter(|x| *x.1).map(|x| x.0).collect::<Vec<_>>()})))),
+        "fastrun" => {
+            sunpetal_runtime::nativewalk::set_fast_mode(w.first() == Some(&"on"))?;
+            done(json!({"move_state": sunpetal_runtime::nativewalk::move_state()}))
+        }
         "scenestart" => done(json!({"switched": sunpetal_runtime::nativewalk::scene_started(w.first().ok_or("SCENE is missing")?)})),
         "charwalk" => {
             // charwalk SCENE [AREA] / charwalk off: the d-pad walks the hero by the PS2 scene (K-236)

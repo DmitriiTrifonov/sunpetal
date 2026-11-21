@@ -14,6 +14,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("where", "where: scene, map, place, story step"),
     ("charwalk", "charwalk SCENE [AREA]: the d-pad walks the hero by the PS2 scene's walls and floor; `charwalk off` ends it"),
     ("ps2room", "ps2room SCENE ROOM | auto: the PS2 camera and walk of a room of rooms.tsv together (auto: the room of each DS map by maps.tsv); `ps2room off` ends both"),
+    ("fastrun", "fastrun on|off: the fast run of the PS2 walk allowed (an event does it on PS2; zones near event points still forbid it)"),
     ("zone", "zone hit|height N on|off: a wall or floor zone of the PS2 walk switched (the game's events do it on PS2)"),
     ("scene", "scene: the script file the game read last"),
     ("cam", "cam YAW PITCH [DX DY DZ]: the scene camera turned (degrees) and moved; `cam 0 0` is the game's"),
@@ -146,6 +147,14 @@ pub fn run(line: &str) -> Result<String, String> {
             }
             crate::nativewalk::room(&root, w.first().ok_or("SCENE is missing")?, num(w, 1, "ROOM", None)?)?;
             Ok("PS2 room on".into())
+        }
+        "fastrun" => {
+            crate::nativewalk::set_fast_mode(match w.first() {
+                Some(&"on") => true,
+                Some(&"off") => false,
+                _ => return Err("fastrun on|off".into()),
+            })?;
+            Ok("fast run set".into())
         }
         "zone" => {
             let on = match w.get(2) {

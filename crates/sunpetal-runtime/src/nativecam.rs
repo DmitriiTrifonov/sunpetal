@@ -172,7 +172,15 @@ fn follow_frame(f: &mut Follow, p: &mut Ps2, s: [f32; 3]) {
     } else if path.flag & 2 != 0 {
         cy.follow_path(path.rotation(t).map_or(0.0, |r| r[1]), f.delay);
     } else {
-        cy.look(look, if path.flag & 8 != 0 { 10000.0 } else { 24.0 });
+        // the dead zone's goal: wide with the path's bit 3, 8 while the hero runs fast (his state of the last frame), else 24 (`camera.md`, Y-52)
+        let goal = if path.flag & 8 != 0 {
+            10000.0
+        } else if fast_run() {
+            8.0
+        } else {
+            24.0
+        };
+        cy.look(look, goal);
     }
     let held = cy.yaw;
     // ours is the game's yaw turned: π - yaw (the same view)
@@ -275,6 +283,18 @@ unsafe extern "C" fn after(c: *mut Cpu) {
 
 pub fn install() {
     crate::machine(|m| m.after_fn(9, LOOKAT, after));
+}
+
+/// The hero runs fast (his move state of the last frame is 3): only the PS2 walk knows it.
+fn fast_run() -> bool {
+    #[cfg(feature = "debug-tools")]
+    {
+        crate::nativewalk::move_state() == Some(3)
+    }
+    #[cfg(not(feature = "debug-tools"))]
+    {
+        false
+    }
 }
 
 #[cfg(test)]

@@ -12,10 +12,15 @@ pub fn apply_initial_zones(area: &mut Area3d, zones_tsv: &str, scene: &str, scen
     for t in &mut area.height {
         t.enabled = false;
     }
+    for e in &mut area.events {
+        e.enabled = false;
+        e.refer_enabled = false;
+    }
     let mut rows = zones_tsv.lines();
     let Some(head) = rows.next() else { return };
     let col = |n: &str| head.split('\t').position(|h| h == n);
     let (Some(cs), Some(c3), Some(ck), Some(cz), Some(ce)) = (col("scene"), col("scene3d"), col("kind"), col("zone"), col("initial_enabled")) else { return };
+    let cb = col("initial_bits");
     for row in rows {
         let c: Vec<&str> = row.split('\t').collect();
         if c.len() <= ce || c[cs] != scene || c[c3].parse() != Ok(scene3d) {
@@ -25,6 +30,11 @@ pub fn apply_initial_zones(area: &mut Area3d, zones_tsv: &str, scene: &str, scen
         match c[ck] {
             "hit" => area.hit.get_mut(z).iter_mut().for_each(|h| h.enabled = on),
             "height" => area.height.get_mut(z).iter_mut().for_each(|t| t.enabled = on),
+            // the save byte of an event zone: bit 0 on, bit 1 its reference point on
+            "event" => {
+                let bits = cb.and_then(|b| c.get(b)).and_then(|v| v.parse::<u32>().ok()).unwrap_or(on as u32);
+                area.events.get_mut(z).iter_mut().for_each(|e| (e.enabled, e.refer_enabled) = (bits & 1 != 0, bits & 2 != 0));
+            }
             _ => {}
         }
     }
@@ -58,6 +68,24 @@ pub struct Speeds {
 /// Seleka's (R01): `GIG+0x20 = 0.1` makes walk 0.25 and run 0.5 a frame (`walk.md` §3).
 pub const SELEKA: Speeds = Speeds { walk: 0.25, run: 0.5 };
 
+/// The fast run's speed for Seleka: `FastRunSpeed` 14 times `GIG+0x20` 0.1 (`walk.md` §3).
+pub const SELEKA_FAST: f32 = 1.4;
+
+/// Whether `AutoFastRun` leaves the fast run allowed at the hero `hero` (x, y, z): every event zone that is on, with its reference point on, an
+/// event and a static condition bit 0 clear forbids it within 150 units (the plane x-z; y too when condition bit 3 is set), `walk.md` §3a.
+/// Zones whose point follows a character or a model (`refer_type` 1, 2: a joint) are not read here and do not forbid.
+pub fn fast_run_allowed(area: &Area3d, hero: [f32; 3]) -> bool {
+    !area.events.iter().any(|e| {
+        let y = if e.condition & 8 != 0 { (e.refer[1] - hero[1]).powi(2) } else { 0.0 };
+        e.enabled
+            && e.refer_enabled
+            && e.refer_type == 0
+            && e.event_id >= 0
+            && e.condition & 1 == 0
+            && (e.refer[0] - hero[0]).powi(2) + (e.refer[2] - hero[2]).powi(2) + y < 22500.0
+    })
+}
+
 /// The step the stick `(dx, dy)` makes in a frame, relative to the camera (`angle = atan2(dx, dy) - π - correction`),
 /// as `(x, z)`; none when the stick rests.
 pub fn stick_step(stick: (i8, i8), camera_correction: f32, s: Speeds) -> [f32; 2] {
@@ -82,13 +110,18 @@ pub fn stick_direction(stick: (i8, i8)) -> Option<f32> {
 pub struct Walker {
     pub face: f32,
     pub turn: Option<Turn>,
-    /// 0 stands, 1 walks (a turn goes on), 2 free to run
+    /// 0 stands, 1 walks (a turn goes on), 2 free to run, 3 the fast run (`MoveState` of the game)
     pub state: u8,
 }
 
 impl Walker {
     /// One frame for the stick; returns the state the step of this frame goes by (0 no step, 1 walk speed, 2 the stick's own).
     pub fn frame(&mut self, stick: (i8, i8)) -> u8 {
+        self.frame_fast(stick, false)
+    }
+
+    /// The same, with the fast run `fast` (allowed and on: `isFastRunMode`, `walk.md` §3a): free of a turn and the stick past 120, the state is 3.
+    pub fn frame_fast(&mut self, stick: (i8, i8), fast: bool) -> u8 {
         let used = self.state;
         match stick_direction(stick) {
             None => {
@@ -98,7 +131,13 @@ impl Walker {
             Some(target) => {
                 self.face = face_step(&mut self.turn, self.face, target);
                 let running = self.turn.is_some_and(|t| t.done < t.total);
-                self.state = if running { 1 } else { 2 };
+                self.state = if running {
+                    1
+                } else if fast && (stick.0 as f32).hypot(stick.1 as f32) > 120.0 {
+                    3
+                } else {
+                    2
+                };
             }
         }
         used
@@ -360,11 +399,11 @@ pub fn walk_frame(area: &Area3d, pos: [f32; 3], stick: (i8, i8), camera_correcti
 
 #[cfg(test)]
 mod tests {
-    use super::super::export::{HeightTri, Hit};
+    use super::super::export::{EventZone, HeightTri, Hit};
     use super::*;
 
     fn area(hit: Vec<Hit>) -> Area3d {
-        Area3d { index: 0, record: 0, hit, height: vec![] }
+        Area3d { index: 0, record: 0, hit, height: vec![], events: vec![] }
     }
 
     fn rect(x0: f32, z0: f32, dx: f32, dz: f32) -> Hit {
@@ -582,5 +621,39 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("relevance.tsv"), out).unwrap();
         eprintln!("zones with events: {}, matter for walking: {}", n, m);
+    }
+
+    #[test]
+    fn an_event_point_forbids_the_fast_run_within_150_units() {
+        // `y22/fastrun_check.tsv`: a point 149 away forbids, 151 and 200 allow, none is allowed
+        let zone = |d: f32| EventZone { enabled: true, refer_enabled: true, refer: [d, 99.0, 0.0], refer_type: 0, condition: 0, event_id: 3 };
+        let mut a = area(vec![]);
+        assert!(fast_run_allowed(&a, [0.0; 3]));
+        a.events = vec![zone(149.0)];
+        assert!(!fast_run_allowed(&a, [0.0; 3]), "149 forbids; y does not count");
+        a.events = vec![zone(151.0)];
+        assert!(fast_run_allowed(&a, [0.0; 3]));
+        a.events = vec![EventZone { enabled: false, ..zone(10.0) }];
+        assert!(fast_run_allowed(&a, [0.0; 3]), "a zone that is off does not forbid");
+        a.events = vec![EventZone { condition: 8, ..zone(10.0) }];
+        assert!(fast_run_allowed(&a, [0.0, 0.0, 0.0]) == ((99.0f32).powi(2) + 100.0 >= 22500.0), "y counts with condition bit 3");
+    }
+
+    #[test]
+    fn the_fast_run_comes_after_the_turn_and_only_with_the_stick_pushed_far() {
+        // `y22`: a turn (state 1) first, then state 3 while the stick is at the end; a half-pushed stick runs plain
+        let mut w = Walker::default();
+        let mut seen = vec![];
+        for _ in 0..40 {
+            seen.push(w.frame_fast((127, 0), true));
+        }
+        assert_eq!(seen[0], 0);
+        assert!(seen.contains(&1) && *seen.last().unwrap() == 3);
+        assert!(seen.iter().skip_while(|s| **s != 3).all(|s| *s == 3), "once fast, it stays");
+        let mut w = Walker::default();
+        let plain: Vec<u8> = (0..40).map(|_| w.frame_fast((100, 0), true)).collect();
+        assert!(!plain.contains(&3));
+        let mut w = Walker::default();
+        assert!((0..40).all(|_| w.frame_fast((127, 0), false) != 3), "not allowed: never");
     }
 }

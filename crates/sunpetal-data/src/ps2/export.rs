@@ -188,6 +188,19 @@ pub struct HeightTri {
     pub points: Vec<[f32; 4]>,
 }
 
+/// An event zone of a Scene3D record, as far as the walk needs it: its reference point keeps the fast run away (`walk.md` §3a).
+#[derive(Clone, Debug, PartialEq)]
+pub struct EventZone {
+    /// the save byte's bit 0 (the zone is on) and bit 1 (its reference point is on)
+    pub enabled: bool,
+    pub refer_enabled: bool,
+    pub refer: [f32; 3],
+    /// 0 the point of the record, 1 a character, 2 a model (the last two follow a joint, not read here)
+    pub refer_type: u32,
+    pub condition: u32,
+    pub event_id: i32,
+}
+
 /// The collision of one 3D scene record.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Area3d {
@@ -195,6 +208,7 @@ pub struct Area3d {
     pub record: u32,
     pub hit: Vec<Hit>,
     pub height: Vec<HeightTri>,
+    pub events: Vec<EventZone>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -246,7 +260,22 @@ pub fn parse_scene(text: &str) -> R<SceneData> {
             let height = a.get("height").and_then(Value::as_array).map_or(Ok(Vec::new()), |l| {
                 l.iter().map(|t| Ok(HeightTri { enabled: u(t, "enabled")? != 0, points: arr(t, "points")?.iter().map(floats::<4>).collect::<R<_>>()? })).collect::<R<Vec<_>>>()
             })?;
-            Ok(Area3d { index: u(a, "index")?, record: u(a, "record")?, hit: hits, height })
+            let events = a.get("event").and_then(Value::as_array).map_or(Vec::new(), |l| {
+                l.iter()
+                    .map(|e| EventZone {
+                        enabled: false,
+                        refer_enabled: false,
+                        refer: e.get("refer_point").and_then(Value::as_array).map_or([0.0; 3], |p| {
+                            let g = |i: usize| p.get(i).and_then(Value::as_f64).unwrap_or(0.0) as f32;
+                            [g(0), g(1), g(2)]
+                        }),
+                        refer_type: e.get("refer_type").and_then(Value::as_u64).unwrap_or(0) as u32,
+                        condition: e.get("condition").and_then(Value::as_u64).unwrap_or(0) as u32,
+                        event_id: e.get("event_id").and_then(Value::as_i64).unwrap_or(-1) as i32,
+                    })
+                    .collect()
+            });
+            Ok(Area3d { index: u(a, "index")?, record: u(a, "record")?, hit: hits, height, events })
         })
         .collect::<R<_>>()?;
     let light = match v.get("light").filter(|l| !l.is_null()) {
