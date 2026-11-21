@@ -148,7 +148,7 @@ fn switches(ds_scene: &str) -> Vec<(&'static str, usize, &'static str, usize, bo
         .skip(1)
         .filter_map(|l| {
             let c: Vec<&str> = l.split('\t').collect();
-            (c.len() == 6 && c[0] == ds_scene).then(|| Some((c[1], c[2].parse().ok()?, c[3], c[4].parse().ok()?, c[5] == "on")))?
+            (c.len() == 7 && c[0] == ds_scene).then(|| Some((c[1], c[2].parse().ok()?, c[3], c[4].parse().ok()?, c[5] == "on")))?
         })
         .collect()
 }

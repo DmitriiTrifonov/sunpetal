@@ -67,14 +67,20 @@ for r in csv.DictReader(open(EX+'/../../y50/zone_events.tsv'),delimiter='\t'):
     if r['confidence']!='unknown': old.add((r['scene'],r['scene3d'],r['kind'],r['zone']))
 print('zones new over the text anchors:',len(czs-old),'of',len(czs))
 
-# the table the runtime reads: what a DS scene switches in a PS2 room (data/ult/zone_switch.tsv); a zone both on and off by the same scene is left out
+# the table the runtime reads: what a DS scene switches in a PS2 room (data/ult/zone_switch.tsv). A zone one event both turns on and off
+# ends as the last switch by pc (the event runs through; branches are not followed, so this is a guess, column `rule` = last);
+# a zone switched by several events of the scene with both states is left out (the order of the events is not known)
 sw={}
 for r in csv.DictReader(open(EX+'/../../y50/zone_events.tsv'),delimiter='\t'):
     k=(r['scene'],int(r['event']))
     if k in good:
         key=(good[k][0],r['scene'],r['scene3d'],r['kind'],r['zone'])
-        sw.setdefault(key,set()).add(r['onoff'])
-rows=sorted((k,next(iter(v))) for k,v in sw.items() if len(v)==1)
+        sw.setdefault(key,[]).append((int(r['event']),int(r['pc']),r['onoff']))
+rows=[]
+for k,v in sorted(sw.items()):
+    states={x[2] for x in v}
+    if len(states)==1: rows.append((k,v[0][2],'only'))
+    elif len({x[0] for x in v})==1: rows.append((k,max(v,key=lambda x:x[1])[2],'last'))
 os.makedirs('data/ult',exist_ok=True)
-open('data/ult/zone_switch.tsv','w').write('ds_scene\tps2_scene\tscene3d\tkind\tzone\tonoff\n'+''.join('\t'.join(k)+'\t'+v+'\n' for k,v in rows))
-print('zone_switch rows',len(rows),'dropped as both',sum(1 for v in sw.values() if len(v)>1))
+open('data/ult/zone_switch.tsv','w').write('ds_scene\tps2_scene\tscene3d\tkind\tzone\tonoff\trule\n'+''.join('\t'.join(k)+'\t'+v+'\t'+rule+'\n' for k,v,rule in rows))
+print('zone_switch rows',len(rows),'by last',sum(1 for r in rows if r[2]=='last'),'left out',len(sw)-len(rows))
