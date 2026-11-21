@@ -16,6 +16,8 @@ const DOWN: u32 = 1 << 7;
 
 struct Walk {
     area: Area3d,
+    /// the room: its PS2 scene and Scene3D index
+    room: (String, usize),
     /// where the hero was put last (export units), to start the next step from
     last: Option<[f32; 3]>,
     /// the DS place written last, to tell a move of the game's (a new map) from ours
@@ -33,7 +35,7 @@ pub fn enable(root: &str, scene: &str, area: usize) -> Result<(), String> {
     // the walls and floors a new game has on (zones.tsv); the events that switch them later are not followed
     let zones = std::fs::read_to_string(std::path::Path::new(root).join("zones.tsv")).map_err(|e| format!("zones.tsv: {}", e))?;
     sunpetal_data::ps2::walk::apply_initial_zones(&mut area, &zones, scene, index);
-    *WALK.lock().unwrap() = Some(Walk { area, last: None, written: None, walker: Walker::default() });
+    *WALK.lock().unwrap() = Some(Walk { area, room: (scene.to_string(), index), last: None, written: None, walker: Walker::default() });
     Ok(())
 }
 
@@ -75,6 +77,18 @@ pub fn auto_off() {
 }
 
 pub fn auto_tick() {
+    // a new DS scene read: the zones its event switches (the room's own, whether chosen by hand or by `auto`)
+    static SEEN: Mutex<Option<String>> = Mutex::new(None);
+    let now = crate::nds::script_scene();
+    {
+        let mut seen = SEEN.lock().unwrap();
+        if *seen != now {
+            *seen = now.clone();
+            if let Some(s) = &now {
+                scene_started(s);
+            }
+        }
+    }
     let mut g = AUTO.lock().unwrap();
     let Some(auto) = g.as_mut() else { return };
     let Some(map) = session::hero_map() else { return };
@@ -127,6 +141,33 @@ pub fn set_zone(kind: &str, zone: usize, on: bool) -> Result<(), String> {
     .ok_or_else(|| format!("the room has no {} zone {}", kind, zone))
 }
 
+/// The zone switches a DS scene makes (`data/ult/zone_switch.tsv`, from `tools/ult/event_match.py`): (PS2 scene, room, kind, zone, on).
+fn switches(ds_scene: &str) -> Vec<(&'static str, usize, &'static str, usize, bool)> {
+    static T: &str = include_str!("../../../data/ult/zone_switch.tsv");
+    T.lines()
+        .skip(1)
+        .filter_map(|l| {
+            let c: Vec<&str> = l.split('\t').collect();
+            (c.len() == 6 && c[0] == ds_scene).then(|| Some((c[1], c[2].parse().ok()?, c[3], c[4].parse().ok()?, c[5] == "on")))?
+        })
+        .collect()
+}
+
+/// A DS scene has started: the walls and floors of the walking room that the PS2 event of that scene (found by its place) switches follow it.
+pub fn scene_started(ds_scene: &str) {
+    let mut g = WALK.lock().unwrap();
+    let Some(w) = g.as_mut() else { return };
+    for (scene, index, kind, zone, on) in switches(ds_scene) {
+        if w.room.0 == scene && w.room.1 == index {
+            match kind {
+                "hit" => w.area.hit.get_mut(zone).map(|h| h.enabled = on),
+                _ => w.area.height.get_mut(zone).map(|t| t.enabled = on),
+            };
+            eprintln!("ps2room: {} switches {} {} {} of {} {}", ds_scene, kind, zone, if on { "on" } else { "off" }, scene, index);
+        }
+    }
+}
+
 /// Back to the game's own camera and walk.
 pub fn room_off() {
     nativecam::clear_ps2();
@@ -177,4 +218,16 @@ pub fn frame(keys: u32) -> u32 {
         }
     }
     keys & !(RIGHT | LEFT | UP | DOWN)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_scene_gives_its_zone_switches_and_a_stranger_gives_none() {
+        let s = switches("C02_04");
+        assert!(s.contains(&("R02", 0, "height", 2, false)) && s.contains(&("R02", 0, "height", 0, true)));
+        assert!(switches("no such scene").is_empty());
+    }
 }

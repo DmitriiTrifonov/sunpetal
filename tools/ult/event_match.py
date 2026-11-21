@@ -66,3 +66,15 @@ old=set()
 for r in csv.DictReader(open(EX+'/../../y50/zone_events.tsv'),delimiter='\t'):
     if r['confidence']!='unknown': old.add((r['scene'],r['scene3d'],r['kind'],r['zone']))
 print('zones new over the text anchors:',len(czs-old),'of',len(czs))
+
+# the table the runtime reads: what a DS scene switches in a PS2 room (data/ult/zone_switch.tsv); a zone both on and off by the same scene is left out
+sw={}
+for r in csv.DictReader(open(EX+'/../../y50/zone_events.tsv'),delimiter='\t'):
+    k=(r['scene'],int(r['event']))
+    if k in good:
+        key=(good[k][0],r['scene'],r['scene3d'],r['kind'],r['zone'])
+        sw.setdefault(key,set()).add(r['onoff'])
+rows=sorted((k,next(iter(v))) for k,v in sw.items() if len(v)==1)
+os.makedirs('data/ult',exist_ok=True)
+open('data/ult/zone_switch.tsv','w').write('ds_scene\tps2_scene\tscene3d\tkind\tzone\tonoff\n'+''.join('\t'.join(k)+'\t'+v+'\n' for k,v in rows))
+print('zone_switch rows',len(rows),'dropped as both',sum(1 for v in sw.values() if len(v)>1))
