@@ -25,6 +25,8 @@ struct Walk {
     walker: Walker,
     /// the automatic event zones the hero stood in last frame (an event fires on walking in)
     inside: Vec<usize>,
+    /// the stairs' floor the zones were last set for (map A30)
+    floor: Option<u32>,
 }
 static WALK: Mutex<Option<Walk>> = Mutex::new(None);
 
@@ -81,7 +83,7 @@ pub fn enable(root: &str, scene: &str, area: usize) -> Result<(), String> {
     sunpetal_data::ps2::walk::apply_initial_zones(&mut area, &zones, scene, index);
     // the room's init event sets the run modes on entering it
     apply_run_sets(&run_sets(Some(&format!("{}#{}", scene, index)), None), &format!("{} {}", scene, index));
-    *WALK.lock().unwrap() = Some(Walk { area, room: (scene.to_string(), index), last: None, written: None, walker: Walker::default(), inside: Vec::new() });
+    *WALK.lock().unwrap() = Some(Walk { area, room: (scene.to_string(), index), last: None, written: None, walker: Walker::default(), inside: Vec::new(), floor: None });
     Ok(())
 }
 
@@ -208,6 +210,44 @@ fn triggers(scene: &str, index: usize, event: i32) -> Vec<(&'static str, usize, 
         .collect()
 }
 
+/// The hotel's stairs: on DS one map (A30) for all floors, the floor by the hero's height, `1 + round(y / 6.2)` (`sunpetal-ee` F-277:
+/// the `CHANGEMAP 30` targets stand at 0, 6.2, 12.4, 18.6, 25; 5 is the roof's landing). PS2 keeps the floor in `var 0x6002[0]`.
+pub const STAIRS_MAP: i32 = 30;
+pub fn stairs_floor(y: i32) -> u32 {
+    (1.0 + (y as f64 / 4096.0 / 6.2).round()).max(1.0) as u32
+}
+
+/// The walls and floors of a stairs' room on a floor (`data/ult/stairs_floor.tsv`, a copy of `sunpetal-ee` `out/y56d/stairs_floor_room.tsv`;
+/// R03 live 32/32): (kind, zone, on). A room that is not that floor's flight gives none.
+fn stairs_zones(scene: &str, index: usize, floor: u32) -> Vec<(&'static str, usize, bool)> {
+    static T: &str = include_str!("../../../data/ult/stairs_floor.tsv");
+    T.lines()
+        .skip(1)
+        .filter_map(|l| {
+            let c: Vec<&str> = l.split('\t').collect();
+            (c.len() == 6 && c[0] == scene && c[1].parse() == Ok(index) && c[4].parse() == Ok(floor)).then(|| Some((c[2], c[3].parse().ok()?, c[5] == "1")))?
+        })
+        .collect()
+}
+
+/// On the stairs' map, the zones of the walking room follow the hero's floor (set again when the floor changes).
+fn follow_floor(w: &mut Walk, map: Option<i32>, y: i32) {
+    if map != Some(STAIRS_MAP) {
+        w.floor = None;
+        return;
+    }
+    let floor = stairs_floor(y);
+    if w.floor == Some(floor) {
+        return;
+    }
+    w.floor = Some(floor);
+    let t = stairs_zones(&w.room.0, w.room.1, floor);
+    for &(kind, z, on) in &t {
+        switch(&mut w.area, kind, z, on);
+    }
+    eprintln!("ps2room: stairs floor {} in {} {}: {} switches", floor, w.room.0, w.room.1, t.len());
+}
+
 /// The hero at `p` (x, z, export units) facing `face`: the automatic event zones walked into this frame fire their switches.
 fn fire_events(w: &mut Walk, p: [f32; 2], face: f32) {
     let now = auto_events(&w.area, p, face);
@@ -331,6 +371,7 @@ pub fn frame(keys: u32) -> u32 {
         let at = w.last.unwrap_or(from);
         let face = w.walker.face;
         fire_events(w, [at[0], at[2]], face);
+        follow_floor(w, session::hero_map(), session::hero_pos().map_or(pos[1], |p| p[1]));
     }
     keys & !(RIGHT | LEFT | UP | DOWN)
 }
@@ -357,6 +398,18 @@ mod tests {
         assert!(a.contains(&("event", 6, false)) && b.contains(&("event", 6, true)));
         assert!(a.iter().all(|&(k, z, on)| b.contains(&(k, z, !on))), "#40 undoes #39");
         assert!(triggers("R11", 7, 39).is_empty() && triggers("R03", 5, 39).is_empty());
+    }
+
+    #[test]
+    fn the_stairs_floor_goes_by_the_height_and_gives_the_flight_zones() {
+        // F-277: the CHANGEMAP 30 targets 0 / 6.2 / 12.4 / 18.6 / 25 are floors 1..5
+        let fl = |y: f64| stairs_floor((y * 4096.0) as i32);
+        assert_eq!([fl(0.0), fl(6.2), fl(12.4), fl(18.6), fl(25.0), fl(-1.0)], [1, 2, 3, 4, 5, 1]);
+        // R03's flight is room 3 (Y-56d): each floor of it sets its zones, another room none
+        assert!((3..=5).all(|f| !stairs_zones("R03", 3, f).is_empty()));
+        assert!(stairs_zones("R03", 0, 3).is_empty());
+        let (up, down) = (stairs_zones("R03", 3, 4), stairs_zones("R03", 3, 3));
+        assert!(up.iter().any(|z| down.iter().any(|d| (d.0, d.1) == (z.0, z.1) && d.2 != z.2)), "floors 3 and 4 differ");
     }
 
     #[test]
