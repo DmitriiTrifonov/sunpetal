@@ -2,6 +2,7 @@
 //! (in the game's memory) goes by `sunpetal_data::ps2::walk` on the PS2 scene's walls and floor, relative to the camera.
 //! A prototype: the hero slides without the walk animation, the face turns by the game's rule. `walk ps2 SCENE AREA` / `walk off`.
 use crate::{nativecam, session};
+use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::Mutex;
 use sunpetal_data::ps2::export::{Area3d, Export};
 use sunpetal_data::ps2::walk::{fast_run_allowed, walk_frame, Speeds, Walker, SELEKA, SELEKA_FAST};
@@ -22,10 +23,51 @@ struct Walk {
     written: Option<[i32; 3]>,
     /// the face (0 is +z, π/2 is +x) and the turn it is in
     walker: Walker,
-    /// the fast run is let by an event and the run mode is on (`WChara+0xcd`, `+0x13` bit 1; the game's events set them, here `fastrun on`)
-    fast_mode: bool,
 }
 static WALK: Mutex<Option<Walk>> = Mutex::new(None);
+
+/// The fast run let by an event (`SetFastRunModeOperationChara`, `WChara+0xcd`) and the hero's run mode (`ChangeRunModeChara` of
+/// chara 0, `+0x13` bit 1): the fast run wants both. The game keeps them in its chara manager across rooms; so here.
+static FAST_LET: AtomicBool = AtomicBool::new(false);
+static RUN_MODE: AtomicBool = AtomicBool::new(true);
+
+/// A run mode switch of `data/ult/run_mode.tsv` (`sunpetal-ee` Y-58): whether it is the fast run's (else the run mode's) and the value.
+type RunSet = (bool, bool);
+
+/// The run mode switches of the PS2 events, in the table's order (event, pc): `room` the init event of a PS2 room (`R10#5`),
+/// `scene` the DS scene the event is bound to (by its text or its place, medium or high). Far places (low) and the chapter's
+/// start are left out.
+fn run_sets(room: Option<&str>, scene: Option<&str>) -> Vec<RunSet> {
+    static T: &str = include_str!("../../../data/ult/run_mode.tsv");
+    T.lines()
+        .skip(1)
+        .filter_map(|l| {
+            let c: Vec<&str> = l.split('\t').collect();
+            if c.len() < 11 {
+                return None;
+            }
+            let fast = match (c[4], c[5]) {
+                ("fastrun", _) => true,
+                ("runmode", "0") => false,
+                _ => return None,
+            };
+            let hit = match c[8].strip_prefix("вход в комнату ") {
+                Some(r) => room == Some(r.trim_end_matches(" ?")),
+                None => scene == Some(c[7]) && matches!(c[10], "high" | "medium"),
+            };
+            hit.then_some((fast, c[6] == "1"))
+        })
+        .collect()
+}
+
+fn apply_run_sets(sets: &[RunSet], why: &str) {
+    for &(fast, on) in sets {
+        (if fast { &FAST_LET } else { &RUN_MODE }).store(on, Relaxed);
+    }
+    if !sets.is_empty() {
+        eprintln!("ps2room: {} sets the fast run {} and the run mode {}", why, FAST_LET.load(Relaxed), RUN_MODE.load(Relaxed));
+    }
+}
 
 /// Switches the walk on for the area `area` (index in `scenes/<scene>.json`'s `scene3d`) of the export at `root`.
 pub fn enable(root: &str, scene: &str, area: usize) -> Result<(), String> {
@@ -35,7 +77,9 @@ pub fn enable(root: &str, scene: &str, area: usize) -> Result<(), String> {
     // the walls and floors a new game has on (zones.tsv); the events that switch them later are not followed
     let zones = std::fs::read_to_string(std::path::Path::new(root).join("zones.tsv")).map_err(|e| format!("zones.tsv: {}", e))?;
     sunpetal_data::ps2::walk::apply_initial_zones(&mut area, &zones, scene, index);
-    *WALK.lock().unwrap() = Some(Walk { area, room: (scene.to_string(), index), fast_mode: false, last: None, written: None, walker: Walker::default() });
+    // the room's init event sets the run modes on entering it
+    apply_run_sets(&run_sets(Some(&format!("{}#{}", scene, index)), None), &format!("{} {}", scene, index));
+    *WALK.lock().unwrap() = Some(Walk { area, room: (scene.to_string(), index), last: None, written: None, walker: Walker::default() });
     Ok(())
 }
 
@@ -158,6 +202,7 @@ fn switches(ds_scene: &str) -> Vec<(&'static str, usize, &'static str, usize, bo
 
 /// A DS scene has started: the walls and floors of the walking room that the PS2 event of that scene (found by its place) switches follow it.
 pub fn scene_started(ds_scene: &str) -> usize {
+    apply_run_sets(&run_sets(None, Some(ds_scene)), ds_scene);
     let mut g = WALK.lock().unwrap();
     let Some(w) = g.as_mut() else { return 0 };
     let mut n = 0;
@@ -183,7 +228,8 @@ pub fn zone_state() -> Option<(String, usize, Vec<bool>, Vec<bool>)> {
 
 /// The fast run allowed or not (`walk.md` §3a); its zones that forbid it stay as the room has them.
 pub fn set_fast_mode(on: bool) -> Result<(), String> {
-    WALK.lock().unwrap().as_mut().ok_or("the PS2 walk is off")?.fast_mode = on;
+    FAST_LET.store(on, Relaxed);
+    RUN_MODE.store(on, Relaxed);
     Ok(())
 }
 
@@ -223,7 +269,7 @@ pub fn frame(keys: u32) -> u32 {
             w.walker = Walker { face: session::hero_angle().map_or(0.0, |a| (a & 0xFFFF) as f32 / 65536.0 * std::f32::consts::TAU), ..Walker::default() };
         }
         // the game's state machine: the first frame of a walk and of a big turn stand, a turn holds the walk speed
-        let fast = w.fast_mode && fast_run_allowed(&w.area, from);
+        let fast = FAST_LET.load(Relaxed) && RUN_MODE.load(Relaxed) && fast_run_allowed(&w.area, from);
         let used = w.walker.frame_fast(stick, fast);
         let to = match used {
             0 => from,
@@ -256,5 +302,16 @@ mod tests {
         let s = switches("C02_04");
         assert!(s.contains(&("R02", 0, "height", 2, false)) && s.contains(&("R02", 0, "height", 0, true)));
         assert!(switches("no such scene").is_empty());
+    }
+
+    #[test]
+    fn a_room_and_a_scene_give_their_run_mode_switches() {
+        // OP room 9 (A19 in chapter 0): the run mode on, the fast run off (event 28, pc 313 then 321)
+        assert_eq!(run_sets(Some("OP#9"), None), vec![(false, true), (true, false)]);
+        // C00_01: text-near, after line 01023
+        assert!(run_sets(None, Some("C00_01")).contains(&(true, true)));
+        // a far place (low) is left out; another room's chara is not the hero
+        assert!(run_sets(None, Some("C13_boat")).is_empty());
+        assert!(run_sets(Some("no#0"), None).is_empty());
     }
 }

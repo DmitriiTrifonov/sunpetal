@@ -1,0 +1,489 @@
+ps2_scene	event	pc	call	kind	x	value	ds_scene	ds_pos	rule	confidence
+OP	0	293	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	C00	старт сцены (StartEventID)	start	low
+OP	11	509	Chara.ChangeRunModeChara	runmode	0	1	C00_01	перед 01022	text-near: реплика после вызова	high
+OP	11	769	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	C00_01	после 01023	text-near: реплика до вызова	high
+OP	11	777	Chara.ChangeRunModeChara	runmode	0	1	C00_01	после 01023	text-near: реплика до вызова	high
+OP	21	71	Chara.ChangeRunModeChara	runmode	0	1	A78@C00;A79@C00	вход в комнату OP#7	room-init (Scene3D init event)	low
+OP	23	547	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату OP#8 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+OP	28	313	Chara.ChangeRunModeChara	runmode	0	1	A19@C00;A20@C00	вход в комнату OP#9	room-init (Scene3D init event)	low
+OP	28	321	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	A19@C00;A20@C00	вход в комнату OP#9	room-init (Scene3D init event)	low
+OP	30	256	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату OP#10 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+OP	32	202	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату OP#11 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+OP	34	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1			unknown: нет реплик в событии; зона без DS-пары	unknown
+OP	35	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0			unknown: нет реплик в событии; зона без DS-пары	unknown
+R00	1	208	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R00#26 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R00	1	216	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1		вход в комнату R00#26 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R00	2	172	Chara.ChangeRunModeChara	runmode	0	1	A11@C00;A83@C00	вход в комнату R00#37	room-init (Scene3D init event)	low
+R00	2	180	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A11@C00;A83@C00	вход в комнату R00#37	room-init (Scene3D init event)	low
+R00	3	180	Chara.ChangeRunModeChara	runmode	0	1	A09@C00	вход в комнату R00#31	room-init (Scene3D init event)	medium
+R00	3	188	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A09@C00	вход в комнату R00#31	room-init (Scene3D init event)	medium
+R00	4	263	Chara.ChangeRunModeChara	runmode	0	0	A00@C00;A46@C00	вход в комнату R00#0	room-init (Scene3D init event)	low
+R00	5	263	Chara.ChangeRunModeChara	runmode	0	0	A45@C00	вход в комнату R00#1	room-init (Scene3D init event)	medium
+R00	6	837	Chara.ChangeRunModeChara	runmode	0	0			unknown: нет реплик в событии; триггер не найден (не зона/init/start)	unknown
+R00	7	699	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R00#2 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R00	8	179	Chara.ChangeRunModeChara	runmode	0	0	A44@C00	вход в комнату R00#3	room-init (Scene3D init event)	medium
+R00	9	265	Chara.ChangeRunModeChara	runmode	0	0	A39@C00	вход в комнату R00#4	room-init (Scene3D init event)	medium
+R00	12	217	Chara.ChangeRunModeChara	runmode	0	0	A52@C00	вход в комнату R00#7	room-init (Scene3D init event)	medium
+R00	13	265	Chara.ChangeRunModeChara	runmode	0	0	A51@C00	вход в комнату R00#8	room-init (Scene3D init event)	medium
+R00	14	217	Chara.ChangeRunModeChara	runmode	0	0	A54@C00	вход в комнату R00#9	room-init (Scene3D init event)	medium
+R00	15	263	Chara.ChangeRunModeChara	runmode	0	0	A53@C00	вход в комнату R00#10	room-init (Scene3D init event)	medium
+R00	16	215	Chara.ChangeRunModeChara	runmode	0	0	A56@C00	вход в комнату R00#11	room-init (Scene3D init event)	medium
+R00	17	263	Chara.ChangeRunModeChara	runmode	0	0	A55@C00	вход в комнату R00#12	room-init (Scene3D init event)	medium
+R00	18	1305	Chara.ChangeRunModeChara	runmode	0	0	A30@C00	вход в комнату R00#13	room-init (Scene3D init event)	medium
+R00	18	1615	Chara.ChangeRunModeChara	runmode	0	0	A30@C00	вход в комнату R00#13	room-init (Scene3D init event)	medium
+R00	45	444	Chara.ChangeRunModeChara	runmode	0	1	A35@C00;A70@C00	вход в комнату R00#14	room-init (Scene3D init event)	low
+R00	46	215	Chara.ChangeRunModeChara	runmode	0	0	A40@C00	вход в комнату R00#15	room-init (Scene3D init event)	medium
+R00	47	263	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R00#16 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R00	48	215	Chara.ChangeRunModeChara	runmode	0	0	A42@C00	вход в комнату R00#17	room-init (Scene3D init event)	medium
+R00	49	265	Chara.ChangeRunModeChara	runmode	0	0	A41@C00	вход в комнату R00#18	room-init (Scene3D init event)	medium
+R00	54	179	Chara.ChangeRunModeChara	runmode	0	0	A33@C00	вход в комнату R00#20	room-init (Scene3D init event)	medium
+R00	61	564	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R00#19 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R00	61	791	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R00#19 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R00	65	363	Chara.ChangeRunModeChara	runmode	0	1	A34@C00	вход в комнату R00#21	room-init (Scene3D init event)	medium
+R00	66	229	Chara.ChangeRunModeChara	runmode	0	1	A27@C00	вход в комнату R00#22	room-init (Scene3D init event)	medium
+R00	70	395	Chara.ChangeRunModeChara	runmode	0	1	A19@C00;A20@C00	вход в комнату R00#23	room-init (Scene3D init event)	low
+R00	71	260	Chara.ChangeRunModeChara	runmode	0	1	A26@C00	вход в комнату R00#24	room-init (Scene3D init event)	medium
+R00	77	507	Chara.ChangeRunModeChara	runmode	0	1	A28@C00;A29@C00	вход в комнату R00#25	room-init (Scene3D init event)	low
+R00	82	280	Chara.ChangeRunModeChara	runmode	0	1			unknown: нет реплик в событии; триггер не найден (не зона/init/start)	unknown
+R00	85	225	Chara.ChangeRunModeChara	runmode	0	1	A22@C00;A68@C00	вход в комнату R00#27	room-init (Scene3D init event)	low
+R00	88	193	Chara.ChangeRunModeChara	runmode	0	1	A25@C00;A88@C00	вход в комнату R00#28	room-init (Scene3D init event)	low
+R00	90	430	Chara.ChangeRunModeChara	runmode	0	1	A78@C00;A79@C00	вход в комнату R00#29	room-init (Scene3D init event)	low
+R00	90	438	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A78@C00;A79@C00	вход в комнату R00#29	room-init (Scene3D init event)	low
+R00	95	240	Chara.ChangeRunModeChara	runmode	0	1	A08@C00;A80@C00	вход в комнату R00#30	room-init (Scene3D init event)	low
+R00	99	246	Chara.ChangeRunModeChara	runmode	0	1			unknown: нет реплик в событии; триггер не найден (не зона/init/start)	unknown
+R00	102	128	Chara.ChangeRunModeChara	runmode	0	1	A10@C00	вход в комнату R00#32	room-init (Scene3D init event)	medium
+R00	106	283	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R00#33 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R00	106	291	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1		вход в комнату R00#33 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R00	109	288	Chara.ChangeRunModeChara	runmode	0	1	A71@C00	вход в комнату R00#34	room-init (Scene3D init event)	medium
+R00	112	191	Chara.ChangeRunModeChara	runmode	0	1	A16@C00	вход в комнату R00#35	room-init (Scene3D init event)	medium
+R00	114	155	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R00#36 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R00	117	130	Chara.ChangeRunModeChara	runmode	0	1			unknown: нет реплик в событии; триггер не найден (не зона/init/start)	unknown
+R00	122	97	Chara.ChangeRunModeChara	runmode	0	0	A21@C00	вход в комнату R00#38	room-init (Scene3D init event)	medium
+R00	123	78	Chara.ChangeRunModeChara	runmode	0	1	A60@C00	вход в комнату R00#39	room-init (Scene3D init event)	medium
+R00	124	78	Chara.ChangeRunModeChara	runmode	0	1	A64@C00	вход в комнату R00#40	room-init (Scene3D init event)	medium
+R00	125	78	Chara.ChangeRunModeChara	runmode	0	1	A65@C00	вход в комнату R00#41	room-init (Scene3D init event)	medium
+R00	126	78	Chara.ChangeRunModeChara	runmode	0	1	A66@C00	вход в комнату R00#42	room-init (Scene3D init event)	medium
+R00	127	283	Chara.ChangeRunModeChara	runmode	0	1	A62@C00;A63@C00;A81@C00;A82@C00	вход в комнату R00#43	room-init (Scene3D init event)	low
+R00	128	175	Chara.ChangeRunModeChara	runmode	0	0	A47@C00	вход в комнату R00#44	room-init (Scene3D init event)	medium
+R00	129	345	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R00#45 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R00	130	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	C00_NEW03	вход в зону события ?	place-far 43.44 (ближайшее DS-событие)	low
+R00	131	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	C00_NEW03	вход в зону события ?	place-far 42.89 (ближайшее DS-событие)	low
+R01	1	781	Chara.ChangeRunModeChara	runmode	0	0	A00@C01;A46@C01	вход в комнату R01#0	room-init (Scene3D init event)	low
+R01	2	343	Chara.ChangeRunModeChara	runmode	0	0	A45@C01	вход в комнату R01#1	room-init (Scene3D init event)	medium
+R01	3	1266	Chara.ChangeRunModeChara	runmode	0	0	C01_01	после 017	text-near: реплика до вызова	high
+R01	4	571	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R01#2 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R01	5	866	Chara.ChangeRunModeChara	runmode	0	0	A44@C01	вход в комнату R01#3	room-init (Scene3D init event)	medium
+R01	5	922	Chara.ChangeRunModeChara	runmode	0	0	A44@C01	вход в комнату R01#3	room-init (Scene3D init event)	medium
+R01	6	345	Chara.ChangeRunModeChara	runmode	0	0	A39@C01	вход в комнату R01#4	room-init (Scene3D init event)	medium
+R01	18	148	Chara.ChangeRunModeChara	runmode	0	0	A01_05	перед 000	text-near: реплика после вызова (слабая: общая реплика)	low
+R01	30	60	Chara.ChangeRunModeChara	runmode	0	0	C01_13	перед 009	text-near: реплика после вызова	high
+R01	32	60	Chara.ChangeRunModeChara	runmode	0	0			unknown: нет реплик в событии; триггер не найден (не зона/init/start)	unknown
+R01	36	303	Chara.ChangeRunModeChara	runmode	4	0	A54@C01	вход в комнату R01#6	room-init (Scene3D init event)	medium
+R01	38	315	Chara.ChangeRunModeChara	runmode	4	0	A53@C01	вход в комнату R01#7	room-init (Scene3D init event)	medium
+R02	1	760	Chara.ChangeRunModeChara	runmode	0	0	A00@C02;A46@C02	вход в комнату R02#0	room-init (Scene3D init event)	low
+R02	2	503	Chara.ChangeRunModeChara	runmode	0	0	A45@C02	вход в комнату R02#1	room-init (Scene3D init event)	medium
+R02	3	1258	Chara.ChangeRunModeChara	runmode	0	0	C02_01	после 01019	text-near: реплика до вызова	high
+R02	4	1164	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R02#2 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R02	5	536	Chara.ChangeRunModeChara	runmode	0	0	A52@C02	вход в комнату R02#3	room-init (Scene3D init event)	medium
+R02	6	505	Chara.ChangeRunModeChara	runmode	0	0	A51@C02	вход в комнату R02#4	room-init (Scene3D init event)	medium
+R02	7	1643	Chara.ChangeRunModeChara	runmode	0	0	A30@C02	вход в комнату R02#5	room-init (Scene3D init event)	medium
+R02	22	888	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R02#6 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R02	31	413	Chara.ChangeRunModeChara	runmode	0	1	C02_03	перед 03001	text-near: реплика после вызова	high
+R03	1	520	Chara.ChangeRunModeChara	runmode	0	0	A00@C03;A46@C03	вход в комнату R03#0	room-init (Scene3D init event)	low
+R03	2	383	Chara.ChangeRunModeChara	runmode	0	0	A45@C03	вход в комнату R03#1	room-init (Scene3D init event)	medium
+R03	3	1258	Chara.ChangeRunModeChara	runmode	0	0	C03_01	после 01020	text-near: реплика до вызова	high
+R03	4	677	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R03#2 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R03	5	1883	Chara.ChangeRunModeChara	runmode	0	0	A30@C03	вход в комнату R03#3	room-init (Scene3D init event)	medium
+R03	16	579	Chara.ChangeRunModeChara	runmode	0	1	A35@C03;A70@C03	вход в комнату R03#4	room-init (Scene3D init event)	low
+R03	17	434	Chara.ChangeRunModeChara	runmode	0	0	A42@C03	вход в комнату R03#5	room-init (Scene3D init event)	medium
+R03	18	411	Chara.ChangeRunModeChara	runmode	0	0	A41@C03	вход в комнату R03#6	room-init (Scene3D init event)	medium
+R03	24	1201	Chara.ChangeRunModeChara	runmode	0	1	A28@C03;A29@C03	вход в комнату R03#7	room-init (Scene3D init event)	low
+R03	42	1004	Chara.ChangeRunModeChara	runmode	0	1	C03_19	после 19039	text-near: реплика до вызова	high
+R04	1	560	Chara.ChangeRunModeChara	runmode	0	0	A00@C04;A46@C04	вход в комнату R04#0	room-init (Scene3D init event)	low
+R04	2	383	Chara.ChangeRunModeChara	runmode	0	0	A45@C04	вход в комнату R04#1	room-init (Scene3D init event)	medium
+R04	3	1250	Chara.ChangeRunModeChara	runmode	0	0	C04_01	после 01018	text-near: реплика до вызова	high
+R04	4	616	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R04#2 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R04	5	375	Chara.ChangeRunModeChara	runmode	0	0	A56@C04	вход в комнату R04#3	room-init (Scene3D init event)	medium
+R04	6	383	Chara.ChangeRunModeChara	runmode	0	0	A55@C04	вход в комнату R04#4	room-init (Scene3D init event)	medium
+R04	7	698	Chara.ChangeRunModeChara	runmode	0	0	A30@C04	вход в комнату R04#5	room-init (Scene3D init event)	medium
+R04	7	1128	Chara.ChangeRunModeChara	runmode	0	0	A30@C04	вход в комнату R04#5	room-init (Scene3D init event)	medium
+R04	22	534	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R04#6 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R04	22	899	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R04#6 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R04	26	532	Chara.ChangeRunModeChara	runmode	0	1	A34@C04	вход в комнату R04#7	room-init (Scene3D init event)	medium
+R04	27	365	Chara.ChangeRunModeChara	runmode	0	0	A27@C04	вход в комнату R04#8	room-init (Scene3D init event)	medium
+R05	1	760	Chara.ChangeRunModeChara	runmode	0	0	A00@C05;A46@C05	вход в комнату R05#0	room-init (Scene3D init event)	low
+R05	2	423	Chara.ChangeRunModeChara	runmode	0	0	A45@C05	вход в комнату R05#1	room-init (Scene3D init event)	medium
+R05	3	1282	Chara.ChangeRunModeChara	runmode	0	0	C05_01	после 01014	text-near: реплика до вызова	high
+R05	4	615	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R05#2 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R05	5	859	Chara.ChangeRunModeChara	runmode	0	0	A30@C05	вход в комнату R05#3	room-init (Scene3D init event)	medium
+R05	5	1329	Chara.ChangeRunModeChara	runmode	0	0	A30@C05	вход в комнату R05#3	room-init (Scene3D init event)	medium
+R05	16	834	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R05#4 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R05	16	1221	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R05#4 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R05	20	729	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R05#5 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R05	22	767	Chara.ChangeRunModeChara	runmode	0	1	A28@C05;A29@C05	вход в комнату R05#6	room-init (Scene3D init event)	low
+R05	43	978	Chara.ChangeRunModeChara	runmode	0	1	C05_25	после 25025	text-near: реплика до вызова	high
+R05	53	729	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R05#7 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R06	1	680	Chara.ChangeRunModeChara	runmode	0	0	A00@C06;A46@C06	вход в комнату R06#0	room-init (Scene3D init event)	low
+R06	2	463	Chara.ChangeRunModeChara	runmode	0	0	A45@C06	вход в комнату R06#1	room-init (Scene3D init event)	medium
+R06	3	1258	Chara.ChangeRunModeChara	runmode	0	0	C06_01	после 01019	text-near: реплика до вызова	high
+R06	4	488	Chara.ChangeRunModeChara	runmode	0	0	A52@C06	вход в комнату R06#2	room-init (Scene3D init event)	medium
+R06	6	465	Chara.ChangeRunModeChara	runmode	0	0	A51@C06	вход в комнату R06#3	room-init (Scene3D init event)	medium
+R06	9	899	Chara.ChangeRunModeChara	runmode	0	0	A30@C06	вход в комнату R06#5	room-init (Scene3D init event)	medium
+R06	9	1409	Chara.ChangeRunModeChara	runmode	0	0	A30@C06	вход в комнату R06#5	room-init (Scene3D init event)	medium
+R06	18	686	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R06#4 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R06	22	572	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R06#6 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R06	22	999	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R06#6 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R06	26	768	Chara.ChangeRunModeChara	runmode	0	1	A19@C06;A20@C06	вход в комнату R06#7	room-init (Scene3D init event)	low
+R06	29	890	Chara.ChangeRunModeChara	runmode	0	1	A28@C06;A29@C06	вход в комнату R06#8	room-init (Scene3D init event)	low
+R06	34	702	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R06#9 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R07	1	760	Chara.ChangeRunModeChara	runmode	0	0	A00@C07;A46@C07	вход в комнату R07#0	room-init (Scene3D init event)	low
+R07	2	519	Chara.ChangeRunModeChara	runmode	0	0	A45@C07	вход в комнату R07#1	room-init (Scene3D init event)	medium
+R07	3	1246	Chara.ChangeRunModeChara	runmode	0	0	C07_01	после 01013	text-near: реплика до вызова	high
+R07	4	563	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R07#2 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R07	12	467	Chara.ChangeRunModeChara	runmode	0	0	A56@C07	вход в комнату R07#11	room-init (Scene3D init event)	medium
+R07	14	463	Chara.ChangeRunModeChara	runmode	0	0	A55@C07	вход в комнату R07#12	room-init (Scene3D init event)	medium
+R07	18	415	Chara.ChangeRunModeChara	runmode	0	0	A44@C07	вход в комнату R07#13	room-init (Scene3D init event)	medium
+R07	20	465	Chara.ChangeRunModeChara	runmode	0	0	A39@C07	вход в комнату R07#14	room-init (Scene3D init event)	medium
+R07	24	417	Chara.ChangeRunModeChara	runmode	0	0	A52@C07	вход в комнату R07#15	room-init (Scene3D init event)	medium
+R07	26	465	Chara.ChangeRunModeChara	runmode	0	0	A51@C07	вход в комнату R07#16	room-init (Scene3D init event)	medium
+R07	30	415	Chara.ChangeRunModeChara	runmode	0	0	A42@C07	вход в комнату R07#17	room-init (Scene3D init event)	medium
+R07	32	465	Chara.ChangeRunModeChara	runmode	0	0	A41@C07	вход в комнату R07#18	room-init (Scene3D init event)	medium
+R07	36	1440	Chara.ChangeRunModeChara	runmode	0	0	A30@C07	вход в комнату R07#3	room-init (Scene3D init event)	medium
+R07	36	1961	Chara.ChangeRunModeChara	runmode	0	0	A30@C07	вход в комнату R07#3	room-init (Scene3D init event)	medium
+R07	40	560	Chara.ChangeRunModeChara	runmode	0	1	A35@C07;A70@C07	вход в комнату R07#19	room-init (Scene3D init event)	low
+R07	42	989	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R07#4 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R07	42	1427	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R07#4 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R07	46	394	Chara.ChangeRunModeChara	runmode	0	0	A38@C07	вход в комнату R07#8	room-init (Scene3D init event)	medium
+R07	48	463	Chara.ChangeRunModeChara	runmode	0	0	A37@C07	вход в комнату R07#9	room-init (Scene3D init event)	medium
+R07	51	673	Chara.ChangeRunModeChara	runmode	0	1	A34@C07	вход в комнату R07#10	room-init (Scene3D init event)	medium
+R07	54	776	Chara.ChangeRunModeChara	runmode	0	1	A19@C07;A20@C07	вход в комнату R07#5	room-init (Scene3D init event)	low
+R07	57	880	Chara.ChangeRunModeChara	runmode	0	1	A28@C07;A29@C07	вход в комнату R07#6	room-init (Scene3D init event)	low
+R07	62	683	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R07#7 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R07	71	844	Chara.ChangeRunModeChara	runmode	0	1	C07_19	после 19037	text-near: реплика до вызова	high
+R08	1	600	Chara.ChangeRunModeChara	runmode	2	0	A00@C09;A46@C09	вход в комнату R08#0	room-init (Scene3D init event)	low
+R08	2	423	Chara.ChangeRunModeChara	runmode	2	0	A45@C09	вход в комнату R08#1	room-init (Scene3D init event)	medium
+R08	3	1290	Chara.ChangeRunModeChara	runmode	2	0	C09_01	после 01013	text-near: реплика до вызова	high
+R08	4	523	Chara.ChangeRunModeChara	runmode	2	1		вход в комнату R08#2 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R08	5	544	Chara.ChangeRunModeChara	runmode	2	0	A30@C09	вход в комнату R08#3	room-init (Scene3D init event)	medium
+R08	5	1014	Chara.ChangeRunModeChara	runmode	2	0	A30@C09	вход в комнату R08#3	room-init (Scene3D init event)	medium
+R08	16	532	Chara.ChangeRunModeChara	runmode	2	0		вход в комнату R08#4 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R08	16	919	Chara.ChangeRunModeChara	runmode	2	0		вход в комнату R08#4 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R08	20	679	Chara.ChangeRunModeChara	runmode	2	1	A19@C09;A20@C09	вход в комнату R08#5	room-init (Scene3D init event)	low
+R08	23	709	Chara.ChangeRunModeChara	runmode	2	1		вход в комнату R08#6 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R08	23	717	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1		вход в комнату R08#6 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R08	26	1058	Chara.ChangeRunModeChara	runmode	2	1	A78@C09;A79@C09	вход в комнату R08#7	room-init (Scene3D init event)	low
+R08	26	1066	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A78@C09;A79@C09	вход в комнату R08#7	room-init (Scene3D init event)	low
+R08	30	411	Chara.ChangeRunModeChara	runmode	2	1	A08@C09;A80@C09	вход в комнату R08#8	room-init (Scene3D init event)	low
+R08	30	419	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	A08@C09;A80@C09	вход в комнату R08#8	room-init (Scene3D init event)	low
+R08	32	964	Chara.ChangeRunModeChara	runmode	2	1	A09@C09	вход в комнату R08#9	room-init (Scene3D init event)	medium
+R08	32	972	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A09@C09	вход в комнату R08#9	room-init (Scene3D init event)	medium
+R08	37	142	Chara.ChangeRunModeChara	runmode	2	1			unknown: нет реплик в событии; триггер не найден (не зона/init/start)	unknown
+R08	37	775	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0			unknown: нет реплик в событии; триггер не найден (не зона/init/start)	unknown
+R08	38	379	Chara.ChangeRunModeChara	runmode	2	1	A10@C09	вход в комнату R08#10	room-init (Scene3D init event)	medium
+R08	38	387	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	A10@C09	вход в комнату R08#10	room-init (Scene3D init event)	medium
+R08	42	295	Chara.ChangeRunModeChara	runmode	2	1		вход в комнату R08#11 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R08	45	339	Chara.ChangeRunModeChara	runmode	2	1	A11@C09;A83@C09	вход в комнату R08#12	room-init (Scene3D init event)	low
+R08	79	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1			unknown: нет реплик в событии; зона без DS-пары	unknown
+R08	80	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0			unknown: нет реплик в событии; зона без DS-пары	unknown
+R09	1	840	Chara.ChangeRunModeChara	runmode	2	0	A00@C10;A46@C10	вход в комнату R09#0	room-init (Scene3D init event)	low
+R09	2	543	Chara.ChangeRunModeChara	runmode	2	0	A45@C10	вход в комнату R09#1	room-init (Scene3D init event)	medium
+R09	3	1282	Chara.ChangeRunModeChara	runmode	2	0	C10_01	после 01015	text-near: реплика до вызова	high
+R09	4	643	Chara.ChangeRunModeChara	runmode	2	1		вход в комнату R09#2 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R09	5	664	Chara.ChangeRunModeChara	runmode	2	0	A30@C10	вход в комнату R09#3	room-init (Scene3D init event)	medium
+R09	5	1254	Chara.ChangeRunModeChara	runmode	2	0	A30@C10	вход в комнату R09#3	room-init (Scene3D init event)	medium
+R09	16	652	Chara.ChangeRunModeChara	runmode	2	0		вход в комнату R09#4 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R09	16	1159	Chara.ChangeRunModeChara	runmode	2	0		вход в комнату R09#4 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R09	20	919	Chara.ChangeRunModeChara	runmode	2	1	A19@C10;A20@C10	вход в комнату R09#5	room-init (Scene3D init event)	low
+R09	23	722	Chara.ChangeRunModeChara	runmode	2	1		вход в комнату R09#6 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R09	23	730	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1		вход в комнату R09#6 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R09	26	1368	Chara.ChangeRunModeChara	runmode	2	1	A78@C10;A79@C10	вход в комнату R09#7	room-init (Scene3D init event)	low
+R09	26	1376	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A78@C10;A79@C10	вход в комнату R09#7	room-init (Scene3D init event)	low
+R09	30	531	Chara.ChangeRunModeChara	runmode	2	1	A08@C10;A80@C10	вход в комнату R09#8	room-init (Scene3D init event)	low
+R09	30	539	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	A08@C10;A80@C10	вход в комнату R09#8	room-init (Scene3D init event)	low
+R09	34	906	Chara.ChangeRunModeChara	runmode	2	1	A09@C10	вход в комнату R09#9	room-init (Scene3D init event)	medium
+R09	34	914	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A09@C10	вход в комнату R09#9	room-init (Scene3D init event)	medium
+R09	40	609	Chara.ChangeRunModeChara	runmode	2	1	A10@C10	вход в комнату R09#10	room-init (Scene3D init event)	medium
+R09	40	617	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	A10@C10	вход в комнату R09#10	room-init (Scene3D init event)	medium
+R09	66	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	C09_NEW02	вход в зону события ?	place-far 27.94 (ближайшее DS-событие)	low
+R09	67	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	C09_NEW02	вход в зону события ?	place-far 21.86 (ближайшее DS-событие)	low
+R10	1	520	Chara.ChangeRunModeChara	runmode	0	0	A00@C08;A46@C08	вход в комнату R10#0	room-init (Scene3D init event)	low
+R10	2	383	Chara.ChangeRunModeChara	runmode	0	0	A45@C08	вход в комнату R10#1	room-init (Scene3D init event)	medium
+R10	3	1258	Chara.ChangeRunModeChara	runmode	0	0	C08_01	после 01030	text-near: реплика до вызова	high
+R10	4	483	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R10#2 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R10	5	504	Chara.ChangeRunModeChara	runmode	0	0	A30@C08	вход в комнату R10#3	room-init (Scene3D init event)	medium
+R10	5	934	Chara.ChangeRunModeChara	runmode	0	0	A30@C08	вход в комнату R10#3	room-init (Scene3D init event)	medium
+R10	16	492	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R10#4 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R10	16	839	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R10#4 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R10	20	599	Chara.ChangeRunModeChara	runmode	0	1	A19@C08;A20@C08	вход в комнату R10#5	room-init (Scene3D init event)	low
+R10	23	360	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R10#6 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R10	23	368	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1		вход в комнату R10#6 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R10	26	422	Chara.ChangeRunModeChara	runmode	0	1	A78@C08;A79@C08	вход в комнату R10#8	room-init (Scene3D init event)	low
+R10	26	430	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A78@C08;A79@C08	вход в комнату R10#8	room-init (Scene3D init event)	low
+R10	29	742	Chara.ChangeRunModeChara	runmode	0	1	A08@C08;A80@C08	вход в комнату R10#7	room-init (Scene3D init event)	low
+R10	29	750	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	A08@C08;A80@C08	вход в комнату R10#7	room-init (Scene3D init event)	low
+R10	46	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1			unknown: нет реплик в событии; зона без DS-пары	unknown
+R10	47	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0			unknown: нет реплик в событии; зона без DS-пары	unknown
+R11	0	263	Chara.ChangeRunModeChara	runmode	0	0	A45@C11	вход в комнату R11#1	room-init (Scene3D init event)	medium
+R11	1	363	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R11#2 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R11	2	362	Chara.ChangeRunModeChara	runmode	0	0	A30@C11	вход в комнату R11#3	room-init (Scene3D init event)	medium
+R11	2	858	Chara.ChangeRunModeChara	runmode	0	0	A30@C11	вход в комнату R11#3	room-init (Scene3D init event)	medium
+R11	3	312	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R11#4 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R11	3	528	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R11#4 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R11	4	273	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R11#8 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R11	4	281	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1		вход в комнату R11#8 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R11	5	315	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R11#7 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R11	5	323	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1		вход в комнату R11#7 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R11	6	191	Chara.ChangeRunModeChara	runmode	0	1	A62@C11;A63@C11;A81@C11;A82@C11	вход в комнату R11#5	room-init (Scene3D init event)	low
+R11	6	199	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A62@C11;A63@C11;A81@C11;A82@C11	вход в комнату R11#5	room-init (Scene3D init event)	low
+R11	7	560	Chara.ChangeRunModeChara	runmode	0	0	A47@C11	вход в комнату R11#0	room-init (Scene3D init event)	medium
+R11	8	310	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R11#6 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R11	8	318	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0		вход в комнату R11#6 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R11	42	1078	Chara.ChangeRunModeChara	runmode	0	0	C11_02	после 02039	text-near: реплика до вызова	high
+R11	43	1124	Chara.ChangeRunModeChara	runmode	0	0	C11_02	после 02089	text-near: реплика до вызова; место C11_02 (0.33) =	high
+R11	55	20	Chara.ChangeRunModeChara	runmode	0	0	C11_08	вход в зону события ?	place-far 4.35 (ближайшее DS-событие)	low
+R11	56	20	Chara.ChangeRunModeChara	runmode	0	1	C11_08	вход в зону события ?	place-far 6.30 (ближайшее DS-событие)	low
+R11	57	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	C11_LOST_01	вход в зону события ?	place-far 53.20 (ближайшее DS-событие)	low
+R11	58	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	C11_LOST_01	вход в зону события ?	place-far 48.40 (ближайшее DS-событие)	low
+R12	0	302	Chara.ChangeRunModeChara	runmode	0	1	A71@C12	вход в комнату R12#2	room-init (Scene3D init event)	medium
+R12	0	310	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A71@C12	вход в комнату R12#2	room-init (Scene3D init event)	medium
+R12	1	224	Chara.ChangeRunModeChara	runmode	0	0	A72@C12	вход в комнату R12#3	room-init (Scene3D init event)	medium
+R12	1	232	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	A72@C12	вход в комнату R12#3	room-init (Scene3D init event)	medium
+R12	2	179	Chara.ChangeRunModeChara	runmode	0	1	A22@C12;A68@C12	вход в комнату R12#1	room-init (Scene3D init event)	low
+R12	2	187	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A22@C12;A68@C12	вход в комнату R12#1	room-init (Scene3D init event)	low
+R12	3	321	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R12#0 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R12	3	329	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1		вход в комнату R12#0 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R12	4	312	Chara.ChangeRunModeChara	runmode	0	1	A26@C12	вход в комнату R12#4	room-init (Scene3D init event)	medium
+R12	4	320	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	A26@C12	вход в комнату R12#4	room-init (Scene3D init event)	medium
+R12	5	290	Chara.ChangeRunModeChara	runmode	0	1	A19@C12;A20@C12	вход в комнату R12#5	room-init (Scene3D init event)	low
+R12	5	298	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	A19@C12;A20@C12	вход в комнату R12#5	room-init (Scene3D init event)	low
+R12	6	225	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R12#6 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R12	6	233	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1		вход в комнату R12#6 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R12	7	616	Chara.ChangeRunModeChara	runmode	0	1	A78@C12;A79@C12	вход в комнату R12#7	room-init (Scene3D init event)	low
+R12	7	624	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A78@C12;A79@C12	вход в комнату R12#7	room-init (Scene3D init event)	low
+R12	8	212	Chara.ChangeRunModeChara	runmode	0	1	A08@C12;A80@C12	вход в комнату R12#8	room-init (Scene3D init event)	low
+R12	8	220	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	A08@C12;A80@C12	вход в комнату R12#8	room-init (Scene3D init event)	low
+R12	9	203	Chara.ChangeRunModeChara	runmode	0	1	A09@C12	вход в комнату R12#9	room-init (Scene3D init event)	medium
+R12	9	211	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A09@C12	вход в комнату R12#9	room-init (Scene3D init event)	medium
+R12	10	174	Chara.ChangeRunModeChara	runmode	0	1	A16@C12	вход в комнату R12#10	room-init (Scene3D init event)	medium
+R12	10	182	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A16@C12	вход в комнату R12#10	room-init (Scene3D init event)	medium
+R12	37	119	Chara.ChangeRunModeChara	runmode	0	1	C12_06	перед 06001	text-near: реплика после вызова	high
+R12	37	127	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	C12_06	перед 06001	text-near: реплика после вызова	high
+R12	50	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	C12_07	вход в зону события ?	place-far 3.39 (ближайшее DS-событие)	low
+R12	51	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	C12_07	вход в зону события	place 1.05	medium
+R13	1	628	Chara.ChangeRunModeChara	runmode	0	1	A28@C13;A29@C13	вход в комнату R13#0	room-init (Scene3D init event)	low
+R13	1	636	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	A28@C13;A29@C13	вход в комнату R13#0	room-init (Scene3D init event)	low
+R13	2	373	Chara.ChangeRunModeChara	runmode	0	0	A30@C13	вход в комнату R13#1	room-init (Scene3D init event)	medium
+R13	2	630	Chara.ChangeRunModeChara	runmode	0	0	A30@C13	вход в комнату R13#1	room-init (Scene3D init event)	medium
+R13	2	638	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	A30@C13	вход в комнату R13#1	room-init (Scene3D init event)	medium
+R13	3	629	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R13#2 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R13	3	637	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0		вход в комнату R13#2 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R13	4	282	Chara.ChangeRunModeChara	runmode	0	1	A19@C13;A20@C13	вход в комнату R13#3	room-init (Scene3D init event)	low
+R13	4	290	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	A19@C13;A20@C13	вход в комнату R13#3	room-init (Scene3D init event)	low
+R13	5	272	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R13#4 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R13	5	280	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1		вход в комнату R13#4 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R13	6	485	Chara.ChangeRunModeChara	runmode	9	1	A78@C13;A79@C13	вход в комнату R13#5	room-init (Scene3D init event)	low
+R13	6	493	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A78@C13;A79@C13	вход в комнату R13#5	room-init (Scene3D init event)	low
+R13	7	223	Chara.ChangeRunModeChara	runmode	9	1	A08@C13;A80@C13	вход в комнату R13#7	room-init (Scene3D init event)	low
+R13	7	231	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	A08@C13;A80@C13	вход в комнату R13#7	room-init (Scene3D init event)	low
+R13	8	247	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R13#6 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R13	8	255	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1		вход в комнату R13#6 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R13	9	200	Chara.ChangeRunModeChara	runmode	9	1	A09@C13	вход в комнату R13#8	room-init (Scene3D init event)	medium
+R13	9	208	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A09@C13	вход в комнату R13#8	room-init (Scene3D init event)	medium
+R13	10	338	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A11@C13;A83@C13	вход в комнату R13#9	room-init (Scene3D init event)	low
+R13	11	137	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	A67@C13	вход в комнату R13#10	room-init (Scene3D init event)	medium
+R13	12	85	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0		вход в комнату R13#11 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R13	13	171	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	A03@C13	вход в комнату R13#12	room-init (Scene3D init event)	medium
+R13	57	470	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	A13_10	после 05002	text-near: реплика до вызова; место A13_10 (0.38) =	high
+R13	62	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	C13_boat	вход в зону события ?	place-far 740.20 (ближайшее DS-событие)	low
+R13	63	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	C13_boat	вход в зону события ?	place-far 745.65 (ближайшее DS-событие)	low
+R15	1	697	Chara.ChangeRunModeChara	runmode	0	0	A00@C14;A46@C14	вход в комнату R15#0	room-init (Scene3D init event)	low
+R15	2	480	Chara.ChangeRunModeChara	runmode	0	0	A45@C14	вход в комнату R15#1	room-init (Scene3D init event)	medium
+R15	3	1868	Chara.ChangeRunModeChara	runmode	0	0	C14_01	после 01023	text-near: реплика до вызова	high
+R15	4	787	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R15#2 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R15	5	432	Chara.ChangeRunModeChara	runmode	0	0	A56@C14	вход в комнату R15#3	room-init (Scene3D init event)	medium
+R15	6	480	Chara.ChangeRunModeChara	runmode	0	0	A55@C14	вход в комнату R15#4	room-init (Scene3D init event)	medium
+R15	7	574	Chara.ChangeRunModeChara	runmode	0	0	A59@C14	вход в комнату R15#5	room-init (Scene3D init event)	medium
+R15	8	606	Chara.ChangeRunModeChara	runmode	0	0	A58@C14	вход в комнату R15#6	room-init (Scene3D init event)	medium
+R15	9	389	Chara.ChangeRunModeChara	runmode	0	0	A57@C14	вход в комнату R15#7	room-init (Scene3D init event)	medium
+R15	29	968	Chara.ChangeRunModeChara	runmode	0	0	A30@C14	вход в комнату R15#8	room-init (Scene3D init event)	medium
+R15	29	1495	Chara.ChangeRunModeChara	runmode	0	0	A30@C14	вход в комнату R15#8	room-init (Scene3D init event)	medium
+R15	33	465	Chara.ChangeRunModeChara	runmode	0	1	A33@C14	вход в комнату R15#20	room-init (Scene3D init event)	medium
+R15	35	516	Chara.ChangeRunModeChara	runmode	0	0			unknown: нет реплик в событии; триггер не найден (не зона/init/start)	unknown
+R15	36	233	Chara.ChangeRunModeChara	runmode	0	1	A14_33	вход в зону события	place 0.42	medium
+R15	37	572	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R15#9 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R15	37	999	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R15#9 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R15	41	935	Chara.ChangeRunModeChara	runmode	0	1	A19@C14;A20@C14	вход в комнату R15#10	room-init (Scene3D init event)	low
+R15	45	463	Chara.ChangeRunModeChara	runmode	0	0	A21@C14	вход в комнату R15#12	room-init (Scene3D init event)	medium
+R15	47	629	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R15#13 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R15	47	637	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1		вход в комнату R15#13 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R15	50	1110	Chara.ChangeRunModeChara	runmode	0	1	A78@C14;A79@C14	вход в комнату R15#14	room-init (Scene3D init event)	low
+R15	50	1118	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A78@C14;A79@C14	вход в комнату R15#14	room-init (Scene3D init event)	low
+R15	55	468	Chara.ChangeRunModeChara	runmode	0	1	A08@C14;A80@C14	вход в комнату R15#15	room-init (Scene3D init event)	low
+R15	57	445	Chara.ChangeRunModeChara	runmode	0	1	A09@C14	вход в комнату R15#16	room-init (Scene3D init event)	medium
+R15	59	511	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R15#17 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R15	59	519	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1		вход в комнату R15#17 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R15	62	688	Chara.ChangeRunModeChara	runmode	0	1	A73@C14	вход в комнату R15#18	room-init (Scene3D init event)	medium
+R15	62	696	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A73@C14	вход в комнату R15#18	room-init (Scene3D init event)	medium
+R15	65	1017	Chara.ChangeRunModeChara	runmode	0	1	A16@C14	вход в комнату R15#19	room-init (Scene3D init event)	medium
+R15	65	1025	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A16@C14	вход в комнату R15#19	room-init (Scene3D init event)	medium
+R15	66	1282	Chara.ChangeRunModeChara	runmode	0	1			unknown: нет реплик в событии; триггер не найден (не зона/init/start)	unknown
+R15	66	1290	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1			unknown: нет реплик в событии; триггер не найден (не зона/init/start)	unknown
+R15	67	465	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	C14_46	после 46001 (до C14_25:25001)	text-near: реплики до/после из разных DS-сцен	medium
+R15	67	1322	Chara.ChangeRunModeChara	runmode	0	1	C14_46	после 46001 (до C14_25:25001)	text-near: реплики до/после из разных DS-сцен	medium
+R15	67	1358	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	C14_46	после 46001 (до C14_25:25001)	text-near: реплики до/после из разных DS-сцен	medium
+R15	82	640	Chara.ChangeRunModeChara	runmode	0	0	C14_40	после 40012	text-near: реплика до вызова	high
+R15	86	576	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	C14_22	после 22016	text-near: реплика до вызова	high
+R15	94	388	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	C14_33	после 33006	text-near: реплика до вызова; место неоднозначно (5 DS-событий в точке, ближайшее C14_22)	high
+R15	100	387	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	C14_43	после 43014	text-near: реплика до вызова	high
+R15	111	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	C14_07	вход в зону события ?	place-far 5.77 (ближайшее DS-событие)	low
+R15	112	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	C14_07	вход в зону события ?	place-far 8.23 (ближайшее DS-событие)	low
+R16	1	540	Chara.ChangeRunModeChara	runmode	0	0	A00@C15;A46@C15	вход в комнату R16#0	room-init (Scene3D init event)	low
+R16	2	383	Chara.ChangeRunModeChara	runmode	0	0	A45@C15	вход в комнату R16#1	room-init (Scene3D init event)	medium
+R16	3	483	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R16#2 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R16	4	603	Chara.ChangeRunModeChara	runmode	0	1	A19@C15;A20@C15	вход в комнату R16#5	room-init (Scene3D init event)	low
+R16	5	381	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R16#6 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R16	5	389	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1		вход в комнату R16#6 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R16	6	633	Chara.ChangeRunModeChara	runmode	0	1	A78@C15;A79@C15	вход в комнату R16#7	room-init (Scene3D init event)	low
+R16	6	641	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A78@C15;A79@C15	вход в комнату R16#7	room-init (Scene3D init event)	low
+R16	7	371	Chara.ChangeRunModeChara	runmode	0	1	A08@C15;A80@C15	вход в комнату R16#8	room-init (Scene3D init event)	low
+R16	7	379	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	A08@C15;A80@C15	вход в комнату R16#8	room-init (Scene3D init event)	low
+R16	8	348	Chara.ChangeRunModeChara	runmode	0	1	A09@C15	вход в комнату R16#9	room-init (Scene3D init event)	medium
+R16	8	356	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A09@C15	вход в комнату R16#9	room-init (Scene3D init event)	medium
+R16	9	414	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R16#10 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R16	9	422	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1		вход в комнату R16#10 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R16	10	419	Chara.ChangeRunModeChara	runmode	0	1	A73@C15	вход в комнату R16#11	room-init (Scene3D init event)	medium
+R16	10	427	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A73@C15	вход в комнату R16#11	room-init (Scene3D init event)	medium
+R16	11	503	Chara.ChangeRunModeChara	runmode	0	1	A16@C15	вход в комнату R16#12	room-init (Scene3D init event)	medium
+R16	11	511	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A16@C15	вход в комнату R16#12	room-init (Scene3D init event)	medium
+R16	12	423	Chara.ChangeRunModeChara	runmode	0	1	A64@C15	вход в комнату R16#13	room-init (Scene3D init event)	medium
+R16	12	431	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A64@C15	вход в комнату R16#13	room-init (Scene3D init event)	medium
+R16	13	423	Chara.ChangeRunModeChara	runmode	0	1	A65@C15	вход в комнату R16#14	room-init (Scene3D init event)	medium
+R16	13	431	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A65@C15	вход в комнату R16#14	room-init (Scene3D init event)	medium
+R16	14	344	Chara.ChangeRunModeChara	runmode	0	1	A66@C15	вход в комнату R16#15	room-init (Scene3D init event)	medium
+R16	14	352	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	A66@C15	вход в комнату R16#15	room-init (Scene3D init event)	medium
+R16	15	279	Chara.ChangeRunModeChara	runmode	0	1	A60@C15	вход в комнату R16#16	room-init (Scene3D init event)	medium
+R16	15	287	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	A60@C15	вход в комнату R16#16	room-init (Scene3D init event)	medium
+R16	23	504	Chara.ChangeRunModeChara	runmode	0	0	A30@C15	вход в комнату R16#3	room-init (Scene3D init event)	medium
+R16	23	934	Chara.ChangeRunModeChara	runmode	0	0	A30@C15	вход в комнату R16#3	room-init (Scene3D init event)	medium
+R16	27	514	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R16#4 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R16	27	861	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R16#4 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R16	49	1199	Chara.ChangeRunModeChara	runmode	0	0	C15_01	после 01022	text-near: реплика до вызова	high
+R16	70	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0			unknown: нет реплик в событии; зона без DS-пары	unknown
+R16	71	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1			unknown: нет реплик в событии; зона без DS-пары	unknown
+R16	73	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1			unknown: нет реплик в событии; зона без DS-пары	unknown
+R16	74	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0			unknown: нет реплик в событии; зона без DS-пары	unknown
+R17	12	544	Chara.ChangeRunModeChara	runmode	0	0	A30@C16	вход в комнату R17#3	room-init (Scene3D init event)	medium
+R17	12	1014	Chara.ChangeRunModeChara	runmode	0	0	A30@C16	вход в комнату R17#3	room-init (Scene3D init event)	medium
+R17	16	532	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R17#4 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R17	16	919	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R17#4 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R17	21	317	Chara.ChangeRunModeChara	runmode	0	0	A16_18	вход в зону события	place 0.39	medium
+R17	22	358	Chara.ChangeRunModeChara	runmode	0	1	A16_17	вход в зону события	place 0.33	medium
+R17	27	779	Chara.ChangeRunModeChara	runmode	0	0	A00@C16;A46@C16	вход в комнату R17#0	room-init (Scene3D init event)	low
+R17	28	423	Chara.ChangeRunModeChara	runmode	0	0	A45@C16	вход в комнату R17#1	room-init (Scene3D init event)	medium
+R17	29	579	Chara.ChangeRunModeChara	runmode	0	1	A19@C16;A20@C16	вход в комнату R17#5	room-init (Scene3D init event)	low
+R17	30	368	Chara.ChangeRunModeChara	runmode	0	1	A22@C16;A68@C16	вход в комнату R17#7	room-init (Scene3D init event)	low
+R17	30	376	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A22@C16;A68@C16	вход в комнату R17#7	room-init (Scene3D init event)	low
+R17	31	488	Chara.ChangeRunModeChara	runmode	0	1	A26@C16	вход в комнату R17#6	room-init (Scene3D init event)	medium
+R17	32	523	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R17#2 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R17	33	609	Chara.ChangeRunModeChara	runmode	0	1	A25@C16;A88@C16	вход в комнату R17#8	room-init (Scene3D init event)	low
+R17	34	786	Chara.ChangeRunModeChara	runmode	0	1	A60@C16	вход в комнату R17#9	room-init (Scene3D init event)	medium
+R17	37	1889	Chara.ChangeRunModeChara	runmode	0	0	C16_01	после 01073	text-near: реплика до вызова	high
+R17	44	11	Chara.ChangeRunModeChara	runmode	0	1	C16_04	перед 04032	text-near: реплика после вызова	high
+R17	44	403	Chara.ChangeRunModeChara	runmode	0	0	C16_04	после 04033	text-near: реплика до вызова	high
+R17	59	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A16_09	вход в зону события ?	place-far 10.50 (ближайшее DS-событие)	low
+R17	60	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	A16_09	вход в зону события ?	place-far 11.14 (ближайшее DS-событие)	low
+R18	1	280	Chara.ChangeRunModeChara	runmode	0	0	A00@C17;A46@C17	вход в комнату R18#0	room-init (Scene3D init event)	low
+R18	2	263	Chara.ChangeRunModeChara	runmode	0	0	A45@C17	вход в комнату R18#1	room-init (Scene3D init event)	medium
+R18	3	1176	Chara.ChangeRunModeChara	runmode	0	0	C17_01	после 01077	text-near: реплика до вызова	high
+R18	4	363	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R18#2 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R18	12	691	Chara.ChangeRunModeChara	runmode	0	0	A30@C17	вход в комнату R18#3	room-init (Scene3D init event)	medium
+R18	12	1001	Chara.ChangeRunModeChara	runmode	0	0	A30@C17	вход в комнату R18#3	room-init (Scene3D init event)	medium
+R18	16	409	Chara.ChangeRunModeChara	runmode	0	1	A35@C17;A70@C17	вход в комнату R18#4	room-init (Scene3D init event)	low
+R18	17	226	Chara.ChangeRunModeChara	runmode	0	0	A40@C17	вход в комнату R18#5	room-init (Scene3D init event)	medium
+R18	18	425	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R18#6 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R18	24	372	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R18#7 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R18	24	599	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R18#7 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R18	28	601	Chara.ChangeRunModeChara	runmode	0	1	A19@C17;A20@C17	вход в комнату R18#8	room-init (Scene3D init event)	low
+R18	32	240	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R18#9 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R18	32	248	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1		вход в комнату R18#9 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R18	35	367	Chara.ChangeRunModeChara	runmode	0	1	A26@C17	вход в комнату R18#21	room-init (Scene3D init event)	medium
+R18	38	201	Chara.ChangeRunModeChara	runmode	0	1	A22@C17;A68@C17	вход в комнату R18#22	room-init (Scene3D init event)	low
+R18	38	209	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A22@C17;A68@C17	вход в комнату R18#22	room-init (Scene3D init event)	low
+R18	41	388	Chara.ChangeRunModeChara	runmode	0	1	A25@C17;A88@C17	вход в комнату R18#23	room-init (Scene3D init event)	low
+R18	43	338	Chara.ChangeRunModeChara	runmode	0	1	A17_28	вход в зону события	place 0.37	medium
+R18	44	301	Chara.ChangeRunModeChara	runmode	0	0	A17_27	вход в зону события	place 0.30	medium
+R18	45	513	Chara.ChangeRunModeChara	runmode	0	1	A78@C17;A79@C17	вход в комнату R18#10	room-init (Scene3D init event)	low
+R18	45	521	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A78@C17;A79@C17	вход в комнату R18#10	room-init (Scene3D init event)	low
+R18	50	251	Chara.ChangeRunModeChara	runmode	0	1	A08@C17;A80@C17	вход в комнату R18#11	room-init (Scene3D init event)	low
+R18	50	259	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	A08@C17;A80@C17	вход в комнату R18#11	room-init (Scene3D init event)	low
+R18	52	364	Chara.ChangeRunModeChara	runmode	0	1	A09@C17	вход в комнату R18#12	room-init (Scene3D init event)	medium
+R18	52	372	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A09@C17	вход в комнату R18#12	room-init (Scene3D init event)	medium
+R18	55	135	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R18#14 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R18	57	319	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R18#13 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R18	57	327	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1		вход в комнату R18#13 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R18	59	387	Chara.ChangeRunModeChara	runmode	0	1	A12@C17	вход в комнату R18#15	room-init (Scene3D init event)	medium
+R18	59	395	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	A12@C17	вход в комнату R18#15	room-init (Scene3D init event)	medium
+R18	60	142	Chara.ChangeRunModeChara	runmode	0	1			unknown: нет реплик в событии; триггер не найден (не зона/init/start)	unknown
+R18	60	150	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0			unknown: нет реплик в событии; триггер не найден (не зона/init/start)	unknown
+R18	62	220	Chara.ChangeRunModeChara	runmode	0	1	A04@C17;A05@C17;A07@C17	вход в комнату R18#16	room-init (Scene3D init event)	low
+R18	63	163	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R18#17 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R18	64	163	Chara.ChangeRunModeChara	runmode	0	1	A06@C17	вход в комнату R18#18	room-init (Scene3D init event)	medium
+R18	65	163	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R18#19 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R18	66	435	Chara.ChangeRunModeChara	runmode	0	1	A15@C17	вход в комнату R18#20	room-init (Scene3D init event)	medium
+R18	81	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	A17_24	вход в зону события ?	place-far 10.70 (ближайшее DS-событие)	low
+R18	82	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	A17_24	вход в зону события ?	place-far 11.34 (ближайшее DS-событие)	low
+R19	1	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	1	C18_28	вход в зону события ?	place-far 27.67 (ближайшее DS-событие)	low
+R19	2	3	CharaMgr.SetFastRunModeOperationChara	fastrun	0	0	C18_28	вход в зону события ?	place-far 21.53 (ближайшее DS-событие)	low
+R19	3	296	Chara.ChangeRunModeChara	runmode	0	0	A00@C18;A46@C18	вход в комнату R19#3	room-init (Scene3D init event)	low
+R19	3	304	Chara.SetFastRunModeChara	fastrun-chara	0	0	A00@C18;A46@C18	вход в комнату R19#3	room-init (Scene3D init event)	low
+R19	4	263	Chara.ChangeRunModeChara	runmode	0	0	A45@C18	вход в комнату R19#4	room-init (Scene3D init event)	medium
+R19	4	271	Chara.SetFastRunModeChara	fastrun-chara	0	0	A45@C18	вход в комнату R19#4	room-init (Scene3D init event)	medium
+R19	5	1251	Chara.ChangeRunModeChara	runmode	0	0	C18_01	после 01020	text-near: реплика до вызова	high
+R19	6	363	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R19#5 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R19	6	371	Chara.SetFastRunModeChara	fastrun-chara	0	0		вход в комнату R19#5 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R19	7	384	Chara.ChangeRunModeChara	runmode	0	0	A30@C18	вход в комнату R19#6	room-init (Scene3D init event)	medium
+R19	7	694	Chara.ChangeRunModeChara	runmode	0	0	A30@C18	вход в комнату R19#6	room-init (Scene3D init event)	medium
+R19	7	702	Chara.SetFastRunModeChara	fastrun-chara	0	0	A30@C18	вход в комнату R19#6	room-init (Scene3D init event)	medium
+R19	18	323	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R19#7 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R19	18	550	Chara.ChangeRunModeChara	runmode	0	0		вход в комнату R19#7 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R19	18	558	Chara.SetFastRunModeChara	fastrun-chara	0	0		вход в комнату R19#7 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R19	22	664	Chara.ChangeRunModeChara	runmode	0	1	A19@C18;A20@C18	вход в комнату R19#8	room-init (Scene3D init event)	low
+R19	22	672	Chara.SetFastRunModeChara	fastrun-chara	0	0	A19@C18;A20@C18	вход в комнату R19#8	room-init (Scene3D init event)	low
+R19	28	315	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R19#9 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R19	28	323	Chara.SetFastRunModeChara	fastrun-chara	0	1		вход в комнату R19#9 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R19	31	636	Chara.ChangeRunModeChara	runmode	0	1	A78@C18;A79@C18	вход в комнату R19#10	room-init (Scene3D init event)	low
+R19	31	644	Chara.SetFastRunModeChara	fastrun-chara	0	1	A78@C18;A79@C18	вход в комнату R19#10	room-init (Scene3D init event)	low
+R19	36	251	Chara.ChangeRunModeChara	runmode	0	1	A08@C18;A80@C18	вход в комнату R19#11	room-init (Scene3D init event)	low
+R19	36	259	Chara.SetFastRunModeChara	fastrun-chara	0	0	A08@C18;A80@C18	вход в комнату R19#11	room-init (Scene3D init event)	low
+R19	40	758	Chara.ChangeRunModeChara	runmode	0	1	A09@C18	вход в комнату R19#12	room-init (Scene3D init event)	medium
+R19	40	766	Chara.SetFastRunModeChara	fastrun-chara	0	1	A09@C18	вход в комнату R19#12	room-init (Scene3D init event)	medium
+R19	49	148	Chara.ChangeRunModeChara	runmode	0	1	A10@C18	вход в комнату R19#13	room-init (Scene3D init event)	medium
+R19	49	156	Chara.SetFastRunModeChara	fastrun-chara	0	0	A10@C18	вход в комнату R19#13	room-init (Scene3D init event)	medium
+R19	54	256	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R19#14 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R19	54	264	Chara.SetFastRunModeChara	fastrun-chara	0	1		вход в комнату R19#14 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R19	58	68	Chara.ChangeRunModeChara	runmode	0	1	A13@C18	вход в комнату R19#16	room-init (Scene3D init event)	medium
+R19	58	76	Chara.SetFastRunModeChara	fastrun-chara	0	0	A13@C18	вход в комнату R19#16	room-init (Scene3D init event)	medium
+R19	59	68	Chara.ChangeRunModeChara	runmode	0	1	A14@C18	вход в комнату R19#17	room-init (Scene3D init event)	medium
+R19	59	76	Chara.SetFastRunModeChara	fastrun-chara	0	0	A14@C18	вход в комнату R19#17	room-init (Scene3D init event)	medium
+R19	60	129	Chara.ChangeRunModeChara	runmode	0	1	A18@C18	вход в комнату R19#18	room-init (Scene3D init event)	medium
+R19	60	137	Chara.SetFastRunModeChara	fastrun-chara	0	0	A18@C18	вход в комнату R19#18	room-init (Scene3D init event)	medium
+R19	60	229	Chara.ChangeRunModeChara	runmode	0	1	A18@C18	вход в комнату R19#18	room-init (Scene3D init event)	medium
+R19	60	237	Chara.SetFastRunModeChara	fastrun-chara	0	0	A18@C18	вход в комнату R19#18	room-init (Scene3D init event)	medium
+R19	61	507	Chara.ChangeRunModeChara	runmode	8	1	A01@C18;A91@C18	вход в комнату R19#19	room-init (Scene3D init event)	low
+R19	61	515	Chara.SetFastRunModeChara	fastrun-chara	8	0	A01@C18;A91@C18	вход в комнату R19#19	room-init (Scene3D init event)	low
+R19	61	563	Chara.ChangeRunModeChara	runmode	10	1	A01@C18;A91@C18	вход в комнату R19#19	room-init (Scene3D init event)	low
+R19	61	571	Chara.SetFastRunModeChara	fastrun-chara	10	0	A01@C18;A91@C18	вход в комнату R19#19	room-init (Scene3D init event)	low
+R19	61	610	Chara.ChangeRunModeChara	runmode	0	1	A01@C18;A91@C18	вход в комнату R19#19	room-init (Scene3D init event)	low
+R19	61	618	Chara.SetFastRunModeChara	fastrun-chara	0	0	A01@C18;A91@C18	вход в комнату R19#19	room-init (Scene3D init event)	low
+R19	107	400	Chara.ChangeRunModeChara	runmode	0	0	A77@C18	вход в комнату R19#20	room-init (Scene3D init event)	medium
+R19	107	408	Chara.SetFastRunModeChara	fastrun-chara	0	0	A77@C18	вход в комнату R19#20	room-init (Scene3D init event)	medium
+R19	107	456	Chara.ChangeRunModeChara	runmode	10	0	A77@C18	вход в комнату R19#20	room-init (Scene3D init event)	medium
+R19	107	464	Chara.SetFastRunModeChara	fastrun-chara	10	0	A77@C18	вход в комнату R19#20	room-init (Scene3D init event)	medium
+R19	108	140	Chara.ChangeRunModeChara	runmode	0	1		вход в комнату R19#21 ?	unknown: init-событие комнаты без DS-карты (maps.tsv)	unknown
+R19	112	181	Chara.ChangeRunModeChara	runmode	10	0	C18_16	вход в зону события; после 07053	place 0.49 вместо слабой реплики C00_07	medium
+R19	112	189	Chara.SetFastRunModeChara	fastrun-chara	10	0	C18_16	вход в зону события; после 07053	place 0.49 вместо слабой реплики C00_07	medium
+R19	113	957	Chara.ChangeRunModeChara	runmode	8	1	C18_17	после 17003 перед 17004	text-near: реплика до/после вызова	high
+R19	113	965	Chara.SetFastRunModeChara	fastrun-chara	8	0	C18_17	после 17003 перед 17004	text-near: реплика до/после вызова	high
+R19	114	613	Chara.ChangeRunModeChara	runmode	0	1	C18_20	после 20020	text-near: реплика до вызова	high
+R19	114	621	Chara.SetFastRunModeChara	fastrun-chara	0	0	C18_20	после 20020	text-near: реплика до вызова	high
+R19	128	373	Chara.ChangeRunModeChara	runmode	0	0	C18_24	перед 24001	text-near: реплика после вызова	high
