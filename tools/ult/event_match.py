@@ -27,9 +27,9 @@ for r in csv.DictReader(open(EX+'/maps.tsv'),delimiter='\t'):
     for x in r['ps2_rooms'].split(';'):
         if '#' in x:
             s,i=x.split('#'); rooms[(s,int(i))].add(m)
-def chap(scene): # PS2 scene -> DS chapter
-    if scene=='OP': return 0
-    n=int(scene[1:]); return n if n<=13 else n-1
+# PS2 scene -> DS chapter by data/ult/scenario.toml (SIDtoRID: C08=R10, C09=R08, C10=R09; Y-59)
+CHAP={s['ps2']:int(s['ds'][1:]) for s in tomllib.load(open(os.path.expanduser('~/Developer/games/sunpetal/data/ult/scenario.toml'),'rb'))['scenario'] if 'ds' in s}
+def chap(scene): return CHAP.get(scene,-1)
 res={}  # (scene,event_id)->(ds_scene,dist)
 dist_all=[]
 for f in sorted(glob.glob(EX+'/scenes/*.json')):
@@ -51,7 +51,21 @@ for f in sorted(glob.glob(EX+'/scenes/*.json')):
             res[(sc,e['event_id'])]=(best['scene'],dist)
 os.makedirs('build/zones',exist_ok=True)
 open('build/zones/event_map.tsv','w').write('scene\tevent\tds_scene\tdist\n'+''.join(f'{k[0]}\t{k[1]}\t{v[0]}\t{v[1]:.2f}\n' for k,v in sorted(res.items())))
-good={k:v for k,v in res.items() if v[1]<1.5}
+good={k:[v[0]] for k,v in res.items() if v[1]<1.5}
+# where several DS events stand at one point, sunpetal-ee Y-60 picks (out/y60/pick_shape.tsv: text, geometry of the .EVN offset);
+# an event that branches by its visit flags is several DS scenes (text_multi: every scene of its branches, out/y60/branch.tsv)
+Y60=EX+'/../../y60'
+multi=collections.defaultdict(list)
+for r in csv.DictReader(open(Y60+'/branch.tsv'),delimiter='\t'):
+    multi[(r['ps2_scene'],int(r['event_id']))].append(r['ds_scene'])
+picked=collections.Counter()
+for r in csv.DictReader(open(Y60+'/pick_shape.tsv'),delimiter='\t'):
+    k=(r['ps2_scene'],int(r['event_id'])); rule=r['final_rule']
+    if rule=='text_multi' and k in multi: good[k]=sorted(set(multi[k]))
+    elif r['final'] and not rule.startswith('unknown'): good[k]=[r['final']]
+    else: continue
+    picked[rule.split(':')[0]]+=1
+print('Y-60 picks',dict(picked))
 print('areas with candidates',len(res),'dist<1.5:',len(good))
 import statistics
 print('quantiles',[round(sorted(dist_all)[int(len(dist_all)*q)],2) for q in (.1,.25,.5,.75,.9)])
@@ -74,8 +88,9 @@ sw={}
 for r in csv.DictReader(open(EX+'/../../y50/zone_events.tsv'),delimiter='\t'):
     k=(r['scene'],int(r['event']))
     if k in good:
-        key=(good[k][0],r['scene'],r['scene3d'],r['kind'],r['zone'])
-        sw.setdefault(key,[]).append((int(r['event']),int(r['pc']),r['onoff']))
+        for ds_scene in good[k]:
+            key=(ds_scene,r['scene'],r['scene3d'],r['kind'],r['zone'])
+            sw.setdefault(key,[]).append((int(r['event']),int(r['pc']),r['onoff']))
 rows=[]
 for k,v in sorted(sw.items()):
     states={x[2] for x in v}
