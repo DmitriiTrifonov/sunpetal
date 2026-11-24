@@ -302,6 +302,9 @@ mod tests {
         let s = switches("C02_04");
         assert!(s.contains(&("R02", 0, "height", 2, false)) && s.contains(&("R02", 0, "height", 0, true)));
         assert!(switches("no such scene").is_empty());
+        // the stairs by the floor (Y-56d): 2F->3F writes the stairs' room only; a stair event bound by place to a story scene is out
+        assert!(switches("A04_18").contains(&("R04", 5, "height", 0, false)));
+        assert!(!switches("C03_03").iter().any(|z| (z.0, z.1, z.2, z.3) == ("R03", 3, "height", 0)));
     }
 
     #[test]

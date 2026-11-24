@@ -83,8 +83,7 @@ print('zones new over the text anchors:',len(czs-old),'of',len(czs))
 
 # the table the runtime reads: what a DS scene switches in a PS2 room (data/ult/zone_switch.tsv). The value of a zone per event is
 # sunpetal-ee Y-56b (out/y56b/zone_branch.tsv, paths of the event followed): `fixed` every path that touches the zone gives one value,
-# `branch` it hangs on var 0x6002[0]/flags at the event's start (Y-56c) and the value is the last switch by pc (live 226/248), an
-# unreached zone is left out; so is a zone switched by several events of the scene with both states (the order is not known)
+# `branch` it hangs on var 0x6002[0]/flags at the event's start (see below), an unreached zone is left out; so is a zone switched by several events of the scene with both states (the order is not known)
 ZB={}
 for r in csv.DictReader(open(EX+'/../../y56b/zone_branch.tsv'),delimiter='\t'):
     ZB[(r['scene'],int(r['event']),r['scene3d'],r['kind'],r['zone'])]=(r['rule'],r['final'])
@@ -106,6 +105,20 @@ for k,v in sorted(sw.items()):
     if any(p is None for p in per.values()): why['unreached or missing']+=1; continue
     if len({p[1] for p in per.values()})>1: why['several events, both states']+=1; continue
     rows.append((k,next(iter(per.values()))[1],'branch' if any(p[0]=='branch' for p in per.values()) else 'fixed'))
+# the `branch` zones are the hotel stairs (and R11's spiral): var 0x6002[0] is the floor, the switches go to the stairs' room only
+# (sunpetal-ee Y-56c/Y-56d, out/y56d/verdict_room.tsv, live in R03 32/32): `resolved` takes the floor's value (rule `stairs`);
+# `false_map` (a stair event bound by place to a story scene) and `not_touched` (the stairs do not write that room) are left out
+VR={}
+for r in csv.DictReader(open(EX+'/../../y56d/verdict_room.tsv'),delimiter='\t'):
+    VR[(r['ds_scene'],r['ps2_scene'],r['scene3d'],r['kind'],r['zone'])]=(r['verdict'],r['final'])
+kept=[]
+for k,v,rule in rows:
+    if rule=='branch':
+        verdict,final=VR.get(k,('?',''))
+        if verdict!='resolved': why[verdict]+=1; continue
+        v,rule=('on' if final=='1' else 'off'),'stairs'
+    kept.append((k,v,rule))
+rows=kept
 os.makedirs('data/ult',exist_ok=True)
 open('data/ult/zone_switch.tsv','w').write('ds_scene\tps2_scene\tscene3d\tkind\tzone\tonoff\trule\n'+''.join('\t'.join(k)+'\t'+v+'\t'+rule+'\n' for k,v,rule in rows))
 print('zone_switch rows',len(rows),dict(collections.Counter(r[2] for r in rows)),'left out',dict(why))
