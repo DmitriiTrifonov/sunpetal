@@ -217,15 +217,16 @@ pub fn stairs_floor(y: i32) -> u32 {
     (1.0 + (y as f64 / 4096.0 / 6.2).round()).max(1.0) as u32
 }
 
-/// The walls and floors of a stairs' room on a floor (`data/ult/stairs_floor.tsv`, a copy of `sunpetal-ee` `out/y56d/stairs_floor_room.tsv`;
-/// R03 live 32/32): (kind, zone, on). A room that is not that floor's flight gives none.
+/// The zones of a stairs' room on a floor (`data/ult/stairs_floor.tsv`, `tools/ult/stairs_floor.py`: R03/R04 by `sunpetal-ee` Y-56e,
+/// live, all kinds; the rest by Y-56d, walls and floors): (kind, zone, on). A room that is not that floor's flight gives none.
+/// Camera zones are in the table but not followed yet (the stairs' camera is of fixed points, Y-63).
 fn stairs_zones(scene: &str, index: usize, floor: u32) -> Vec<(&'static str, usize, bool)> {
     static T: &str = include_str!("../../../data/ult/stairs_floor.tsv");
     T.lines()
         .skip(1)
         .filter_map(|l| {
             let c: Vec<&str> = l.split('\t').collect();
-            (c.len() == 6 && c[0] == scene && c[1].parse() == Ok(index) && c[4].parse() == Ok(floor)).then(|| Some((c[2], c[3].parse().ok()?, c[5] == "1")))?
+            (c.len() >= 6 && c[0] == scene && c[1].parse() == Ok(index) && c[4].parse() == Ok(floor)).then(|| Some((c[2], c[3].parse().ok()?, c[5] == "1")))?
         })
         .collect()
 }
@@ -410,6 +411,9 @@ mod tests {
         assert!(stairs_zones("R03", 0, 3).is_empty());
         let (up, down) = (stairs_zones("R03", 3, 4), stairs_zones("R03", 3, 3));
         assert!(up.iter().any(|z| down.iter().any(|d| (d.0, d.1) == (z.0, z.1) && d.2 != z.2)), "floors 3 and 4 differ");
+        // Y-56e: R04's upper flight (room 5) is floors 3..5 by #9/#10, the lower (room 6) floor 2 by #24; all four kinds
+        assert!(stairs_zones("R04", 6, 4).is_empty() && stairs_zones("R04", 5, 2).is_empty());
+        assert!(!stairs_zones("R04", 6, 2).is_empty() && stairs_zones("R04", 5, 4).iter().any(|z| z.0 == "event"));
     }
 
     #[test]
