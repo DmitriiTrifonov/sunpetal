@@ -81,9 +81,13 @@ for r in csv.DictReader(open(EX+'/../../y50/zone_events.tsv'),delimiter='\t'):
     if r['confidence']!='unknown': old.add((r['scene'],r['scene3d'],r['kind'],r['zone']))
 print('zones new over the text anchors:',len(czs-old),'of',len(czs))
 
-# the table the runtime reads: what a DS scene switches in a PS2 room (data/ult/zone_switch.tsv). A zone one event both turns on and off
-# ends as the last switch by pc (the event runs through; branches are not followed, so this is a guess, column `rule` = last);
-# a zone switched by several events of the scene with both states is left out (the order of the events is not known)
+# the table the runtime reads: what a DS scene switches in a PS2 room (data/ult/zone_switch.tsv). The value of a zone per event is
+# sunpetal-ee Y-56b (out/y56b/zone_branch.tsv, paths of the event followed): `fixed` every path that touches the zone gives one value,
+# `branch` it hangs on var 0x6002[0]/flags at the event's start (Y-56c) and the value is the last switch by pc (live 226/248), an
+# unreached zone is left out; so is a zone switched by several events of the scene with both states (the order is not known)
+ZB={}
+for r in csv.DictReader(open(EX+'/../../y56b/zone_branch.tsv'),delimiter='\t'):
+    ZB[(r['scene'],int(r['event']),r['scene3d'],r['kind'],r['zone'])]=(r['rule'],r['final'])
 sw={}
 for r in csv.DictReader(open(EX+'/../../y50/zone_events.tsv'),delimiter='\t'):
     k=(r['scene'],int(r['event']))
@@ -91,11 +95,17 @@ for r in csv.DictReader(open(EX+'/../../y50/zone_events.tsv'),delimiter='\t'):
         for ds_scene in good[k]:
             key=(ds_scene,r['scene'],r['scene3d'],r['kind'],r['zone'])
             sw.setdefault(key,[]).append((int(r['event']),int(r['pc']),r['onoff']))
-rows=[]
+rows=[];why=collections.Counter()
 for k,v in sorted(sw.items()):
-    states={x[2] for x in v}
-    if len(states)==1: rows.append((k,v[0][2],'only'))
-    elif len({x[0] for x in v})==1: rows.append((k,max(v,key=lambda x:x[1])[2],'last'))
+    per={}
+    for e in sorted({x[0] for x in v}):
+        rule,final=ZB.get((k[1],e,k[2],k[3],k[4]),('?',''))
+        if rule=='fixed': per[e]=('fixed','on' if final=='1' else 'off')
+        elif rule=='branch': per[e]=('branch',max((x for x in v if x[0]==e),key=lambda x:x[1])[2])
+        else: per[e]=None
+    if any(p is None for p in per.values()): why['unreached or missing']+=1; continue
+    if len({p[1] for p in per.values()})>1: why['several events, both states']+=1; continue
+    rows.append((k,next(iter(per.values()))[1],'branch' if any(p[0]=='branch' for p in per.values()) else 'fixed'))
 os.makedirs('data/ult',exist_ok=True)
 open('data/ult/zone_switch.tsv','w').write('ds_scene\tps2_scene\tscene3d\tkind\tzone\tonoff\trule\n'+''.join('\t'.join(k)+'\t'+v+'\t'+rule+'\n' for k,v,rule in rows))
-print('zone_switch rows',len(rows),'by last',sum(1 for r in rows if r[2]=='last'),'left out',len(sw)-len(rows))
+print('zone_switch rows',len(rows),dict(collections.Counter(r[2] for r in rows)),'left out',dict(why))
