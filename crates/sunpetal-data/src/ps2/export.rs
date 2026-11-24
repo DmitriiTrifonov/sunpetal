@@ -361,6 +361,25 @@ pub fn room_by_scene(map: u32, ds_scene: &str) -> Option<(String, usize)> {
     })
 }
 
+/// The PS2 -> DS shift of a DS map's world (`data/ult/areas.toml`, the `shift` its PS2 model was aligned by: DS = PS2 + shift,
+/// DS world units), `None` for a map not aligned. A46 is (16; −18,6; −13), most maps are at 0.
+pub fn area_shift(map: u32) -> Option<[f64; 3]> {
+    static T: &str = include_str!("../../../../data/ult/areas.toml");
+    let file = format!("file = \"Model/Area/A{:02}/", map);
+    let mut here = false;
+    for l in T.lines() {
+        if l.starts_with("[[area]]") {
+            here = false;
+        } else if l.starts_with(&file) {
+            here = true;
+        } else if let (true, Some(v)) = (here, l.strip_prefix("shift =")) {
+            let n: Vec<f64> = v.trim().trim_matches(|c| c == '[' || c == ']').split(',').filter_map(|x| x.trim().parse().ok()).collect();
+            return (n.len() == 3).then(|| [n[0], n[1], n[2]]);
+        }
+    }
+    None
+}
+
 impl MapRow {
     /// The room of this area for the DS scene `ds_scene` (`C13_12`): the scene's own room on a list map (`room_by_scene`), else the
     /// candidate of that scene's chapter (`ps2_chapter`), else the primary one (`Y-38`'s rule).
@@ -522,6 +541,14 @@ mod tests {
         assert_eq!(m[1].room_for(Some("C08_02")), Some(("R10".into(), 5)));
         assert_eq!(room_by_scene(19, "C19_01"), None);
         assert!(room_by_scene(20, "C08_02").is_none());
+    }
+
+    #[test]
+    fn each_map_has_its_own_shift() {
+        let a46 = area_shift(46).unwrap();
+        assert!((a46[0] - 16.0).abs() < 0.01 && (a46[1] + 18.6).abs() < 0.01 && (a46[2] + 13.0).abs() < 0.01, "{:?}", a46);
+        assert!(area_shift(19).unwrap().iter().all(|v| v.abs() < 0.01));
+        assert_eq!(area_shift(99), None);
     }
 
     /// With the real export (`SUNPETAL_EE_EXPORT=…/out/export/v1`): every scene reads, and the numbers of the notes hold.

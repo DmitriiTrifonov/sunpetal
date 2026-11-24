@@ -44,7 +44,20 @@ struct Follow {
 static FOLLOW: std::sync::Mutex<Option<Follow>> = std::sync::Mutex::new(None);
 /// The pointer to the world (its first word the hero, whose place is at +0x18, 1/4096) and the PS2 -> DS shift.
 const WORLD: u32 = 0x0206_B45C + 4;
-const SHIFT: [f64; 3] = [16.0, -18.5996, -13.0];
+/// the room's map's shift (`areas.toml`, set by `nativewalk::room`); A46's until then
+static SHIFT: std::sync::Mutex<[f64; 3]> = std::sync::Mutex::new([16.0, -18.5996, -13.0]);
+
+/// The PS2 -> DS shift of the room's map (DS = PS2 / 10 + shift, DS world units).
+pub fn shift() -> [f64; 3] {
+    *SHIFT.lock().unwrap()
+}
+
+pub fn set_shift(s: [f64; 3]) {
+    *SHIFT.lock().unwrap() = s;
+    if let Some(p) = PS2.lock().unwrap().as_mut() {
+        p.shift = s;
+    }
+}
 
 /// The camera's turn about y (radians, f32 bits), what the walk is relative to (`g_cameracorrection`).
 static YAW_NOW: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
@@ -92,7 +105,7 @@ pub fn set_ps2_path(root: &str, scene: &str, record: usize, path: usize, t: f32)
     let pos = p.position(t, cam.scale).ok_or("path without keys")?;
     let rot = p.rotation(t).ok_or("path without keys")?;
     // the export's units are the scene's tenths (`scene_scale` 0,1): the DS world is the model's units
-    set_ps2([pos[0] as f64 * 0.1, pos[1] as f64 * 0.1, pos[2] as f64 * 0.1], rot[0] as f64, rot[1] as f64, 0.0, [16.0, -18.5996, -13.0], false);
+    set_ps2([pos[0] as f64 * 0.1, pos[1] as f64 * 0.1, pos[2] as f64 * 0.1], rot[0] as f64, rot[1] as f64, 0.0, shift(), false);
     Ok((pos, rot))
 }
 
@@ -125,7 +138,7 @@ pub fn follow_ps2_path(root: &str, scene: &str, record: usize, path: Option<usiz
         eye: [0.0; 3],
         fixed: path.is_some(),
     });
-    set_ps2([0.0; 3], 0.0, 0.0, 0.0, SHIFT, false);
+    set_ps2([0.0; 3], 0.0, 0.0, 0.0, shift(), false);
     Ok(())
 }
 
@@ -257,7 +270,8 @@ unsafe extern "C" fn after(c: *mut Cpu) {
         if hero != 0 {
             // the hero in the export's units: the DS world less the shift, tenths of it
             let at = |o: u32| (mem_read32(c, hero + o) as i32) as f64 / 4096.0;
-            let s = [((at(0x18) - SHIFT[0]) * 10.0) as f32, ((at(0x1C) - SHIFT[1]) * 10.0) as f32, ((at(0x20) - SHIFT[2]) * 10.0) as f32];
+            let sh = shift();
+            let s = [((at(0x18) - sh[0]) * 10.0) as f32, ((at(0x1C) - sh[1]) * 10.0) as f32, ((at(0x20) - sh[2]) * 10.0) as f32];
             follow_frame(f, p, s);
         }
     }

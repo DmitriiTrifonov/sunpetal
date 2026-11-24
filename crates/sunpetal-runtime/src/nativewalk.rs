@@ -6,8 +6,6 @@ use std::sync::Mutex;
 use sunpetal_data::ps2::export::{Area3d, Export};
 use sunpetal_data::ps2::walk::{fast_run_allowed, walk_frame, Speeds, Walker, SELEKA, SELEKA_FAST};
 
-/// The PS2 -> DS shift of the world; the export's units are tenths of it.
-const SHIFT: [f64; 3] = [16.0, -18.5996, -13.0];
 /// The d-pad's bits in the keys word (`KEY_NAMES`: A B SELECT START RIGHT LEFT UP DOWN ...).
 const RIGHT: u32 = 1 << 4;
 const LEFT: u32 = 1 << 5;
@@ -52,6 +50,9 @@ pub fn room(root: &str, scene: &str, index: usize) -> Result<(), String> {
     if !known {
         return Err(format!("rooms.tsv has no room {} {}", scene, index));
     }
+    // the hero's map gives the shift of the PS2 world (each map is aligned on its own: A46 by 16, most by none)
+    let map = session::hero_map().ok_or("the hero's map is not known")?;
+    nativecam::set_shift(sunpetal_data::ps2::export::area_shift(map as u32).ok_or_else(|| format!("map {} has no PS2 alignment in areas.toml", map))?);
     nativecam::follow_ps2_path(root, scene, index, None)?;
     enable(root, scene, index)
 }
@@ -211,7 +212,8 @@ pub fn frame(keys: u32) -> u32 {
     let Some(w) = g.as_mut() else { return keys };
     if let Some(pos) = session::hero_pos() {
         let ds = |i: usize| pos[i] as f64 / 4096.0;
-        let here = [((ds(0) - SHIFT[0]) * 10.0) as f32, ((ds(1) - SHIFT[1]) * 10.0) as f32, ((ds(2) - SHIFT[2]) * 10.0) as f32];
+        let sh = nativecam::shift();
+        let here = [((ds(0) - sh[0]) * 10.0) as f32, ((ds(1) - sh[1]) * 10.0) as f32, ((ds(2) - sh[2]) * 10.0) as f32];
         // the hero is where we put it, or somewhere else for the game's reasons (a scene, a teleport): start from there
         let ours = w.written.is_some_and(|k| (0..3).all(|i| (k[i] - pos[i]).abs() < 8));
         let from = if ours { w.last.unwrap_or(here) } else { here };
@@ -229,7 +231,7 @@ pub fn frame(keys: u32) -> u32 {
             3 => walk_frame(&w.area, from, stick, nativecam::yaw(), Speeds { walk: SELEKA.walk, run: SELEKA_FAST }),
             _ => walk_frame(&w.area, from, stick, nativecam::yaw(), Speeds { walk: SELEKA.walk, run: SELEKA.run }),
         };
-        let out = [(to[0] as f64 / 10.0 + SHIFT[0]) * 4096.0, (to[1] as f64 / 10.0 + SHIFT[1]) * 4096.0, (to[2] as f64 / 10.0 + SHIFT[2]) * 4096.0];
+        let out = [(to[0] as f64 / 10.0 + sh[0]) * 4096.0, (to[1] as f64 / 10.0 + sh[1]) * 4096.0, (to[2] as f64 / 10.0 + sh[2]) * 4096.0];
         let out = [out[0].round() as i32, out[1].round() as i32, out[2].round() as i32];
         if stick != (0, 0) {
             session::hero_set_angle((w.walker.face.rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU * 65536.0) as u32 & 0xFFFF);
