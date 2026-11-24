@@ -5,7 +5,7 @@ use crate::{nativecam, session};
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::Mutex;
 use sunpetal_data::ps2::export::{Area3d, Export};
-use sunpetal_data::ps2::walk::{fast_run_allowed, walk_frame, Speeds, Walker, SELEKA, SELEKA_FAST};
+use sunpetal_data::ps2::walk::{auto_events, fast_run_allowed, walk_frame, Speeds, Walker, SELEKA, SELEKA_FAST};
 
 /// The d-pad's bits in the keys word (`KEY_NAMES`: A B SELECT START RIGHT LEFT UP DOWN ...).
 const RIGHT: u32 = 1 << 4;
@@ -23,6 +23,8 @@ struct Walk {
     written: Option<[i32; 3]>,
     /// the face (0 is +z, π/2 is +x) and the turn it is in
     walker: Walker,
+    /// the automatic event zones the hero stood in last frame (an event fires on walking in)
+    inside: Vec<usize>,
 }
 static WALK: Mutex<Option<Walk>> = Mutex::new(None);
 
@@ -79,7 +81,7 @@ pub fn enable(root: &str, scene: &str, area: usize) -> Result<(), String> {
     sunpetal_data::ps2::walk::apply_initial_zones(&mut area, &zones, scene, index);
     // the room's init event sets the run modes on entering it
     apply_run_sets(&run_sets(Some(&format!("{}#{}", scene, index)), None), &format!("{} {}", scene, index));
-    *WALK.lock().unwrap() = Some(Walk { area, room: (scene.to_string(), index), last: None, written: None, walker: Walker::default() });
+    *WALK.lock().unwrap() = Some(Walk { area, room: (scene.to_string(), index), last: None, written: None, walker: Walker::default(), inside: Vec::new() });
     Ok(())
 }
 
@@ -180,12 +182,45 @@ pub fn auto_tick() {
 pub fn set_zone(kind: &str, zone: usize, on: bool) -> Result<(), String> {
     let mut g = WALK.lock().unwrap();
     let w = g.as_mut().ok_or("the PS2 walk is off")?;
+    switch(&mut w.area, kind, zone, on).ok_or_else(|| format!("the room has no {} zone {} (kind is hit, height or event)", kind, zone))
+}
+
+/// One zone of the area on or off (an event zone: its save bit 0); `None` if there is no such zone.
+fn switch(area: &mut Area3d, kind: &str, zone: usize, on: bool) -> Option<()> {
     match kind {
-        "hit" => w.area.hit.get_mut(zone).map(|h| h.enabled = on),
-        "height" => w.area.height.get_mut(zone).map(|t| t.enabled = on),
-        _ => return Err("kind is hit or height".into()),
+        "hit" => area.hit.get_mut(zone).map(|h| h.enabled = on),
+        "height" => area.height.get_mut(zone).map(|t| t.enabled = on),
+        "event" => area.events.get_mut(zone).map(|e| e.enabled = on),
+        _ => None,
     }
-    .ok_or_else(|| format!("the room has no {} zone {}", kind, zone))
+}
+
+/// The zones a PS2 event switches when the hero walks into its automatic event zone (`data/ult/zone_trigger.tsv`, from
+/// `tools/ult/event_match.py`; for now the lighthouse switch R11 #39/#40, `sunpetal-ee` F-272): (kind, zone, on).
+fn triggers(scene: &str, index: usize, event: i32) -> Vec<(&'static str, usize, bool)> {
+    static T: &str = include_str!("../../../data/ult/zone_trigger.tsv");
+    T.lines()
+        .skip(1)
+        .filter_map(|l| {
+            let c: Vec<&str> = l.split('\t').collect();
+            (c.len() == 6 && c[0] == scene && c[1].parse() == Ok(index) && c[2].parse() == Ok(event)).then(|| Some((c[3], c[4].parse().ok()?, c[5] == "on")))?
+        })
+        .collect()
+}
+
+/// The hero at `p` (x, z, export units) facing `face`: the automatic event zones walked into this frame fire their switches.
+fn fire_events(w: &mut Walk, p: [f32; 2], face: f32) {
+    let now = auto_events(&w.area, p, face);
+    for &(zone, event) in now.iter().filter(|(z, _)| !w.inside.contains(z)) {
+        let t = triggers(&w.room.0, w.room.1, event);
+        for &(kind, z, on) in &t {
+            switch(&mut w.area, kind, z, on);
+        }
+        if !t.is_empty() {
+            eprintln!("ps2room: event zone {} of {} {} fires #{}: {} switches", zone, w.room.0, w.room.1, event, t.len());
+        }
+    }
+    w.inside = now.into_iter().map(|(z, _)| z).collect();
 }
 
 /// The zone switches a DS scene makes (`data/ult/zone_switch.tsv`, from `tools/ult/event_match.py`): (PS2 scene, room, kind, zone, on).
@@ -208,10 +243,7 @@ pub fn scene_started(ds_scene: &str) -> usize {
     let mut n = 0;
     for (scene, index, kind, zone, on) in switches(ds_scene) {
         if w.room.0 == scene && w.room.1 == index {
-            match kind {
-                "hit" => w.area.hit.get_mut(zone).map(|h| h.enabled = on),
-                _ => w.area.height.get_mut(zone).map(|t| t.enabled = on),
-            };
+            switch(&mut w.area, kind, zone, on);
             n += 1;
             eprintln!("ps2room: {} switches {} {} {} of {} {}", ds_scene, kind, zone, if on { "on" } else { "off" }, scene, index);
         }
@@ -219,11 +251,18 @@ pub fn scene_started(ds_scene: &str) -> usize {
     n
 }
 
-/// The walking room and which of its walls and floors are on (for the debugger): (scene, index, hit flags, height flags).
-pub fn zone_state() -> Option<(String, usize, Vec<bool>, Vec<bool>)> {
+/// The walking room and which of its walls, floors and event zones are on (for the debugger): (scene, index, hit, height, event flags).
+pub type ZoneState = (String, usize, Vec<bool>, Vec<bool>, Vec<bool>);
+pub fn zone_state() -> Option<ZoneState> {
     let g = WALK.lock().unwrap();
     let w = g.as_ref()?;
-    Some((w.room.0.clone(), w.room.1, w.area.hit.iter().map(|h| h.enabled).collect(), w.area.height.iter().map(|t| t.enabled).collect()))
+    Some((
+        w.room.0.clone(),
+        w.room.1,
+        w.area.hit.iter().map(|h| h.enabled).collect(),
+        w.area.height.iter().map(|t| t.enabled).collect(),
+        w.area.events.iter().map(|e| e.enabled).collect(),
+    ))
 }
 
 /// The fast run allowed or not (`walk.md` §3a); its zones that forbid it stay as the room has them.
@@ -289,6 +328,9 @@ pub fn frame(keys: u32) -> u32 {
             w.last = Some(from);
             w.written = Some(pos);
         }
+        let at = w.last.unwrap_or(from);
+        let face = w.walker.face;
+        fire_events(w, [at[0], at[2]], face);
     }
     keys & !(RIGHT | LEFT | UP | DOWN)
 }
@@ -305,6 +347,16 @@ mod tests {
         // the stairs by the floor (Y-56d): 2F->3F writes the stairs' room only; a stair event bound by place to a story scene is out
         assert!(switches("A04_18").contains(&("R04", 5, "height", 0, false)));
         assert!(!switches("C03_03").iter().any(|z| (z.0, z.1, z.2, z.3) == ("R03", 3, "height", 0)));
+    }
+
+    #[test]
+    fn the_lighthouse_switch_fires_by_the_hero_place() {
+        // R11 room 5 (F-272): #39 turns the spiral's event zones 6..9 off and #40 back on; a wall one turns on, the other off
+        let (a, b) = (triggers("R11", 5, 39), triggers("R11", 5, 40));
+        assert_eq!((a.len(), b.len()), (49, 49));
+        assert!(a.contains(&("event", 6, false)) && b.contains(&("event", 6, true)));
+        assert!(a.iter().all(|&(k, z, on)| b.contains(&(k, z, !on))), "#40 undoes #39");
+        assert!(triggers("R11", 7, 39).is_empty() && triggers("R03", 5, 39).is_empty());
     }
 
     #[test]

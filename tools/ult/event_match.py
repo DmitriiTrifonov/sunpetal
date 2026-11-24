@@ -122,3 +122,24 @@ rows=kept
 os.makedirs('data/ult',exist_ok=True)
 open('data/ult/zone_switch.tsv','w').write('ds_scene\tps2_scene\tscene3d\tkind\tzone\tonoff\trule\n'+''.join('\t'.join(k)+'\t'+v+'\t'+rule+'\n' for k,v,rule in rows))
 print('zone_switch rows',len(rows),dict(collections.Counter(r[2] for r in rows)),'left out',dict(why))
+
+# the zones a PS2 event switches when the hero walks into its automatic event zone (data/ult/zone_trigger.tsv, nativewalk::frame):
+# only the events checked live — R11 #39/#40, the lighthouse switch of room 5 (sunpetal-ee F-272: event zones 3,4 -> #39, 5 -> #40,
+# the state is the last zone walked through, 20/20 live). Walls and floors are Y-56b `fixed` rows of that room; event zones are
+# zones.tsv on/off lists (an event in both is left out); camera zones are not followed by the runtime
+TRIGGERS={('R11',5):(39,40)}
+trig=[]
+for r in csv.DictReader(open(EX+'/../../y56b/zone_branch.tsv'),delimiter='\t'):
+    k=(r['scene'],int(r['scene3d']))
+    if int(r['event']) in TRIGGERS.get(k,()) and r['rule']=='fixed':
+        trig.append((r['scene'],r['scene3d'],r['event'],r['kind'],r['zone'],'on' if r['final']=='1' else 'off'))
+for r in csv.DictReader(open(EX+'/zones.tsv'),delimiter='\t'):
+    k=(r['scene'],int(r['scene3d']))
+    if r['kind']!='event' or k not in TRIGGERS: continue
+    evs=lambda col:{int(x.split('@')[0]) for x in r[col].split(',') if x}
+    for e in TRIGGERS[k]:
+        on,off=e in evs('on_events'),e in evs('off_events')
+        if on!=off: trig.append((r['scene'],r['scene3d'],str(e),'event',r['zone'],'on' if on else 'off'))
+trig=sorted(set(trig),key=lambda t:(t[0],int(t[1]),int(t[2]),t[3],int(t[4])))
+open('data/ult/zone_trigger.tsv','w').write('ps2_scene\tscene3d\tevent\tkind\tzone\tonoff\n'+''.join('\t'.join(t)+'\n' for t in trig))
+print('zone_trigger rows',len(trig),dict(collections.Counter((t[2],t[3],t[5]) for t in trig)))

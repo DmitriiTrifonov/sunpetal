@@ -257,6 +257,28 @@ fn collide_polygon(poly: &[[f32; 2]], p: [f32; 2], q: [f32; 2]) -> [f32; 2] {
     q
 }
 
+/// Whether the point (x, z) is in the shape (the border is in), as `ContainPoint` for an event zone.
+pub fn shape_contains(shape: &HitShape, p: [f32; 2]) -> bool {
+    match shape {
+        HitShape::Rect { x0, z0, dx, dz } => p[0] >= *x0 && p[0] <= x0 + dx && p[1] >= *z0 && p[1] <= z0 + dz,
+        HitShape::Ellipse { cx, cz, rx, rz } => ((p[0] - cx) / rx).powi(2) + ((p[1] - cz) / rz).powi(2) <= 1.0,
+        HitShape::Polygon(poly) => poly.len() >= 3 && contain_closed(poly, p) >= 0,
+    }
+}
+
+/// The automatic event zones the hero stands in (`event-conditions.md` §1–2): on (save bit 0), `Condition` bit 0 (no button),
+/// with an event; bit 2 checks the raw place, else the point 2 ahead along the face (0 is +z, π/2 is +x). (zone, event id).
+pub fn auto_events(area: &Area3d, raw: [f32; 2], face: f32) -> Vec<(usize, i32)> {
+    let fwd = [raw[0] + 2.0 * face.sin(), raw[1] + 2.0 * face.cos()];
+    area.events
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| e.enabled && e.condition & 1 != 0 && e.event_id >= 0)
+        .filter(|(_, e)| e.shape.as_ref().is_some_and(|s| shape_contains(s, if e.condition & 4 != 0 { raw } else { fwd })))
+        .map(|(i, e)| (i, e.event_id))
+        .collect()
+}
+
 /// The wall hit: the end `q` of a step from `p` (x, z) kept out of the area's shapes (rectangles, ellipses and polygons;
 /// not done: the switching of zones by the game's events): a rectangle gives only the coordinate of the face crossed (the hero slides along it).
 pub fn collide(area: &Area3d, p: [f32; 2], q: [f32; 2]) -> [f32; 2] {
@@ -626,7 +648,7 @@ mod tests {
     #[test]
     fn an_event_point_forbids_the_fast_run_within_150_units() {
         // `y22/fastrun_check.tsv`: a point 149 away forbids, 151 and 200 allow, none is allowed
-        let zone = |d: f32| EventZone { enabled: true, refer_enabled: true, refer: [d, 99.0, 0.0], refer_type: 0, condition: 0, event_id: 3 };
+        let zone = |d: f32| EventZone { enabled: true, refer_enabled: true, refer: [d, 99.0, 0.0], refer_type: 0, condition: 0, event_id: 3, shape: None };
         let mut a = area(vec![]);
         assert!(fast_run_allowed(&a, [0.0; 3]));
         a.events = vec![zone(149.0)];
@@ -637,6 +659,33 @@ mod tests {
         assert!(fast_run_allowed(&a, [0.0; 3]), "a zone that is off does not forbid");
         a.events = vec![EventZone { condition: 8, ..zone(10.0) }];
         assert!(fast_run_allowed(&a, [0.0, 0.0, 0.0]) == ((99.0f32).powi(2) + 100.0 >= 22500.0), "y counts with condition bit 3");
+    }
+
+    #[test]
+    fn an_automatic_event_zone_fires_by_the_raw_place_or_the_point_ahead() {
+        // R11 room 5 (the lighthouse), event zones 3 (#39) and 5 (#40): rectangles side by side, condition 5 (auto, raw place)
+        let rect = |x0: f32, z0: f32, dx: f32, dz: f32, ev: i32, cond: u32| EventZone {
+            enabled: true,
+            refer_enabled: false,
+            refer: [0.0; 3],
+            refer_type: 0,
+            condition: cond,
+            event_id: ev,
+            shape: Some(HitShape::Rect { x0, z0, dx, dz }),
+        };
+        let mut a = area(vec![]);
+        a.events = vec![rect(-1848.42, 174.566, 20.844, 8.848, 39, 5), rect(-1845.033, 183.218, 10.238, 6.98, 40, 5)];
+        assert_eq!(auto_events(&a, [-1840.0, 178.0], 0.0), vec![(0, 39)]);
+        assert_eq!(auto_events(&a, [-1840.0, 188.0], 0.0), vec![(1, 40)]);
+        assert!(auto_events(&a, [-1800.0, 178.0], 0.0).is_empty());
+        a.events[0].enabled = false;
+        assert!(auto_events(&a, [-1840.0, 178.0], 0.0).is_empty(), "a zone that is off does not fire");
+        // condition 1: the point 2 ahead; a button zone (bit 0 clear) never fires by itself
+        a.events = vec![rect(0.0, 10.0, 5.0, 5.0, 7, 1)];
+        assert!(auto_events(&a, [2.0, 8.5], std::f32::consts::PI).is_empty());
+        assert_eq!(auto_events(&a, [2.0, 8.5], 0.0), vec![(0, 7)]);
+        a.events[0].condition = 4;
+        assert!(auto_events(&a, [2.0, 12.0], 0.0).is_empty());
     }
 
     #[test]

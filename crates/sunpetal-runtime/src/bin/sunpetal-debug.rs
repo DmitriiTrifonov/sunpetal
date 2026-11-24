@@ -184,7 +184,17 @@ fn command(s: &mut Session, tracker: &Tracker, line: &str) -> Result<Option<Valu
             done(json!({}))
         }
         // zones: the walking room's walls (hit) and floors (height) that are on; scenestart SCENE: what the DS scene's event switches in the room, without playing the scene
-        "zones" => done(json!(sunpetal_runtime::nativewalk::zone_state().map(|(sc, i, hit, height)| json!({"room": format!("{} {}", sc, i), "hit_on": hit.iter().enumerate().filter(|x| *x.1).map(|x| x.0).collect::<Vec<_>>(), "height_on": height.iter().enumerate().filter(|x| *x.1).map(|x| x.0).collect::<Vec<_>>()})))),
+        // zones set KIND N on|off: one wall, floor or event zone of the walking room by hand
+        "zones" if w.first() == Some(&"set") => {
+            let zone = number(w.get(2), "N", None)?;
+            sunpetal_runtime::nativewalk::set_zone(w.get(1).ok_or("KIND is missing")?, zone, w.get(3) == Some(&"on"))?;
+            done(json!({}))
+        }
+        "zones" => {
+            let on = |v: &[bool]| v.iter().enumerate().filter(|x| *x.1).map(|x| x.0).collect::<Vec<_>>();
+            done(json!(sunpetal_runtime::nativewalk::zone_state()
+                .map(|(sc, i, hit, height, event)| json!({"room": format!("{} {}", sc, i), "hit_on": on(&hit), "height_on": on(&height), "event_on": on(&event)}))))
+        }
         "fastrun" => {
             sunpetal_runtime::nativewalk::set_fast_mode(w.first() == Some(&"on"))?;
             done(json!({"move_state": sunpetal_runtime::nativewalk::move_state()}))

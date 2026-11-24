@@ -199,6 +199,8 @@ pub struct EventZone {
     pub refer_type: u32,
     pub condition: u32,
     pub event_id: i32,
+    /// the zone's shape, as a wall's (`hit.md` §2); `None` when the record has none the reader knows
+    pub shape: Option<HitShape>,
 }
 
 /// The collision of one 3D scene record.
@@ -240,14 +242,17 @@ pub struct SceneData {
     pub fog: Option<Fog>,
 }
 
-fn hit(h: &Value) -> R<Hit> {
-    let shape = match u(h, "shape")? {
+fn shape(h: &Value) -> R<HitShape> {
+    Ok(match u(h, "shape")? {
         3 => HitShape::Rect { x0: f(h, "x0")?, z0: f(h, "z0")?, dx: f(h, "dx")?, dz: f(h, "dz")? },
         2 => HitShape::Ellipse { cx: f(h, "cx")?, cz: f(h, "cz")?, rx: f(h, "rx")?, rz: f(h, "rz")? },
         1 => HitShape::Polygon(arr(h, "points")?.iter().map(floats::<2>).collect::<R<_>>()?),
         n => return Err(format!("hit shape {}", n)),
-    };
-    Ok(Hit { enabled: u(h, "enabled")? != 0, shape })
+    })
+}
+
+fn hit(h: &Value) -> R<Hit> {
+    Ok(Hit { enabled: u(h, "enabled")? != 0, shape: shape(h)? })
 }
 
 /// The scene data from the text of `scenes/<R>.json`.
@@ -272,6 +277,7 @@ pub fn parse_scene(text: &str) -> R<SceneData> {
                         refer_type: e.get("refer_type").and_then(Value::as_u64).unwrap_or(0) as u32,
                         condition: e.get("condition").and_then(Value::as_u64).unwrap_or(0) as u32,
                         event_id: e.get("event_id").and_then(Value::as_i64).unwrap_or(-1) as i32,
+                        shape: shape(e).ok(),
                     })
                     .collect()
             });
