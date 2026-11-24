@@ -329,17 +329,47 @@ pub struct MapRow {
     pub rooms: Vec<(String, usize)>,
 }
 
+/// The PS2 scenario of a DS chapter (`C08` → `R10`) by `data/ult/scenario.toml` (`SIDtoRID`: chapters 8–10 are R10, R08, R09,
+/// 14 on are one up, `R14` being absent; `sunpetal-ee` Y-59).
+pub fn ps2_chapter(ds: &str) -> Option<&'static str> {
+    static T: &str = include_str!("../../../../data/ult/scenario.toml");
+    let val = |l: &'static str, k: &str| l.strip_prefix(k).map(|v| v.trim().trim_matches('"'));
+    let mut ps2 = None;
+    for l in T.lines() {
+        if l.starts_with("[[scenario]]") {
+            ps2 = None;
+        } else if let Some(v) = val(l, "ps2 =") {
+            ps2 = Some(v);
+        } else if val(l, "ds =") == Some(ds) {
+            return ps2;
+        }
+    }
+    None
+}
+
+/// The room of a DS scene on a map shown by several rooms (`A19`, `A20`): `data/ult/room_by_scene.tsv` (`sunpetal-ee` Y-59,
+/// by the scene's chapter, its text and the rooms with the map's model).
+pub fn room_by_scene(map: u32, ds_scene: &str) -> Option<(String, usize)> {
+    static T: &str = include_str!("../../../../data/ult/room_by_scene.tsv");
+    let area = format!("A{:02}", map);
+    T.lines().skip(1).find_map(|l| {
+        let x: Vec<&str> = l.split('\t').collect();
+        if x.first() != Some(&area.as_str()) || x.get(1) != Some(&ds_scene) {
+            return None;
+        }
+        Some((x.get(5)?.to_string(), x.get(6)?.parse().ok()?))
+    })
+}
+
 impl MapRow {
-    /// The room of this area for the DS scene `ds_scene` (`C13_12`): the candidate of that scene's chapter (the DS chapter `Cnn`
-    /// is PS2 `OP` for 0, `Rnn` up to 13, `R(nn+1)` from 14, `R14` being absent), else the primary one (`Y-38`'s rule).
+    /// The room of this area for the DS scene `ds_scene` (`C13_12`): the scene's own room on a list map (`room_by_scene`), else the
+    /// candidate of that scene's chapter (`ps2_chapter`), else the primary one (`Y-38`'s rule).
     pub fn room_for(&self, ds_scene: Option<&str>) -> Option<(String, usize)> {
-        let chapter = ds_scene.and_then(|s| s.strip_prefix('C')).and_then(|s| s.get(..2)).and_then(|n| n.parse::<u32>().ok());
-        let ps2 = chapter.map(|n| match n {
-            0 => "OP".to_string(),
-            1..=13 => format!("R{:02}", n),
-            _ => format!("R{:02}", n + 1),
-        });
-        if let Some(r) = ps2.and_then(|p| self.rooms.iter().find(|(s, _)| *s == p)) {
+        if let Some(r) = ds_scene.and_then(|s| room_by_scene(self.map, s)) {
+            return Some(r);
+        }
+        let chapter = ds_scene.and_then(|s| s.get(..3)).and_then(ps2_chapter);
+        if let Some(r) = chapter.and_then(|p| self.rooms.iter().find(|(s, _)| s == p)) {
             return Some(r.clone());
         }
         match (self.ps2_scene.as_str(), self.primary) {
@@ -476,6 +506,22 @@ mod tests {
         assert_eq!(m[0].room_for(Some("C03_01")), Some(("R00".into(), 1)));
         assert_eq!(m[0].room_for(None), Some(("R00".into(), 1)));
         assert_eq!(m[1].room_for(Some("C07_33")), None);
+    }
+
+    #[test]
+    fn chapters_8_to_10_are_the_scenarios_order_and_a_list_map_takes_the_scenes_room() {
+        assert_eq!((ps2_chapter("C00"), ps2_chapter("C07"), ps2_chapter("C08")), (Some("OP"), Some("R07"), Some("R10")));
+        assert_eq!((ps2_chapter("C09"), ps2_chapter("C10"), ps2_chapter("C14")), (Some("R08"), Some("R09"), Some("R15")));
+        assert_eq!(ps2_chapter("C19"), None);
+        let t = "ds_area\tds_model\tps2_scene\tps2_scene3d_index\tps2_model\tstatus\tconfidence\tchapter\tps2_rooms\n\
+                 A45\tm\tR00\t1\tx\tswap\tlist\t\tR00#1;R10#3;R08#4\nA19\tm\tR00\t0\tx\tswap\tlist\t\tR00#0\n";
+        let m = parse_maps(t).unwrap();
+        assert_eq!(m[0].room_for(Some("C08_02")), Some(("R10".into(), 3)));
+        assert_eq!(m[0].room_for(Some("C09_02")), Some(("R08".into(), 4)));
+        // a list map: the table's room of the scene, whatever the row's candidates
+        assert_eq!(m[1].room_for(Some("C08_02")), Some(("R10".into(), 5)));
+        assert_eq!(room_by_scene(19, "C19_01"), None);
+        assert!(room_by_scene(20, "C08_02").is_none());
     }
 
     /// With the real export (`SUNPETAL_EE_EXPORT=…/out/export/v1`): every scene reads, and the numbers of the notes hold.

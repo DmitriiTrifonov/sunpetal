@@ -128,6 +128,15 @@ impl CamPath {
         }
         Some(out)
     }
+
+    /// The yaw the path turns the camera to at `t` (flag bit 1, `camera.md` §9.2): `SplineRot` with the flag's bit 0,
+    /// else the segment's `ParamB` (+0x28), checked on `sunpetal-ee` Y-39.
+    pub fn turn(&self, t: f32) -> Option<f32> {
+        if self.flag & 1 != 0 || self.keys.len() < 2 {
+            return self.rotation(t).map(|r| r[1]);
+        }
+        Some(self.keys[self.segment(t)?].param[1])
+    }
 }
 
 /// Whether the area holds the point (x, y, z): its shape on the area's plane, the edge counted in (`ContainPoint`).
@@ -326,6 +335,128 @@ mod tests {
         // no delay: at once
         z.follow_path(0.5, false);
         assert_eq!(z.yaw, 0.5);
+    }
+
+    /// The yaw of the live camera of R01 through a path change (`out/y32/probe.json`, 420 frames): `CamYaw::look` toward the
+    /// header's key and target from the first frame's yaw and width reproduces each frame's yaw and `n`.
+    #[test]
+    fn the_yaw_follows_the_live_probe_of_a_path_change() {
+        let Some(root) = std::env::var_os("SUNPETAL_EE_EXPORT") else { return };
+        let Ok(text) = std::fs::read_to_string(std::path::PathBuf::from(root).join("../../y32/probe.json")) else { return };
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let rows = v.as_array().unwrap();
+        let f = |r: &serde_json::Value, k: &str| r[k].as_f64().unwrap() as f32;
+        let xyz = |r: &serde_json::Value, k: &str| {
+            let a = r[k].as_array().unwrap();
+            [a[0].as_f64().unwrap() as f32, a[1].as_f64().unwrap() as f32, a[2].as_f64().unwrap() as f32]
+        };
+        let mut y = CamYaw::new(f(&rows[0], "yaw"));
+        y.n = f(&rows[0], "N");
+        y.bit3 = rows[0]["bit3"].as_i64().unwrap() != 0;
+        let mut worst = 0.0f32;
+        for r in &rows[1..] {
+            let (k, t) = (xyz(r, "key"), xyz(r, "target"));
+            y.look((k[0] - t[0]).atan2(t[2] - k[2]), 24.0);
+            worst = worst.max(wrap(y.yaw - f(r, "yaw")).abs());
+            assert!((y.n - f(r, "N")).abs() < 1e-3, "frame {}: n {} want {}", r["frame"], y.n, f(r, "N"));
+        }
+        assert!(worst < 1e-3, "worst yaw error {}", worst);
+    }
+
+    /// The same with the hero running (`out/y39/fast.json`): the width's goal is 8 while the previous frame's `MoveState`
+    /// is 3 (the camera updates before the move), else 24.
+    #[test]
+    fn the_yaw_follows_the_live_probe_of_a_fast_run() {
+        let Some(root) = std::env::var_os("SUNPETAL_EE_EXPORT") else { return };
+        let Ok(text) = std::fs::read_to_string(std::path::PathBuf::from(root).join("../../y39/fast.json")) else { return };
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let rows = v["rows"].as_array().unwrap();
+        let f = |x: &serde_json::Value| x.as_f64().unwrap() as f32;
+        let mut y = CamYaw::new(f(&rows[0]["yaw"]));
+        y.n = f(&rows[0]["threshold"]);
+        let mut fast = 0;
+        for w in rows.windows(2) {
+            let (prev, r) = (&w[0], &w[1]);
+            let n0 = if prev["obj"]["move_state"].as_i64() == Some(3) {
+                fast += 1;
+                8.0
+            } else {
+                24.0
+            };
+            let (k, t) = (&r["gpa"]["key"], &r["gpa"]["target"]);
+            y.look((f(&k[0]) - f(&t[0])).atan2(f(&t[2]) - f(&k[2])), n0);
+            assert!(wrap(y.yaw - f(&r["yaw"])).abs() < 1e-3, "frame {}: yaw {} want {}", r["frame"], y.yaw, f(&r["yaw"]));
+            assert!((y.n - f(&r["threshold"])).abs() < 1e-3, "frame {}: n {} want {}", r["frame"], y.n, f(&r["threshold"]));
+        }
+        assert!(fast > 50, "the probe must hold a run: {} frames", fast);
+    }
+
+    /// The three phases of R01 room 1 (`out/y39/spline.json`, Y-39 A): paths 4 and 5 turn by their own `SplineRot`
+    /// (bit 0 of the path flag; `bDelay` = bit 6 of `flag38` blends 0.05/0.95, bit 4 resets), path 0 looks at the subject
+    /// with the dead zone; `follow_path` and `look` reproduce each frame's yaw.
+    #[test]
+    fn the_yaw_follows_the_live_probe_of_the_spline_turn() {
+        let Some(root) = std::env::var_os("SUNPETAL_EE_EXPORT") else { return };
+        let Ok(text) = std::fs::read_to_string(std::path::PathBuf::from(root).join("../../y39/spline.json")) else { return };
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let f = |x: &serde_json::Value| x.as_f64().unwrap() as f32;
+        let mut checked = 0;
+        for ph in v["phases"].as_array().unwrap() {
+            let want = (ph["want_path"].as_i64().unwrap(), ph["want_flag"].as_i64().unwrap());
+            let rows: Vec<&serde_json::Value> = ph["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|r| r["gpa"]["cur_path"].as_i64() == Some(want.0) && r["path"]["flag"].as_i64().map(|x| x & 0x1F) == Some(want.1))
+                .collect();
+            assert!(rows.len() > 100, "{}: {} frames on the path", ph["tag"], rows.len());
+            let mut y = CamYaw::new(f(&rows[0]["yaw"]));
+            y.n = f(&rows[0]["threshold"]);
+            for w in rows.windows(2) {
+                let (prev, r) = (w[0], w[1]);
+                if r["path"]["addr"] != prev["path"]["addr"] {
+                    y = CamYaw::new(f(&r["yaw"]));
+                    y.n = f(&r["threshold"]);
+                    continue;
+                }
+                let pflag = r["path"]["flag"].as_i64().unwrap() as u32;
+                let flag38 = r["flag38"].as_i64().unwrap();
+                if pflag & 2 != 0 {
+                    let keys: Vec<CamKey> = r["path"]["keys"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|k| CamKey {
+                            rot: [f(&k["rx"]), f(&k["ry"])],
+                            param_t: f(&k["param_t"]),
+                            param: [0.0, f(&k["param_b"]), 0.0],
+                            ..key(0.0, [0.0; 3], [0.0; 2], [0.0; 3])
+                        })
+                        .collect();
+                    let target = CamPath { flag: pflag, last_frame: 0, keys }.turn(f(&r["gpa"]["T"])).unwrap();
+                    if flag38 >> 4 & 1 != 0 {
+                        y.yaw = target;
+                    } else {
+                        y.follow_path(target, flag38 >> 6 & 1 != 0);
+                    }
+                } else {
+                    let (e, t) = (&r["eye"], &r["gpa"]["target"]);
+                    y.look((f(&e[0]) - f(&t[0])).atan2(f(&t[2]) - f(&e[2])), if pflag & 8 != 0 { 10000.0 } else { 24.0 });
+                }
+                assert!(wrap(y.yaw - f(&r["yaw"])).abs() < 1e-5, "{} frame {}: yaw {} want {}", ph["tag"], r["frame"], y.yaw, f(&r["yaw"]));
+                checked += 1;
+            }
+        }
+        assert!(checked > 300, "{} frames checked", checked);
+    }
+
+    #[test]
+    fn the_turn_is_the_spline_with_bit_0_and_the_segments_param_b_without() {
+        let keys = vec![key(0.0, [0.0; 3], [0.0, 0.0], [0.0, 0.3, 0.0]), key(1.0, [0.0; 3], [0.0, 1.0], [0.0, 0.7, 0.0])];
+        let mut p = path(keys);
+        assert_eq!(p.turn(0.5), Some(0.5));
+        p.flag = 2;
+        assert_eq!(p.turn(0.5), Some(0.3));
     }
 
     #[test]

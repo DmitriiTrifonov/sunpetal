@@ -162,15 +162,14 @@ fn follow_frame(f: &mut Follow, p: &mut Ps2, s: [f32; 3]) {
     let (dx, dz) = (s[0] - eye[0], s[2] - eye[2]);
     let ty = s[1] + f.cam.scale * 15.0;
     let pitch = (ty - eye[1]).atan2(dx.hypot(dz)).max(-1.2566371);
-    // the yaw (camera.md §9.2): the path's flag bit 1 set: its own turn blended 0.05/0.95; clear: a look at the hero with a dead
-    // zone of π/N (N follows 24, or 10000 with bit 3; the game's 8 while running needs the hero's move state: not read); bit 4: a
-    // continuous look
+    // the yaw (camera.md §9.2): the path's flag bit 1 set: its own turn (`SplineRot` with bit 0, else the segment's ParamB)
+    // blended 0.05/0.95; clear: a look at the hero with a dead zone of π/N; bit 4: a continuous look
     let look = (-dx).atan2(dz);
     let cy = f.yaw.get_or_insert_with(|| CamYaw::new(look));
     if path.flag & 16 != 0 {
         cy.look_smooth(look);
     } else if path.flag & 2 != 0 {
-        cy.follow_path(path.rotation(t).map_or(0.0, |r| r[1]), f.delay);
+        cy.follow_path(path.turn(t).unwrap_or(0.0), f.delay);
     } else {
         // the dead zone's goal: wide with the path's bit 3, 8 while the hero runs fast (his state of the last frame), else 24 (`camera.md`, Y-52)
         let goal = if path.flag & 8 != 0 {
